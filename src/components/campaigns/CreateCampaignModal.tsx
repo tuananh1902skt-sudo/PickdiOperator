@@ -1,0 +1,184 @@
+import React, { useState } from 'react';
+import { X, Target, Plus } from 'lucide-react';
+
+interface CreateCampaignModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (campaignData: any) => void;
+}
+
+export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
+  isOpen,
+  onClose,
+  onSubmit
+}) => {
+  const [name, setName] = useState('');
+  const [brand, setBrand] = useState("d'Alba Piedmont");
+  const [objective, setObjective] = useState('');
+  const [description, setDescription] = useState('');
+  const [budget, setBudget] = useState('10000');
+  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(new Date(Date.now() + 30*86400000).toISOString().split('T')[0]);
+  const [productName, setProductName] = useState('');
+  const [productSku, setProductSku] = useState('');
+  const [productPrice, setProductPrice] = useState('30');
+
+  if (!isOpen) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !brand.trim()) return;
+
+    onSubmit({
+      name,
+      brand,
+      objective,
+      description,
+      budget: Number(budget) || 5000,
+      startDate,
+      endDate,
+      status: 'Planning',
+      products: productName ? [{ id: `p-${Date.now()}`, name: productName, sku: productSku || 'SKU-001', price: Number(productPrice) || 25 }] : []
+    });
+
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+      <div
+        className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+          <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
+            <Target className="w-5 h-5 text-indigo-600" />
+            Create New Affiliate Campaign
+          </h3>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-5 space-y-4 text-xs">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Campaign Title *
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. 2aN Cushion Q3 Viral Launch"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 font-medium"
+              />
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Brand / Client Name *
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="Brand Name"
+                value={brand}
+                onChange={e => setBrand(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Campaign Objective</label>
+            <input
+              type="text"
+              placeholder="Target sales units or GMV goal..."
+              value={objective}
+              onChange={e => setObjective(e.target.value)}
+              className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Budget ($)</label>
+              <input
+                type="number"
+                value={budget}
+                onChange={e => setBudget(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
+              />
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Start Date</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={e => setStartDate(e.target.value)}
+                className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">End Date</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={e => setEndDate(e.target.value)}
+                className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+          </div>
+
+          {/* Product Info section */}
+          <div className="p-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2">
+            <span className="font-bold text-slate-800 dark:text-slate-200">Featured TikTok Shop Product</span>
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                type="text"
+                placeholder="Product Name"
+                value={productName}
+                onChange={e => setProductName(e.target.value)}
+                className="p-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              />
+              <input
+                type="text"
+                placeholder="SKU"
+                value={productSku}
+                onChange={e => setProductSku(e.target.value)}
+                className="p-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              />
+              <input
+                type="number"
+                placeholder="Retail Price ($)"
+                value={productPrice}
+                onChange={e => setProductPrice(e.target.value)}
+                className="p-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              />
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-100 rounded-xl"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-xs"
+            >
+              Launch Campaign
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
