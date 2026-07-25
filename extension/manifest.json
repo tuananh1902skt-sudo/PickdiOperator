@@ -11,14 +11,16 @@
   ],
   "host_permissions": [
     "https://ads.tiktok.com/*",
-    "https://www.tiktok.com/*"
+    "https://www.tiktok.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://www.tiktok.com/*"],
+      "matches": ["https://www.tiktok.com/*", "https://ads.tiktok.com/*"],
       "js": ["interceptor.js"],
       "run_at": "document_start",
       "world": "MAIN"

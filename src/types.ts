@@ -118,6 +118,33 @@ export interface Creator {
   demographics?: CreatorDemographics;
   scores?: CreatorScores;
   isMock?: boolean;
+  // Dữ liệu thô lấy từ network-intercept MGetCreatorsCard (TikTok One) — giữ nguyên
+  // shape gốc của TikTok, không chuẩn hoá lại, nên để any thay vì định nghĩa lại toàn bộ.
+  audienceDemographicsFull?: any;
+  followerHistory?: any[];
+  topVideos?: any[];
+  recentVideosFull?: any[];
+  brandPartners?: string[];
+  // Kết quả scoreCreator() (server/scoring.ts) — lưu lại để hiển thị breakdown chi tiết
+  // trong UI thay vì chỉ có brandFitScore tổng.
+  scoreBreakdown?: CreatorScoreBreakdown;
+}
+
+export interface CreatorScoreBreakdown {
+  totalScore: number;
+  recommendation: string;
+  groups: {
+    key: string;
+    label: string;
+    weightPct: number;
+    available: boolean;
+    scorePct: number | null; // 0-100, null nếu cả nhóm không đủ dữ liệu
+    items: { key: string; label: string; weightPct: number; value: number | null }[];
+  }[];
+  riskFlags: string[];
+  strengths: string[];
+  weaknesses: string[];
+  scoredAt: string;
 }
 
 export interface CreatorNote {
@@ -143,8 +170,15 @@ export interface Campaign {
   owner: string;
   creatorIds: string[];
   targetCategories: string[];
+  targetAudience?: CampaignTargetAudience;
   products: { id: string; name: string; sku: string; price: number }[];
   isMock?: boolean;
+}
+
+export interface CampaignTargetAudience {
+  gender?: 'Male' | 'Female' | 'Any';
+  ageGroups?: string[]; // vd ['18-24','25-34'] — khớp với format topAgeGroup của TikTok One
+  countries?: string[];
 }
 
 export interface OutreachEmail {

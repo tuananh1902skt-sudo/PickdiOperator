@@ -7,6 +7,8 @@ interface CreateCampaignModalProps {
   onSubmit: (campaignData: any) => void;
 }
 
+const AGE_GROUP_OPTIONS = ['13-17', '18-24', '25-34', '35-44', '45-54', '55+'];
+
 export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
   isOpen,
   onClose,
@@ -23,7 +25,17 @@ export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
   const [productSku, setProductSku] = useState('');
   const [productPrice, setProductPrice] = useState('30');
 
+  // Target audience — dùng để chấm Audience Fit trong scoreCreator() (src/scoring.ts).
+  // Không bắt buộc: bỏ trống thì nhóm Audience Fit tự bị loại khỏi công thức chấm điểm.
+  const [targetGender, setTargetGender] = useState<'Any' | 'Male' | 'Female'>('Any');
+  const [targetAgeGroups, setTargetAgeGroups] = useState<string[]>([]);
+  const [targetCountries, setTargetCountries] = useState('');
+
   if (!isOpen) return null;
+
+  const toggleAgeGroup = (ag: string) => {
+    setTargetAgeGroups(prev => prev.includes(ag) ? prev.filter(x => x !== ag) : [...prev, ag]);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,6 +44,9 @@ export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
       alert('Ngày kết thúc phải sau ngày bắt đầu.');
       return;
     }
+
+    const countries = targetCountries.split(',').map(s => s.trim()).filter(Boolean);
+    const hasTargetAudience = targetGender !== 'Any' || targetAgeGroups.length > 0 || countries.length > 0;
 
     onSubmit({
       name,
@@ -42,7 +57,12 @@ export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
       startDate,
       endDate,
       status: 'Planning',
-      products: productName ? [{ id: `p-${Date.now()}`, name: productName, sku: productSku || 'SKU-001', price: Number(productPrice) || 25 }] : []
+      products: productName ? [{ id: `p-${Date.now()}`, name: productName, sku: productSku || 'SKU-001', price: Number(productPrice) || 25 }] : [],
+      targetAudience: hasTargetAudience ? {
+        gender: targetGender,
+        ageGroups: targetAgeGroups,
+        countries,
+      } : undefined,
     });
 
     onClose();
@@ -162,6 +182,54 @@ export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
                 value={productPrice}
                 onChange={e => setProductPrice(e.target.value)}
                 className="p-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              />
+            </div>
+          </div>
+
+          {/* Target Audience section — dùng để chấm Audience Fit cho creator, không bắt buộc */}
+          <div className="p-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2">
+            <span className="font-bold text-slate-800 dark:text-slate-200">Target Audience (optional — used for creator scoring)</span>
+
+            <div>
+              <label className="block font-medium text-slate-600 dark:text-slate-400 mb-1">Gender</label>
+              <div className="flex gap-2">
+                {(['Any', 'Male', 'Female'] as const).map(g => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => setTargetGender(g)}
+                    className={`px-3 py-1.5 rounded-lg border text-xs font-medium ${targetGender === g ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}
+                  >
+                    {g}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-medium text-slate-600 dark:text-slate-400 mb-1">Age groups</label>
+              <div className="flex flex-wrap gap-2">
+                {AGE_GROUP_OPTIONS.map(ag => (
+                  <button
+                    key={ag}
+                    type="button"
+                    onClick={() => toggleAgeGroup(ag)}
+                    className={`px-3 py-1.5 rounded-lg border text-xs font-medium ${targetAgeGroups.includes(ag) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'}`}
+                  >
+                    {ag}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-medium text-slate-600 dark:text-slate-400 mb-1">Countries (comma-separated)</label>
+              <input
+                type="text"
+                placeholder="e.g. Vietnam, United States"
+                value={targetCountries}
+                onChange={e => setTargetCountries(e.target.value)}
+                className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
               />
             </div>
           </div>

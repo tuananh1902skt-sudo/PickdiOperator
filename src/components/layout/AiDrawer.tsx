@@ -97,7 +97,7 @@ export const AiDrawer: React.FC<AiDrawerProps> = ({
         const res = await fetch('/api/ai/research', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ creator: currentCreator })
+          body: JSON.stringify({ creator: currentCreator, campaignId: currentCampaign?.id })
         });
         const json = await res.json();
         setAiResult(json.data);

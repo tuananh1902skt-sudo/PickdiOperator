@@ -137,8 +137,19 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
     { subject: 'Creativity', value: creator.scores?.creativity ?? 0, fullMark: 100 }
   ];
 
-  // Videos Grid Data — only real creator.recentVideos from the scraper, never invented
-  const displayVideos = creator.recentVideos || [];
+  // Videos Grid Data — creator.recentVideos (batch-scrape shape) hoặc creator.recentVideosFull
+  // (network-intercept shape từ update-detail, field khác tên nên phải convert lại cho khớp).
+  const displayVideos = (creator.recentVideos && creator.recentVideos.length > 0)
+    ? creator.recentVideos
+    : (creator.recentVideosFull || []).map((v: any) => ({
+        id: String(v.itemID),
+        title: v.title || '',
+        views: v.views,
+        thumb: '',
+        date: v.createTime ? new Date(Number(v.createTime) * 1000).toISOString().slice(0, 10) : undefined,
+        isBranded: !!v.isSponsoredVideo,
+        videoUrl: undefined,
+      }));
 
   // Performance Trend Bar Chart Data — only built when real video views exist
   const parseView = (val?: string | number) => {
@@ -326,9 +337,9 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
               <div>
                 <h4 className="font-bold text-slate-800 dark:text-slate-200 mb-1.5">Video content tag</h4>
                 <div className="flex flex-wrap gap-1.5">
-                  {creator.category ? (
+                  {(creator.videoContentTag || creator.category) ? (
                     <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
-                      {creator.category}
+                      {creator.videoContentTag || creator.category}
                     </span>
                   ) : (
                     <span className="text-slate-400 italic">{EMPTY}</span>
@@ -689,7 +700,7 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                       </span>
                     </div>
                     <p className="text-3xl font-black text-slate-900 dark:text-white">
-                      {formatNumber(creator.avgViews)}
+                      {formatNumber(creator.medianViews != null ? Number(creator.medianViews) : creator.avgViews)}
                     </p>
 
                     <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center text-xs">

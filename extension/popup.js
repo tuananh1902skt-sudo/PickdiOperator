@@ -50,8 +50,17 @@ document.getElementById('findCreatorsBtn').addEventListener('click', () => {
     budget_max: Number(document.getElementById('budgetMax').value) || undefined,
     query_keyword: document.getElementById('keyword').value.trim() || undefined,
   };
+  // Người dùng hay lỡ nhập ngược min/max -> range rỗng, khiến vòng lặp cào phải quét
+  // hết cả 50 trang mà không bao giờ match được creator nào (tưởng như bị treo).
+  if (filters.follower_min && filters.follower_max && filters.follower_min > filters.follower_max) {
+    [filters.follower_min, filters.follower_max] = [filters.follower_max, filters.follower_min];
+  }
+  if (filters.budget_min && filters.budget_max && filters.budget_min > filters.budget_max) {
+    [filters.budget_min, filters.budget_max] = [filters.budget_max, filters.budget_min];
+  }
+  const fetchFullDetail = document.getElementById('fetchFullDetail').checked;
   chrome.storage.local.set({ webappUrl, lastFilters: filters });
-  chrome.runtime.sendMessage({ type: 'FIND_CREATORS', webappUrl, filters });
+  chrome.runtime.sendMessage({ type: 'FIND_CREATORS', webappUrl, filters, fetchFullDetail });
 });
 
 // ================== LẤY CHI TIẾT TRANG PROFILE TIKTOK ONE ==================
@@ -59,102 +68,89 @@ document.getElementById('findCreatorsBtn').addEventListener('click', () => {
 // 1 creator trên TikTok One trước) -> không dính bug popup tự đóng, chạy thẳng
 // trong popup.js là an toàn.
 //
-// Đây là DOM-scrape (đọc text đã render), KHÔNG phải gọi API — vì API thật của trang
-// này (MGetCreatorsCard) có chữ ký chống bot X-Bogus/X-Gnarly không tái tạo được.
+// KHÔNG DOM-scrape nữa — interceptor.js (world MAIN, chạy từ document_start trên
+// ads.tiktok.com) đã "nghe lén" response thật của API MGetCreatorsCard và gom vào
+// window.__pickdi_creator_cards[aioCreatorID]. Không cần tái tạo chữ ký chống bot
+// X-Bogus/X-Gnarly vì chỉ đọc lại response mà chính trang TikTok One đã tự nhận được.
+// Đổi lại: cần user đã lướt qua các tab (Content performance/Videos/Collaborations/
+// Audience demographics) ít nhất 1 lần trong phiên hiện tại thì data mới đủ đầy.
 
 // HÀM CHẠY BÊN TRONG TAB TIKTOK ONE ĐANG MỞ — không được closure biến ngoài.
-function scrapeTikTokOneDetailPage() {
+function scrapeTikTokOneDetailFromNetwork() {
   const idMatch = location.pathname.match(/creator\/profile\/(\d+)/);
   if (!idMatch) return { error: 'Trang hiện tại không phải trang profile chi tiết TikTok One.' };
   const tiktokOneId = idMatch[1];
 
-  const lines = document.body.innerText.split('\n');
-
-  function valuesAfterLabel(label, count) {
-    const idx = lines.findIndex((l) => l.trim() === label);
-    if (idx === -1) return [];
-    const out = [];
-    for (let i = idx + 1; i < lines.length && out.length < count; i++) {
-      const v = lines[i].trim();
-      if (v && !/^Top\s+\d/i.test(v)) out.push(v); // bỏ qua dòng percentile "Top 5 %" chen giữa
-    }
-    return out;
-  }
-  function valueAfterLabel(label) {
-    return valuesAfterLabel(label, 1)[0] || null;
-  }
-  function metricWithBenchmark(label) {
-    const vals = valuesAfterLabel(label, 3);
-    return { value: vals[0] || null, benchmark: vals[2] || null };
-  }
-  function concatLabelValue(label) {
-    const re = new RegExp('^' + label.replace(/'/g, "\\'") + '(.+)$');
-    const line = lines.find((l) => re.test(l.trim()) && l.trim() !== label);
-    const m = line && line.trim().match(re);
-    return m ? m[1] : null;
+  const store = window.__pickdi_creator_cards || {};
+  const c = store[tiktokOneId];
+  if (!c) {
+    return { error: 'Chưa bắt được data mạng cho creator này — hãy thử bấm qua vài tab (Content performance, Videos, Audience demographics) trên trang rồi bấm lại nút này.' };
   }
 
-  const medianViews = metricWithBenchmark('Median views');
-  const sixSecondViews = metricWithBenchmark('6-second video views');
-  const engagementRate = metricWithBenchmark('Engagement rate');
-  const postingFreqLine = valueAfterLabel('Posting frequency');
+  const tt = c.creatorTTInfo || {};
+  const handle = tt.handleName ? '@' + tt.handleName : null;
+  if (!handle) return { error: 'Không đọc được handle của creator này từ data đã bắt.' };
 
-  // Collaboration evaluation: "Overall score" đứng riêng (không có benchmark), còn
-  // Broadcasting/Diligence/Commercial đứng dưới "Score breakdown" kèm 1 dòng % chen giữa
-  // (vd "69.2" rồi "3%") -> lấy value đầu tiên sau mỗi label, bỏ qua dòng %.
-  function scoreAfterLabel(label) {
-    const idx = lines.findIndex((l) => l.trim() === label);
-    if (idx === -1) return null;
-    for (let i = idx + 1; i < lines.length; i++) {
-      const v = lines[i].trim();
-      if (!v) continue;
-      if (/^-?\d+(\.\d+)?%?$/.test(v) && v !== '--') return parseFloat(v);
-      if (v === '--') return null;
-      break;
-    }
-    return null;
+  const vs = c.creatorValueStat || {};
+  const stat = (c.statisticData && c.statisticData.overallPerformance) || {};
+  const coop = c.creatorCooperationInfo || {};
+  const followerDist = (c.statisticData && c.statisticData.followerDistriData) || {};
+  const audienceReached = (c.statisticData && c.statisticData.audienceReachedDemographics) || {};
+  const audienceEngaged = (c.statisticData && c.statisticData.audienceEngagedDemographics) || {};
+  const followerHistory = (c.statisticData && c.statisticData.followerCountHistory && c.statisticData.followerCountHistory.followerCount) || [];
+  const videoPerf = (c.statisticData && c.statisticData.videoPerformance) || {};
+
+  function topByRatio(arr, labelKey) {
+    if (!Array.isArray(arr) || arr.length === 0) return null;
+    const top = arr.reduce((a, b) => (b.ratio > (a ? a.ratio : -1) ? b : a), null);
+    return top ? top[labelKey] : null;
   }
-  const collabScore = scoreAfterLabel('Overall score');
-  const collabBroadcasting = scoreAfterLabel('Broadcasting');
-  const collabDiligence = scoreAfterLabel('Diligence');
-  const collabCommercial = scoreAfterLabel('Commercial');
-
-  // Lấy handle từ link "View TikTok profile" (href dạng https://www.tiktok.com/@handle) —
-  // dùng để MATCH creator trong webapp (đáng tin hơn tiktokOneId vì đọc trực tiếp, không qua
-  // pipeline số có thể lệch).
-  const profileLink = Array.from(document.querySelectorAll('a')).find((a) => /tiktok\.com\/@/.test(a.href));
-  const handleMatch = profileLink && profileLink.href.match(/tiktok\.com\/(@[\w.]+)/);
-  const handle = handleMatch ? handleMatch[1] : null;
-  if (!handle) return { error: 'Không đọc được handle của creator trên trang này.' };
-
-  const brandedVideosCount = Number(valueAfterLabel('Branded videos'));
-  const industryCoveredCount = Number(valueAfterLabel('Industry covered'));
+  function pct(n) {
+    return n != null ? (n * 100).toFixed(2) + '%' : null;
+  }
+  function summarizeVideo(v) {
+    return {
+      itemID: v.itemID, title: v.title, views: Number(v.views) || 0,
+      likes: v.heart || 0, comments: v.comment || 0, shares: v.share || 0,
+      createTime: v.createTime, isSponsoredVideo: !!v.isSponsoredVideo,
+    };
+  }
 
   return {
     handle,
     tiktokOneId,
     detail: {
-      videoContentTag: valueAfterLabel('Video content tag'),
-      industryTag: valueAfterLabel('Industry tag'),
-      languagesSpoken: valueAfterLabel('Languages spoken'),
-      followerGrowthRate: valueAfterLabel('Follower growth rate'),
-      postingFrequencyPer30Days: postingFreqLine ? Number(postingFreqLine.replace(/[^\d.]/g, '')) || null : null,
-      collabScore,
-      collabBroadcasting,
-      collabDiligence,
-      collabCommercial,
-      medianViews: medianViews.value,
-      medianViewsBenchmark: medianViews.benchmark,
-      sixSecondViewRate: sixSecondViews.value,
-      sixSecondViewRateBenchmark: sixSecondViews.benchmark,
-      engagementRateContent: engagementRate.value,
-      engagementRateBenchmark: engagementRate.benchmark,
-      brandedVideosCount: isNaN(brandedVideosCount) ? null : brandedVideosCount,
-      industryCoveredCount: isNaN(industryCoveredCount) ? null : industryCoveredCount,
-      responseRate: valueAfterLabel('Response rate'),
-      audienceTopGender: concatLabelValue('Gender'),
-      audienceTopAgeRange: concatLabelValue('Age'),
-      audienceTopCountry: concatLabelValue('Top country or region'),
+      videoContentTag: (c.potentialIndustryLabels || []).map((l) => l.labelName).join(', ') || null,
+      industryTag: null,
+      languagesSpoken: (c.creatorProfile && c.creatorProfile.spokenLanguageList || []).join(', ') || null,
+      followerGrowthRate: pct(stat.followersGrowthRate),
+      postingFrequencyPer30Days: coop.contentPostFreq30d != null ? Number(coop.contentPostFreq30d) : null,
+      collabScore: vs.comprehensiveScore != null ? vs.comprehensiveScore : null,
+      collabBroadcasting: vs.broadcastingScore != null ? vs.broadcastingScore : null,
+      collabDiligence: vs.collaborationScore != null ? vs.collaborationScore : null,
+      collabCommercial: vs.commercialScore != null ? vs.commercialScore : null,
+      medianViews: stat.medianViews != null ? String(stat.medianViews) : null,
+      medianViewsBenchmark: stat.medianBenchMarkViews != null ? String(stat.medianBenchMarkViews) : null,
+      sixSecondViewRate: pct(stat.avgSixSecondsViewsRate),
+      sixSecondViewRateBenchmark: pct(stat.avgSixSecondsViewsBenchMarkViews),
+      engagementRateContent: pct(stat.engagementRate),
+      engagementRateBenchmark: pct(stat.engagementRateBenchMark),
+      brandedVideosCount: coop.bcVideoCnt90d != null ? Number(coop.bcVideoCnt90d) : null,
+      industryCoveredCount: coop.collabIndustryCnt90d != null ? Number(coop.collabIndustryCnt90d) : null,
+      responseRate: null,
+      audienceTopGender: topByRatio(followerDist.gender, 'gender'),
+      audienceTopAgeRange: topByRatio(followerDist.age, 'ageInterval'),
+      audienceTopCountry: topByRatio(followerDist.region, 'country'),
+      // Field mở rộng — server có thể bỏ qua nếu chưa hỗ trợ, không phá vỡ payload cũ.
+      audienceDemographics: {
+        reached: audienceReached,
+        engaged: audienceEngaged,
+        follower: followerDist,
+      },
+      followerHistory: followerHistory.slice(-30),
+      topVideos: (videoPerf.popularVideos || []).slice(0, 10).map(summarizeVideo),
+      recentVideos: (videoPerf.recentVideos || []).slice(0, 10).map(summarizeVideo),
+      brandInfoList: (c.brandInfoList || []).map((b) => b.brandName),
     },
   };
 }
@@ -164,13 +160,13 @@ document.getElementById('pushDetailBtn').addEventListener('click', async () => {
   const webappUrl = getWebappUrl();
   chrome.storage.local.set({ webappUrl });
 
-  detailStatusDiv.innerHTML = '⏳ Đang đọc trang...';
+  detailStatusDiv.innerHTML = '⏳ Đang đọc data đã bắt được...';
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
   chrome.scripting.executeScript({
     target: { tabId: tab.id },
     world: 'MAIN',
-    func: scrapeTikTokOneDetailPage,
+    func: scrapeTikTokOneDetailFromNetwork,
   }, async (results) => {
     const scraped = results && results[0] && results[0].result;
     if (!scraped) {

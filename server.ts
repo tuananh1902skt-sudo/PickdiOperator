@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { ZipArchive } from 'archiver';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { scoreCreator } from './src/scoring';
 import {
   INITIAL_CREATORS,
   INITIAL_CAMPAIGNS,
@@ -23,7 +24,7 @@ const PORT = Number(process.env.PORT) || 3000;
 
 // Enable CORS only for the TikTok One scraper extension and local dev origins —
 // the batch-import/update-detail routes come from a content script on tiktok.com.
-const ALLOWED_ORIGINS = [/^https:\/\/(www\.)?tiktok\.com$/, /^https:\/\/ads\.tiktok\.com$/, /^http:\/\/localhost(:\d+)?$/, /^http:\/\/127\.0\.0\.1(:\d+)?$/];
+const ALLOWED_ORIGINS = [/^https:\/\/(www\.)?tiktok\.com$/, /^https:\/\/ads\.tiktok\.com$/, /^http:\/\/localhost(:\d+)?$/, /^http:\/\/127\.0\.0\.1(:\d+)?$/, /^chrome-extension:\/\/[a-z]{32}$/];
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && ALLOWED_ORIGINS.some(re => re.test(origin))) {
@@ -439,14 +440,30 @@ app.post('/api/creators/update-detail', (req, res) => {
     if (detail.brandedVideosCount != null) creator.brandedVideosCount = detail.brandedVideosCount;
     if (detail.industryCoveredCount != null) creator.industryCoveredCount = detail.industryCoveredCount;
 
-    if (detail.audienceTopGender || detail.audienceTopAgeRange || detail.audienceTopCountry) {
+    // % Gender thật lấy từ mảng ratio follower demographics (TikTok One trả ratio 0-1 theo
+    // từng giới tính) — trước đây chỉ lưu "top gender" dạng label, UI cần đúng % Female/Male.
+    const genderRatios: { gender?: string; ratio?: number }[] =
+      (detail.audienceDemographics && detail.audienceDemographics.follower && detail.audienceDemographics.follower.gender) || [];
+    const femaleRatio = genderRatios.find((g) => g.gender === 'Female');
+    const maleRatio = genderRatios.find((g) => g.gender === 'Male');
+
+    if (detail.audienceTopGender || detail.audienceTopAgeRange || detail.audienceTopCountry || femaleRatio || maleRatio) {
       creator.demographics = {
         ...creator.demographics,
         ...(detail.audienceTopGender ? { topGender: detail.audienceTopGender } : {}),
         ...(detail.audienceTopAgeRange ? { topAgeGroup: detail.audienceTopAgeRange } : {}),
-        ...(detail.audienceTopCountry ? { topCountry: detail.audienceTopCountry } : {})
+        ...(detail.audienceTopCountry ? { topCountry: detail.audienceTopCountry } : {}),
+        ...(femaleRatio && femaleRatio.ratio != null ? { genderFemale: Math.round(femaleRatio.ratio * 100) } : {}),
+        ...(maleRatio && maleRatio.ratio != null ? { genderMale: Math.round(maleRatio.ratio * 100) } : {})
       };
     }
+
+    // Field giàu dữ liệu lấy từ network-intercept (MGetCreatorsCard) — optional, chỉ set khi có.
+    if (detail.audienceDemographics) creator.audienceDemographicsFull = detail.audienceDemographics;
+    if (detail.followerHistory) creator.followerHistory = detail.followerHistory;
+    if (detail.topVideos) creator.topVideos = detail.topVideos;
+    if (detail.recentVideos) creator.recentVideosFull = detail.recentVideos;
+    if (detail.brandInfoList) creator.brandPartners = detail.brandInfoList;
 
     creator.updatedAt = new Date().toISOString();
   }
@@ -528,6 +545,7 @@ app.post('/api/campaigns', (req, res) => {
     owner: req.body.owner || 'Anh Tuan',
     creatorIds: [],
     targetCategories: Array.isArray(req.body.targetCategories) ? req.body.targetCategories : ['Beauty'],
+    targetAudience: req.body.targetAudience || undefined,
     products: req.body.products || []
   };
 
@@ -697,49 +715,58 @@ app.get('/api/search', (req, res) => {
   });
 });
 
-// Gemini AI Endpoints (Server-side)
-app.post('/api/ai/research', async (req, res) => {
-  try {
-    const { creator } = req.body;
-    const ai = getGenAI();
-
-    const prompt = `You are an expert TikTok Shop Affiliate Operator AI Assistant. Analyze this creator profile and generate a structured evaluation report in JSON format:
-Creator Data:
-- Handle: @${creator.handle}
-- Display Name: ${creator.displayName}
-- Category: ${creator.category}
-- Followers: ${creator.followers}
-- Avg Views: ${creator.avgViews}
-- Engagement Rate: ${creator.engagementRate}%
-- Bio: "${creator.bio}"
-- Country: ${creator.country}
-
-Provide output with JSON schema:
-{
-  "summary": "2-3 concise sentences summarizing suitability for beauty/skincare TikTok shop campaigns",
-  "strengths": ["strength 1", "strength 2", "strength 3"],
-  "weaknesses": ["point 1", "point 2"],
-  "brandFitScore": number (0-100),
-  "commercialScore": number (0-100),
-  "riskScore": number (0-100),
-  "recommendation": "Priority A - Immediate Outreach" | "Priority B - Recommended" | "Priority C - Optional" | "Not Recommended",
-  "reasoning": "Detailed justification"
-}`;
-
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
-    });
-
-    const parsed = JSON.parse(response.text || '{}');
-    res.json({ success: true, data: parsed });
-  } catch (error: any) {
-    console.error('AI Research Error:', error);
-    res.status(500).json({ success: false, message: error.message || 'AI Research generation failed.' });
+// Deterministic Brand-Fit Scoring — thay cho việc dùng Gemini đoán điểm theo cảm tính.
+// Công thức nằm ở src/scoring.ts, ở đây chỉ tra creator/campaign thật rồi tính + lưu lại.
+app.post('/api/creators/:id/score', (req, res) => {
+  const creator = creators.find(c => c.id === req.params.id);
+  if (!creator) {
+    return res.status(404).json({ success: false, message: 'Creator not found' });
   }
+  const campaignId = req.body.campaignId as string | undefined;
+  const campaign = campaignId ? campaigns.find(c => c.id === campaignId) : undefined;
+
+  const breakdown = scoreCreator(creator, campaign);
+  creator.scoreBreakdown = breakdown;
+  creator.brandFitScore = breakdown.totalScore;
+  creator.updatedAt = new Date().toISOString();
+
+  addActivity('Anh Tuan', 'scored creator', `@${creator.handle}`, 'creator', creator.id);
+  res.json({ success: true, data: { creator, breakdown } });
+});
+
+// Giữ route /api/ai/research vì UI (AiDrawer) đang gọi endpoint này, nhưng bỏ hẳn Gemini —
+// dùng đúng scoreCreator() xác định để trả summary/strengths/recommendation.
+app.post('/api/ai/research', async (req, res) => {
+  const { creator: creatorInput, campaignId } = req.body;
+  const creator = creators.find(c => c.id === creatorInput?.id) || creatorInput;
+  const campaign = campaignId ? campaigns.find(c => c.id === campaignId) : undefined;
+
+  const breakdown = scoreCreator(creator, campaign);
+
+  const stored = creators.find(c => c.id === creator?.id);
+  if (stored) {
+    stored.scoreBreakdown = breakdown;
+    stored.brandFitScore = breakdown.totalScore;
+    stored.updatedAt = new Date().toISOString();
+  }
+
+  const summary = breakdown.groups
+    .filter(g => g.available)
+    .map(g => `${g.label}: ${g.scorePct}/100`)
+    .join('. ') || 'Not enough scraped data to evaluate this creator yet.';
+
+  res.json({
+    success: true,
+    data: {
+      summary,
+      strengths: breakdown.strengths.length ? breakdown.strengths : ['Not enough data to identify a clear strength'],
+      weaknesses: breakdown.weaknesses,
+      brandFitScore: breakdown.totalScore,
+      recommendation: breakdown.recommendation,
+      reasoning: breakdown.riskFlags.length ? `Risk flags: ${breakdown.riskFlags.join('; ')}` : 'No risk flags detected.',
+      breakdown,
+    },
+  });
 });
 
 app.post('/api/ai/email', async (req, res) => {
