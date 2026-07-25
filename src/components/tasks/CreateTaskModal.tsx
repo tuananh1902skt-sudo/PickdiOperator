@@ -40,6 +40,12 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
       relatedCreatorName: relCreator?.displayName
     });
 
+    setTitle('');
+    setDescription('');
+    setPriority('MEDIUM');
+    setDueDate(new Date().toISOString().split('T')[0]);
+    setAssignedTo('Anh Tuan');
+    setRelatedCreatorId('');
     onClose();
   };
 

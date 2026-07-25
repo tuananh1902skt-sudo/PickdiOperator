@@ -114,6 +114,7 @@ export function App() {
   const workspaceConversations = displayConversations.filter(c => inActiveWorkspace(c.workspaceId));
   const workspaceReviews = displayReviews.filter(r => inActiveWorkspace(r.workspaceId));
   const workspaceTasks = displayTasks.filter(t => inActiveWorkspace(t.workspaceId));
+  const workspaceNotifications = displayNotifications.filter(n => inActiveWorkspace(n.workspaceId));
 
   // Modals & Drawers state
   const [isAiDrawerOpen, setIsAiDrawerOpen] = useState(false);
@@ -128,6 +129,7 @@ export function App() {
   const [selectedCreatorForEmail, setSelectedCreatorForEmail] = useState<Creator | null>(null);
   const [isEmailComposerOpen, setIsEmailComposerOpen] = useState(false);
   const [selectedCreatorDetail, setSelectedCreatorDetail] = useState<Creator | null>(null);
+  const [preselectCampaignId, setPreselectCampaignId] = useState<string | null>(null);
   const [selectedReviewDetail, setSelectedReviewDetail] = useState<DraftReview | null>(null);
 
   // Fetch state from backend & poll periodically for background script syncs
@@ -264,23 +266,14 @@ export function App() {
     }
   };
 
-  const handleBulkImportCreators = async (imported: any[]) => {
+  // ImportWizardModal already POSTs the parsed creators to /api/creators/batch-import
+  // itself before calling this — this only needs to pull the fresh server state in,
+  // not import a second time.
+  const handleBulkImportCreators = async (_imported: any[]) => {
     try {
-      const res = await fetch('/api/creators/batch-import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspaceId: activeWorkspaceId,
-          source: 'CSV/Wizard Import',
-          creators: imported
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        refreshCreators();
-      }
+      await refreshCreators();
     } catch (err) {
-      console.error('Error batch importing creators:', err);
+      console.error('Error refreshing creators after batch import:', err);
     }
   };
 
@@ -292,9 +285,24 @@ export function App() {
         body: JSON.stringify({ workspaceId: targetWorkspaceId })
       });
       const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || `Request failed with status ${res.status}`);
+      }
       setCreators(prev => prev.map(c => c.id === creatorId ? { ...c, workspaceId: targetWorkspaceId } : c));
     } catch (err) {
-      setCreators(prev => prev.map(c => c.id === creatorId ? { ...c, workspaceId: targetWorkspaceId } : c));
+      console.error('Error assigning creator to workspace:', err);
+      setNotifications(prev => [
+        {
+          id: `notif-${Date.now()}`,
+          title: 'Chuyển workspace thất bại',
+          description: 'Không thể lưu thay đổi workspace cho creator này. Vui lòng thử lại.',
+          priority: 'HIGH',
+          category: 'System',
+          isRead: false,
+          createdAt: new Date().toISOString()
+        },
+        ...prev
+      ]);
     }
   };
 
@@ -347,8 +355,10 @@ export function App() {
 
   const handleCreateCampaign = (campData: any) => {
     const newCamp: Campaign = {
-      id: `cmp-${Date.now()}`,
+      currency: 'USD',
+      targetCategories: ['Beauty'],
       ...campData,
+      id: `cmp-${Date.now()}`,
       spent: 0,
       creatorIds: [],
       createdAt: new Date().toISOString()
@@ -446,7 +456,7 @@ export function App() {
         setActiveTab={setActiveTab as any}
         collapsed={collapsed}
         setCollapsed={setCollapsed}
-        unreadNotifsCount={notifications.filter(n => !n.isRead).length}
+        unreadNotifsCount={workspaceNotifications.filter(n => !n.isRead).length}
         creatorsCount={workspaceCreators.length}
         openAiDrawer={() => setIsAiDrawerOpen(true)}
         openNotifDrawer={() => setIsNotificationDrawerOpen(true)}
@@ -460,7 +470,7 @@ export function App() {
           openQuickAdd={() => setIsQuickAddModalOpen(true)}
           openAiDrawer={() => setIsAiDrawerOpen(true)}
           openNotifDrawer={() => setIsNotificationDrawerOpen(true)}
-          unreadNotifsCount={notifications.filter(n => !n.isRead).length}
+          unreadNotifsCount={workspaceNotifications.filter(n => !n.isRead).length}
           darkMode={darkMode}
           setDarkMode={setDarkMode}
           activeWorkspace={activeWorkspace}
@@ -543,6 +553,7 @@ export function App() {
               onOpenSettings={() => setActiveTab('settings')}
               onOpenCreateCampaign={() => setIsCreateCampaignModalOpen(true)}
               onSelectCreator={setSelectedCreatorDetail}
+              preselectCampaignId={preselectCampaignId}
             />
           )}
 
@@ -588,14 +599,14 @@ export function App() {
       <AiDrawer
         isOpen={isAiDrawerOpen}
         onClose={() => setIsAiDrawerOpen(false)}
-        creators={creators}
-        campaigns={campaigns}
+        creators={workspaceCreators}
+        campaigns={workspaceCampaigns}
       />
 
       <NotificationDrawer
         isOpen={isNotificationDrawerOpen}
         onClose={() => setIsNotificationDrawerOpen(false)}
-        notifications={notifications}
+        notifications={workspaceNotifications}
         onMarkAllRead={() => setNotifications(prev => prev.map(n => ({ ...n, isRead: true })))}
         onSelectTab={tab => {
           setActiveTab(tab);
@@ -606,14 +617,17 @@ export function App() {
       <CommandPalette
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
-        creators={creators}
-        campaigns={campaigns}
-        tasks={tasks}
+        creators={workspaceCreators}
+        campaigns={workspaceCampaigns}
+        tasks={workspaceTasks}
         onSelectCreator={cr => {
           setSelectedCreatorDetail(cr);
           setActiveTab('creators');
         }}
-        onSelectCampaign={() => setActiveTab('campaigns')}
+        onSelectCampaign={cmp => {
+          setPreselectCampaignId(cmp.id);
+          setActiveTab('campaigns');
+        }}
         onSelectTab={setActiveTab}
         onOpenQuickAdd={() => setIsQuickAddModalOpen(true)}
         onOpenAi={() => setIsAiDrawerOpen(true)}

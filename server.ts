@@ -442,6 +442,7 @@ app.post('/api/creators/update-detail', (req, res) => {
     if (detail.audienceTopGender || detail.audienceTopAgeRange || detail.audienceTopCountry) {
       creator.demographics = {
         ...creator.demographics,
+        ...(detail.audienceTopGender ? { topGender: detail.audienceTopGender } : {}),
         ...(detail.audienceTopAgeRange ? { topAgeGroup: detail.audienceTopAgeRange } : {}),
         ...(detail.audienceTopCountry ? { topCountry: detail.audienceTopCountry } : {})
       };

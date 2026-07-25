@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Target,
   Plus,
@@ -19,6 +19,7 @@ interface CampaignsViewProps {
   onOpenSettings?: () => void;
   onOpenCreateCampaign: () => void;
   onSelectCreator: (cr: Creator) => void;
+  preselectCampaignId?: string | null;
 }
 
 export const CampaignsView: React.FC<CampaignsViewProps> = ({
@@ -29,9 +30,16 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
   onSelectWorkspace,
   onOpenSettings,
   onOpenCreateCampaign,
-  onSelectCreator
+  onSelectCreator,
+  preselectCampaignId
 }) => {
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>(campaigns[0]?.id || '');
+
+  // A campaign picked elsewhere (e.g. the ⌘K command palette) should open here selected,
+  // not just switch to this tab and leave whatever was already selected.
+  useEffect(() => {
+    if (preselectCampaignId) setSelectedCampaignId(preselectCampaignId);
+  }, [preselectCampaignId]);
 
   const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId) || campaigns[0];
   const assignedCreators = creators.filter(cr => selectedCampaign?.creatorIds?.includes(cr.id));

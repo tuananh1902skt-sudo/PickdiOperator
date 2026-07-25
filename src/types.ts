@@ -50,6 +50,7 @@ export interface CreatorVideo {
 export interface CreatorDemographics {
   genderMale?: number;
   genderFemale?: number;
+  topGender?: string;
   topAgeGroup?: string;
   topCountry?: string;
   ageDistribution?: { name: string; value: number }[];

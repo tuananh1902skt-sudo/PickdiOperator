@@ -41,12 +41,21 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
   const [aiReplyLoading, setAiReplyLoading] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<any>(null);
 
+  // Covers every non-archived CreatorStatus so a creator never silently disappears
+  // from the pipeline just because their status isn't one of the "main" stages.
   const pipelineStages: { label: string; status: Creator['status']; color: string }[] = [
     { label: 'New Lead', status: 'New Lead', color: 'border-slate-300' },
+    { label: 'Researching', status: 'Researching', color: 'border-slate-400' },
     { label: 'Qualified', status: 'Qualified', color: 'border-blue-400' },
     { label: 'Contacted', status: 'Contacted', color: 'border-indigo-400' },
+    { label: 'Interested', status: 'Interested', color: 'border-sky-400' },
     { label: 'Negotiating', status: 'Negotiating', color: 'border-amber-400' },
     { label: 'Approved', status: 'Approved', color: 'border-emerald-400' },
+    { label: 'Sample Sent', status: 'Sample Sent', color: 'border-purple-400' },
+    { label: 'Draft Submitted', status: 'Draft Submitted', color: 'border-amber-500' },
+    { label: 'Revision Requested', status: 'Revision Requested', color: 'border-rose-400' },
+    { label: 'Approved Draft', status: 'Approved Draft', color: 'border-emerald-500' },
+    { label: 'Posted', status: 'Posted', color: 'border-teal-500' },
     { label: 'Completed', status: 'Completed', color: 'border-emerald-600' }
   ];
 

@@ -360,7 +360,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
               <button
                 onClick={() => {
                   selectedIds.forEach(id => {
-                    const cr = creators.find(c => c.id === id);
+                    const cr = sourceCreators.find(c => c.id === id);
                     if (cr) onRunAiScore(cr);
                   });
                 }}

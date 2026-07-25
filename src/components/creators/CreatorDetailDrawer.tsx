@@ -151,15 +151,29 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
     return isNaN(n) ? undefined : n;
   };
 
-  const trendBarData = displayVideos.map((v, i) => {
-    const numViews = parseView(v.views) ?? 0;
-    return {
-      date: v.date ? (v.date.includes('/') ? v.date.split(' ')[0].slice(0, 5) : v.date) : `V${i + 1}`,
-      branded: v.isBranded ? numViews : 0,
-      nonBranded: !v.isBranded ? numViews : 0,
-      boosted: 0
-    };
+  const trendBarData = displayVideos
+    .map((v, i) => {
+      const numViews = parseView(v.views) ?? 0;
+      return {
+        date: v.date ? (v.date.includes('/') ? v.date.split(' ')[0].slice(0, 5) : v.date) : `V${i + 1}`,
+        views: numViews,
+        branded: v.isBranded ? numViews : 0,
+        nonBranded: !v.isBranded ? numViews : 0,
+        boosted: 0
+      };
+    })
+    .sort((a, b) => (trendSort === 'popular' ? b.views - a.views : 0));
+
+  const filteredDisplayVideos = displayVideos.filter(v => {
+    if (contentFilter === 'branded') return !!v.isBranded;
+    if (contentFilter === 'non-branded') return !v.isBranded;
+    return true;
   });
+
+  const sortedFilteredVideos =
+    trendSort === 'popular'
+      ? [...filteredDisplayVideos].sort((a, b) => (parseView(b.views) ?? 0) - (parseView(a.views) ?? 0))
+      : filteredDisplayVideos;
 
   // Donut chart colors
   const COLORS = ['#818cf8', '#0284c7', '#f472b6', '#b45309', '#0d9488', '#9333ea'];
@@ -561,34 +575,47 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                         </button>
                       </div>
 
-                      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
-                        <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                          Broadcasting <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-                        </span>
-                        <div className="flex items-baseline gap-2">
-                          <span className={`text-2xl font-black ${creator.scores?.broadcasting !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
-                            {creator.scores?.broadcasting ?? EMPTY}
+                      {scoreTab === 'overall' ? (
+                        <>
+                          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
+                            <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
+                              Broadcasting <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
+                            </span>
+                            <div className="flex items-baseline gap-2">
+                              <span className={`text-2xl font-black ${creator.scores?.broadcasting !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                                {creator.scores?.broadcasting ?? EMPTY}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
+                            <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
+                              Diligence <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
+                            </span>
+                            <p className={`text-2xl font-black ${creator.scores?.diligence !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                              {creator.scores?.diligence ?? EMPTY}
+                            </p>
+                          </div>
+
+                          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
+                            <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
+                              Commercial <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
+                            </span>
+                            <p className={`text-2xl font-black ${(creator.scores?.commercial ?? creator.commercialScore) !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                              {creator.scores?.commercial ?? creator.commercialScore ?? EMPTY}
+                            </p>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
+                          <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
+                            Creativity & Talent <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
                           </span>
+                          <p className={`text-2xl font-black ${creator.scores?.creativity !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                            {creator.scores?.creativity ?? EMPTY}
+                          </p>
                         </div>
-                      </div>
-
-                      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
-                        <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                          Diligence <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-                        </span>
-                        <p className={`text-2xl font-black ${creator.scores?.diligence !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
-                          {creator.scores?.diligence ?? EMPTY}
-                        </p>
-                      </div>
-
-                      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
-                        <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                          Commercial <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-                        </span>
-                        <p className={`text-2xl font-black ${(creator.scores?.commercial ?? creator.commercialScore) !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
-                          {creator.scores?.commercial ?? creator.commercialScore ?? EMPTY}
-                        </p>
-                      </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -817,22 +844,47 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                   </h3>
 
                   <div className="flex items-center bg-slate-200/60 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold">
-                    <button className="px-3 py-1.5 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-lg shadow-xs">
+                    <button
+                      onClick={() => setTrendSort('recent')}
+                      className={`px-3 py-1.5 rounded-lg transition-colors ${
+                        trendSort === 'recent'
+                          ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
                       Most recent
                     </button>
-                    <button className="px-3 py-1.5 text-slate-500 hover:text-slate-800">Most popular</button>
-                    <button className="px-3 py-1.5 text-slate-500 hover:text-slate-800">Branded content</button>
+                    <button
+                      onClick={() => setTrendSort('popular')}
+                      className={`px-3 py-1.5 rounded-lg transition-colors ${
+                        trendSort === 'popular'
+                          ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      Most popular
+                    </button>
+                    <button
+                      onClick={() => setContentFilter(prev => (prev === 'branded' ? 'all' : 'branded'))}
+                      className={`px-3 py-1.5 rounded-lg transition-colors ${
+                        contentFilter === 'branded'
+                          ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      Branded content
+                    </button>
                   </div>
                 </div>
 
                 {/* Video Grid */}
-                {displayVideos.length === 0 && (
+                {sortedFilteredVideos.length === 0 && (
                   <div className="p-8 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-slate-400 text-xs italic">
                     {EMPTY} — chưa cào được video nào từ TikTok
                   </div>
                 )}
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-                  {displayVideos.map(vid => (
+                  {sortedFilteredVideos.map(vid => (
                     <a
                       key={vid.id}
                       href={vid.videoUrl || creator.profileUrl || `https://www.tiktok.com/@${(creator.handle || '').replace(/^@/, '')}`}
