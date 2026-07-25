@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckSquare, Plus, Clock, CheckCircle2, AlertTriangle, Trash2, Filter } from 'lucide-react';
+import { CheckSquare, Plus, Clock, CheckCircle2, Trash2 } from 'lucide-react';
 import { Task } from '../../types';
 
 interface TasksViewProps {

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   Search,
   Plus,
@@ -7,10 +7,8 @@ import {
   Sun,
   Moon,
   ChevronDown,
-  Building2,
   Check,
   PlusCircle,
-  Layers,
   Database
 } from 'lucide-react';
 import { Workspace } from '../../types';
@@ -47,11 +45,23 @@ export const Navbar: React.FC<NavbarProps> = ({
   setShowMockData
 }) => {
   const [wsDropdownOpen, setWsDropdownOpen] = React.useState(false);
+  const wsDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!wsDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (wsDropdownRef.current && !wsDropdownRef.current.contains(e.target as Node)) {
+        setWsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [wsDropdownOpen]);
 
   return (
     <header className="h-16 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur sticky top-0 z-20 px-4 md:px-6 flex items-center justify-between gap-4">
       {/* Workspace Switcher */}
-      <div className="relative">
+      <div className="relative" ref={wsDropdownRef}>
         <button
           id="workspace-switcher-btn"
           onClick={() => setWsDropdownOpen(!wsDropdownOpen)}
@@ -121,17 +131,17 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Center Search Bar */}
-      <div className="flex-1 max-w-xl hidden sm:block">
+      <div className="flex-1 max-w-xl min-w-0 hidden sm:block">
         <button
           id="global-search-trigger"
           onClick={openCommandPalette}
-          className="w-full flex items-center justify-between px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 border border-transparent hover:border-slate-300 dark:hover:border-slate-700 text-xs transition-all"
+          className="w-full flex items-center justify-between gap-2 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 border border-transparent hover:border-slate-300 dark:hover:border-slate-700 text-xs transition-all"
         >
-          <div className="flex items-center gap-2">
-            <Search className="w-4 h-4 text-slate-400" />
-            <span>Search creators, campaigns, tasks, messages, notes...</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <Search className="w-4 h-4 text-slate-400 shrink-0" />
+            <span className="truncate whitespace-nowrap">Search creators, campaigns, tasks, messages, notes...</span>
           </div>
-          <kbd className="hidden sm:inline-flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-mono font-medium text-slate-500 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-md shadow-2xs">
+          <kbd className="hidden sm:inline-flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-mono font-medium text-slate-500 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-md shadow-2xs shrink-0">
             ⌘K
           </kbd>
         </button>

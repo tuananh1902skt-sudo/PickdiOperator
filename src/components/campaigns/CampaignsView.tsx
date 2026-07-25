@@ -3,12 +3,8 @@ import {
   Target,
   Plus,
   Users,
-  DollarSign,
   Calendar,
-  ChevronRight,
-  TrendingUp,
   Package,
-  Sparkles,
   ExternalLink
 } from 'lucide-react';
 import { Campaign, Creator, Workspace } from '../../types';
@@ -39,6 +35,21 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
 
   const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId) || campaigns[0];
   const assignedCreators = creators.filter(cr => selectedCampaign?.creatorIds?.includes(cr.id));
+
+  const getCreatorStatusBadge = (status: string) => {
+    switch (status) {
+      case 'Approved':
+      case 'Completed':
+        return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300';
+      case 'Draft Submitted':
+      case 'Negotiating':
+        return 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300';
+      case 'Contacted':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300';
+      default:
+        return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+    }
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -92,7 +103,7 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {campaigns.map(cmp => {
           const isSelected = cmp.id === selectedCampaignId;
-          const budgetPct = Math.min(100, Math.round((cmp.spent / cmp.budget) * 100));
+          const budgetPct = cmp.budget > 0 ? Math.min(100, Math.round((cmp.spent / cmp.budget) * 100)) : 0;
 
           return (
             <div
@@ -235,13 +246,13 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
                             </div>
                           </div>
                         </td>
-                        <td className="p-3 text-slate-700 dark:text-slate-300">{cr.category}</td>
-                        <td className="p-3 text-right font-semibold">{(cr.followers / 1000).toFixed(0)}K</td>
+                        <td className="p-3 text-slate-700 dark:text-slate-300">{cr.category || '—'}</td>
+                        <td className="p-3 text-right font-semibold">{cr.followers !== undefined ? `${(cr.followers / 1000).toFixed(0)}K` : '—'}</td>
                         <td className="p-3 text-center">
-                          <span className="font-bold text-indigo-600">{cr.brandFitScore}/100</span>
+                          <span className="font-bold text-indigo-600">{cr.brandFitScore !== undefined ? `${cr.brandFitScore}/100` : '—'}</span>
                         </td>
                         <td className="p-3">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${getCreatorStatusBadge(cr.status)}`}>
                             {cr.status}
                           </span>
                         </td>

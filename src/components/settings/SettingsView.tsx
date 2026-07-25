@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Settings, Shield, User, Sparkles, Mail, Database, Bell, Building2, Plus, Check, Layers } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Settings, User, Sparkles, Database, Building2, Plus, Check } from 'lucide-react';
 import { Workspace } from '../../types';
 import { WorkspaceBanner } from '../layout/WorkspaceBanner';
 
@@ -20,11 +20,42 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   showMockData = true,
   setShowMockData
 }) => {
-  const [operatorName, setOperatorName] = useState('Anh Tuan');
-  const [brandName, setBrandName] = useState(activeWorkspace?.brandName || "d'Alba Piedmont Vietnam");
-  const [signature, setSignature] = useState("Best regards,\nAnh Tuan | Affiliate Operator\n" + (activeWorkspace?.name || "d'Alba Official Store Vietnam"));
-  const [autoScoreEnabled, setAutoScoreEnabled] = useState(true);
-  const [autoDraftEnabled, setAutoDraftEnabled] = useState(true);
+  const defaultSignature =
+    "Best regards,\nAnh Tuan | Affiliate Operator\n" + (activeWorkspace?.name || "d'Alba Official Store Vietnam");
+
+  const [operatorName, setOperatorName] = useState(
+    () => localStorage.getItem('pickdi_operator_name') || 'Anh Tuan'
+  );
+  const [brandName, setBrandName] = useState(
+    () => localStorage.getItem('pickdi_brand_name') || activeWorkspace?.brandName || "d'Alba Piedmont Vietnam"
+  );
+  const [signature, setSignature] = useState(
+    () => localStorage.getItem('pickdi_signature') || defaultSignature
+  );
+  const [autoScoreEnabled, setAutoScoreEnabled] = useState(
+    () => localStorage.getItem('pickdi_auto_score') !== 'false'
+  );
+  const [autoDraftEnabled, setAutoDraftEnabled] = useState(
+    () => localStorage.getItem('pickdi_auto_draft') !== 'false'
+  );
+
+  // Auto-save operator preferences as they change — there's no separate Save button,
+  // so without this every edit was silently lost on navigation/reload.
+  useEffect(() => {
+    localStorage.setItem('pickdi_operator_name', operatorName);
+  }, [operatorName]);
+  useEffect(() => {
+    localStorage.setItem('pickdi_brand_name', brandName);
+  }, [brandName]);
+  useEffect(() => {
+    localStorage.setItem('pickdi_signature', signature);
+  }, [signature]);
+  useEffect(() => {
+    localStorage.setItem('pickdi_auto_score', String(autoScoreEnabled));
+  }, [autoScoreEnabled]);
+  useEffect(() => {
+    localStorage.setItem('pickdi_auto_draft', String(autoDraftEnabled));
+  }, [autoDraftEnabled]);
 
   // New Workspace Modal state
   const [isCreatingWs, setIsCreatingWs] = useState(false);

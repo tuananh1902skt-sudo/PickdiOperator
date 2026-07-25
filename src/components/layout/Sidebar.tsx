@@ -80,7 +80,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 Pickdi Operator
               </span>
               <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate flex items-center gap-1">
-                <ShieldCheck className="w-3 h-3 text-emerald-5-00 text-emerald-500" />
+                <ShieldCheck className="w-3 h-3 text-emerald-500" />
                 TikTok Shop Assistant
               </span>
             </div>

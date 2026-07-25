@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { width: 280px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 14px; margin: 0; background: #f9fafb; }
+    h3 { margin: 0 0 10px 0; font-size: 14px; color: #111827; }
+    label { font-size: 11px; color: #4b5563; font-weight: bold; }
+    input { width: 100%; padding: 6px; margin: 4px 0 10px 0; border: 1px solid #d1d5db; border-radius: 4px; box-sizing: border-box; font-size: 11px; }
+    .row { display: flex; gap: 6px; }
+    .row input { flex: 1; }
+    button { width: 100%; padding: 10px; background: #4f46e5; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 12px; }
+    button:hover { background: #4338ca; }
+    button.secondary { background: #111827; margin-top: 6px; }
+    button.secondary:hover { background: #000; }
+    #findStatus, #detailStatus, #engagementStatus { margin-top: 8px; font-size: 11px; color: #374151; word-break: break-word; }
+    hr { border: none; border-top: 1px solid #e5e7eb; margin: 14px 0; }
+  </style>
+</head>
+<body>
+  <h3>⚡ Pickdi TikTok One Scraper</h3>
+
+  <label>Webapp URL:</label>
+  <input type="text" id="webappUrl" placeholder="http://localhost:3000">
+
+  <hr>
+
+  <label>🔍 Tìm creator qua TikTok One</label>
+  <div class="row">
+    <input type="number" id="followerMin" placeholder="Follower min">
+    <input type="number" id="followerMax" placeholder="Follower max">
+  </div>
+  <div class="row">
+    <input type="number" id="budgetMin" placeholder="Budget min $">
+    <input type="number" id="budgetMax" placeholder="Budget max $">
+  </div>
+  <input type="text" id="keyword" placeholder="Từ khoá (vd: skincare)">
+  <button id="findCreatorsBtn">🔍 Tìm creator</button>
+  <div id="findStatus"></div>
+
+  <hr>
+
+  <button id="pushDetailBtn" class="secondary">📋 Lấy chi tiết trang này</button>
+  <div id="detailStatus"></div>
+
+  <button id="pushEngagementBtn" class="secondary">📊 Lấy engagement (tiktok.com)</button>
+  <div id="engagementStatus"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

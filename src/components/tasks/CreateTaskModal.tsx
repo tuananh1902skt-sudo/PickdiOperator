@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, CheckSquare, Plus } from 'lucide-react';
+import { X, CheckSquare } from 'lucide-react';
 import { Creator } from '../../types';
 
 interface CreateTaskModalProps {

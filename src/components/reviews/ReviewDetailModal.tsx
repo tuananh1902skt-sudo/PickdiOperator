@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Play, Sparkles, CheckCircle2, AlertTriangle, Send, RefreshCw, ThumbsUp, RotateCcw } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, Play, Sparkles, CheckCircle2, AlertTriangle, RefreshCw, ThumbsUp, RotateCcw, HelpCircle } from 'lucide-react';
 import { DraftReview } from '../../types';
 
 interface ReviewDetailModalProps {
@@ -16,6 +16,13 @@ export const ReviewDetailModal: React.FC<ReviewDetailModalProps> = ({
   const [feedback, setFeedback] = useState('');
   const [aiChecking, setAiChecking] = useState(false);
   const [aiReviewResult, setAiReviewResult] = useState<any>(null);
+
+  // This modal stays mounted and just swaps `review` — clear the previous
+  // review's draft feedback and AI result so they don't leak into the next one.
+  useEffect(() => {
+    setFeedback('');
+    setAiReviewResult(null);
+  }, [review?.id]);
 
   if (!review) return null;
 
@@ -102,22 +109,23 @@ export const ReviewDetailModal: React.FC<ReviewDetailModalProps> = ({
                 </h4>
 
                 <div className="space-y-1.5 text-[11px]">
-                  <div className="flex items-center gap-2 text-emerald-600 font-semibold">
-                    <CheckCircle2 className="w-4 h-4 shrink-0" />
-                    <span>TikTok Shop product link pinned in bio & video</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-emerald-600 font-semibold">
-                    <CheckCircle2 className="w-4 h-4 shrink-0" />
-                    <span>Brand logo & product visible in first 3 seconds</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-emerald-600 font-semibold">
-                    <CheckCircle2 className="w-4 h-4 shrink-0" />
-                    <span>Clear call-to-action to click orange basket</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-amber-600 font-semibold">
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
-                    <span>FTC #ad disclosure present in caption</span>
-                  </div>
+                  {[
+                    { key: 'linkCorrect', label: 'TikTok Shop product link pinned in bio & video' },
+                    { key: 'productVisible', label: 'Brand logo & product visible in first 3 seconds' },
+                    { key: 'ctaPresent', label: 'Clear call-to-action to click orange basket' },
+                    { key: 'compliance', label: 'FTC #ad disclosure present in caption' }
+                  ].map(item => {
+                    const value = review.checklist?.[item.key as keyof NonNullable<typeof review.checklist>];
+                    const Icon = value === true ? CheckCircle2 : value === false ? AlertTriangle : HelpCircle;
+                    const colorClass =
+                      value === true ? 'text-emerald-600' : value === false ? 'text-rose-600' : 'text-slate-400';
+                    return (
+                      <div key={item.key} className={`flex items-center gap-2 font-semibold ${colorClass}`}>
+                        <Icon className="w-4 h-4 shrink-0" />
+                        <span>{item.label}{value === undefined ? ' (not yet checked)' : ''}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -131,7 +139,7 @@ export const ReviewDetailModal: React.FC<ReviewDetailModalProps> = ({
                 {aiChecking ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    Analyzing Video Script with Gemini...
+                    Analyzing Video Script with AI...
                   </>
                 ) : (
                   <>

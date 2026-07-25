@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileCheck2, Play, CheckCircle2, Clock, RotateCcw, AlertTriangle, ExternalLink } from 'lucide-react';
+import { FileCheck2, Play, ExternalLink } from 'lucide-react';
 import { DraftReview } from '../../types';
 
 interface ReviewsViewProps {

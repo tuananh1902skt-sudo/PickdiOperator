@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Target, Plus } from 'lucide-react';
+import { X, Target } from 'lucide-react';
 
 interface CreateCampaignModalProps {
   isOpen: boolean;
@@ -28,6 +28,10 @@ export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !brand.trim()) return;
+    if (endDate < startDate) {
+      alert('Ngày kết thúc phải sau ngày bắt đầu.');
+      return;
+    }
 
     onSubmit({
       name,

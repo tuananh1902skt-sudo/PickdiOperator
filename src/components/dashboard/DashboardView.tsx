@@ -58,6 +58,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenAi,
   onCompleteTask
 }) => {
+  const todayStr = new Date().toISOString().split('T')[0];
+
   const pipelineFunnel = [
     { label: 'New Leads', count: creators.filter(c => c.status === 'New Lead').length, color: 'bg-slate-500' },
     { label: 'Contacted', count: creators.filter(c => c.status === 'Contacted').length, color: 'bg-blue-500' },
@@ -150,7 +152,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <AlertTriangle className="w-4 h-4 text-rose-500" />
           </div>
           <div className="text-2xl font-bold text-slate-900 dark:text-white">{tasks.length}</div>
-          <div className="text-[11px] text-slate-400 mt-1">0 Overdue</div>
+          <div className="text-[11px] text-slate-400 mt-1">
+            {tasks.filter(t => t.dueDate < todayStr).length} Overdue
+          </div>
         </div>
 
         <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">

@@ -1,5 +1,5 @@
-import React from 'react';
-import { Building2, Sparkles, ChevronDown, Check, Settings, ArrowRightLeft, Layers, ShieldCheck } from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
+import { ChevronDown, Check, Settings, ArrowRightLeft, Layers } from 'lucide-react';
 import { Workspace } from '../../types';
 
 interface WorkspaceBannerProps {
@@ -20,6 +20,18 @@ export const WorkspaceBanner: React.FC<WorkspaceBannerProps> = ({
   activeCampaignCount = 0
 }) => {
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [dropdownOpen]);
 
   const getWorkspaceBadgeStyle = (color: Workspace['color']) => {
     switch (color) {
@@ -112,7 +124,7 @@ export const WorkspaceBanner: React.FC<WorkspaceBannerProps> = ({
           </div>
 
           {/* Switch Workspace Dropdown */}
-          <div className="relative">
+          <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setDropdownOpen(!dropdownOpen)}
               className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold transition-all border border-slate-200 dark:border-slate-700"

@@ -17,9 +17,7 @@ export type CreatorStatus =
 export type CampaignStatus = 'Planning' | 'Recruiting' | 'Running' | 'Completed' | 'Archived';
 
 export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-export type TaskStatus = 'PENDING' | 'IN_PROGRESS' | 'WAITING' | 'COMPLETED' | 'CANCELLED';
-
-export type ReviewStatus = 'SUBMITTED' | 'APPROVED' | 'REVISION_REQUIRED' | 'REJECTED';
+export type TaskStatus = 'Pending' | 'Completed';
 
 export type NotificationPriority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
@@ -42,9 +40,9 @@ export interface Workspace {
 export interface CreatorVideo {
   id: string;
   title: string;
-  views: string | number;
+  views?: string | number;
   thumb: string;
-  date: string;
+  date?: string;
   isBranded?: boolean;
   videoUrl?: string;
 }
@@ -68,28 +66,30 @@ export interface CreatorScores {
 export interface Creator {
   id: string;
   workspaceId?: string; // Active workspace ID or null if global lead
+  source?: 'scraper' | 'manual'; // how this creator entered the CRM — drives the "Auto-Synced" badge
   handle: string;
   displayName: string;
-  avatar: string;
+  avatar?: string;
   platform: 'TikTok' | 'Instagram' | 'YouTube';
-  country: string;
-  language: string;
+  country?: string;
+  language?: string;
   bio: string;
   profileUrl: string;
   tiktokOneId?: string;
-  followers: number;
-  avgViews: number;
-  engagementRate: number; // e.g. 4.2%
+  followers?: number;
+  avgViews?: number;
+  engagementRate?: number; // e.g. 4.2%
   gmv30d?: number; // 30-day estimated GMV
-  category: string;
-  niche: string[];
-  brandFitScore: number; // 0-100
-  commercialScore: number; // 0-100
-  riskScore: number; // 0-100
+  category?: string;
+  niche?: string[];
+  brandFitScore?: number; // 0-100
+  commercialScore?: number; // 0-100
+  riskScore?: number; // 0-100
   status: CreatorStatus;
   owner: string;
-  email: string;
+  email?: string;
   phone?: string;
+  instagram?: string;
   rateCard?: string;
   campaignId?: string;
   campaignName?: string;
@@ -111,6 +111,8 @@ export interface Creator {
   responseRate?: string;
   industryTag?: string;
   videoContentTag?: string;
+  brandedVideosCount?: number;
+  industryCoveredCount?: number;
   recentVideos?: CreatorVideo[];
   demographics?: CreatorDemographics;
   scores?: CreatorScores;
@@ -200,7 +202,7 @@ export interface ContentReview {
   thumbnailUrl?: string;
   videoThumbnail?: string;
   durationSeconds?: number;
-  status: 'Pending Review' | 'Approved' | 'Revision Requested' | 'Rejected' | ReviewStatus;
+  status: 'Pending Review' | 'Approved' | 'Revision Requested' | 'Rejected';
   dueAt: string;
   submittedAt: string;
   checklist?: {
@@ -228,6 +230,7 @@ export interface Task {
   status: TaskStatus;
   dueDate: string;
   owner: string;
+  assignedTo?: string;
   relatedCreatorId?: string;
   relatedCreatorName?: string;
   relatedCampaignId?: string;

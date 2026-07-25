@@ -5,18 +5,10 @@ import {
   Sparkles,
   Mail,
   Archive,
-  Clock,
   Bookmark,
-  TrendingUp,
-  FileText,
   HelpCircle,
   Play,
-  Globe,
-  Users,
-  ChevronRight,
-  Filter,
   BarChart2,
-  MessageSquare,
   ArrowDown
 } from 'lucide-react';
 import {
@@ -32,10 +24,7 @@ import {
   Tooltip,
   PieChart,
   Pie,
-  Cell,
-  LineChart,
-  Line,
-  ReferenceLine
+  Cell
 } from 'recharts';
 import { Creator, Campaign } from '../../types';
 
@@ -64,7 +53,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
   const [contentFilter, setContentFilter] = useState<'all' | 'branded' | 'non-branded'>('all');
   const [trendSort, setTrendSort] = useState<'recent' | 'popular'>('recent');
   const [demoTab, setDemoTab] = useState<'reached' | 'engaged' | 'followers'>('reached');
-  const [followerTrendType, setFollowerTrendType] = useState<'count' | 'growth'>('count');
   const [newNoteText, setNewNoteText] = useState('');
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -118,10 +106,13 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
 
   if (!creator) return null;
 
-  const formatNumber = (num: number) => {
+  const EMPTY = 'Chưa có dữ liệu';
+
+  const formatNumber = (num?: number | null) => {
+    if (num === undefined || num === null || isNaN(num)) return EMPTY;
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
     if (num >= 1000) return (num / 1000).toFixed(0) + 'K';
-    return num ? num.toLocaleString() : '0';
+    return num.toLocaleString();
   };
 
   const scrollToSection = (id: string) => {
@@ -136,130 +127,59 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
     }
   };
 
-  // Radar chart
-  // Dynamic Radar chart based on creator scores
+  // Radar chart — only built from real creator.scores, no invented fallback numbers
+  const hasScores = !!creator.scores && Object.values(creator.scores).some(v => v !== undefined);
   const radarData = [
-    { subject: 'Broadcasting', value: creator.scores?.broadcasting || 86, fullMark: 100 },
-    { subject: 'Diligence', value: creator.scores?.diligence || 72.8, fullMark: 100 },
-    { subject: 'Commercial', value: creator.scores?.commercial || creator.commercialScore || 60, fullMark: 100 },
-    { subject: 'Brand Fit', value: creator.brandFitScore || 85, fullMark: 100 },
-    { subject: 'Creativity', value: creator.scores?.creativity || 82, fullMark: 100 }
+    { subject: 'Broadcasting', value: creator.scores?.broadcasting ?? 0, fullMark: 100 },
+    { subject: 'Diligence', value: creator.scores?.diligence ?? 0, fullMark: 100 },
+    { subject: 'Commercial', value: creator.scores?.commercial ?? creator.commercialScore ?? 0, fullMark: 100 },
+    { subject: 'Brand Fit', value: creator.brandFitScore ?? 0, fullMark: 100 },
+    { subject: 'Creativity', value: creator.scores?.creativity ?? 0, fullMark: 100 }
   ];
 
-  // Videos Grid Data (real creator.recentVideos if available or dynamically generated from creator handle)
-  const safeHandle = (creator.handle || '').replace(/^@/, '');
-  const avgViewBase = creator.avgViews || 35000;
+  // Videos Grid Data — only real creator.recentVideos from the scraper, never invented
+  const displayVideos = creator.recentVideos || [];
 
-  const defaultRecentVideos = [
-    {
-      id: 'v1',
-      views: formatNumber(Math.round(avgViewBase * 1.45)),
-      title: `${creator.displayName || 'Creator'} - Video mới nhất về ${creator.niche?.[0] || creator.category || 'TikTok'} #${creator.category || 'trending'}`,
-      isBranded: true,
-      date: 'Gần đây',
-      thumb: creator.avatar || 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=300&auto=format&fit=crop&q=80',
-      videoUrl: creator.profileUrl || `https://www.tiktok.com/@${safeHandle}`
-    },
-    {
-      id: 'v2',
-      views: formatNumber(Math.round(avgViewBase * 0.95)),
-      title: `Chia sẻ kinh nghiệm ${creator.niche?.[1] || 'sáng tạo nội dung'} cùng ${creator.handle || '@creator'}`,
-      isBranded: false,
-      date: '3 ngày trước',
-      thumb: creator.avatar || 'https://images.unsplash.com/photo-1501443762994-82bd5dace89a?w=300&auto=format&fit=crop&q=80',
-      videoUrl: creator.profileUrl || `https://www.tiktok.com/@${safeHandle}`
-    },
-    {
-      id: 'v3',
-      views: formatNumber(Math.round(avgViewBase * 1.15)),
-      title: `Hot trend ${creator.category || 'Lifestyle'} cực cuốn từ ${creator.displayName || 'Creator'}`,
-      isBranded: true,
-      date: '5 ngày trước',
-      thumb: creator.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&auto=format&fit=crop&q=80',
-      videoUrl: creator.profileUrl || `https://www.tiktok.com/@${safeHandle}`
-    }
-  ];
+  // Performance Trend Bar Chart Data — only built when real video views exist
+  const parseView = (val?: string | number) => {
+    if (val === undefined) return undefined;
+    if (typeof val === 'number') return val;
+    const s = String(val).toUpperCase().trim();
+    if (s.endsWith('M')) return parseFloat(s) * 1000000;
+    if (s.endsWith('K')) return parseFloat(s) * 1000;
+    const n = parseFloat(s);
+    return isNaN(n) ? undefined : n;
+  };
 
-  const displayVideos = (creator.recentVideos && creator.recentVideos.length > 0)
-    ? creator.recentVideos
-    : defaultRecentVideos;
-
-  // Dynamic Performance Trend Bar Chart Data
-  const trendBarData = displayVideos.length > 0
-    ? displayVideos.map((v, i) => {
-        const parseView = (val: string | number) => {
-          if (typeof val === 'number') return val;
-          const s = String(val).toUpperCase().trim();
-          if (s.endsWith('M')) return parseFloat(s) * 1000000;
-          if (s.endsWith('K')) return parseFloat(s) * 1000;
-          return parseFloat(s) || 50000;
-        };
-        const numViews = parseView(v.views);
-        return {
-          date: v.date ? (v.date.includes('/') ? v.date.split(' ')[0].slice(0, 5) : v.date) : `V${i + 1}`,
-          branded: v.isBranded ? numViews : 0,
-          nonBranded: !v.isBranded ? numViews : 0,
-          boosted: 0
-        };
-      })
-    : [
-        { date: 'V1', branded: Math.round(avgViewBase * 1.3), nonBranded: 0, boosted: 0 },
-        { date: 'V2', branded: 0, nonBranded: Math.round(avgViewBase * 0.9), boosted: 0 },
-        { date: 'V3', branded: Math.round(avgViewBase * 1.1), nonBranded: 0, boosted: 0 },
-        { date: 'V4', branded: 0, nonBranded: Math.round(avgViewBase * 0.8), boosted: 0 },
-        { date: 'V5', branded: 0, nonBranded: Math.round(avgViewBase * 1.2), boosted: 0 }
-      ];
+  const trendBarData = displayVideos.map((v, i) => {
+    const numViews = parseView(v.views) ?? 0;
+    return {
+      date: v.date ? (v.date.includes('/') ? v.date.split(' ')[0].slice(0, 5) : v.date) : `V${i + 1}`,
+      branded: v.isBranded ? numViews : 0,
+      nonBranded: !v.isBranded ? numViews : 0,
+      boosted: 0
+    };
+  });
 
   // Donut chart colors
   const COLORS = ['#818cf8', '#0284c7', '#f472b6', '#b45309', '#0d9488', '#9333ea'];
 
-  // Dynamic Demographic Donut Data
-  const femaleVal = creator.demographics?.genderFemale ?? 72;
-  const maleVal = creator.demographics?.genderMale ?? 28;
-  const genderData = [
-    { name: 'Female', value: femaleVal },
-    { name: 'Male', value: maleVal }
-  ];
+  // Demographic Donut Data — only rendered when the scraper actually captured demographics
+  const hasGenderData = creator.demographics?.genderFemale !== undefined || creator.demographics?.genderMale !== undefined;
+  const genderData = hasGenderData ? [
+    { name: 'Female', value: creator.demographics?.genderFemale ?? 0 },
+    { name: 'Male', value: creator.demographics?.genderMale ?? 0 }
+  ] : [];
 
-  const ageData = creator.demographics?.ageDistribution || [
-    { name: '18-24', value: 45.2 },
-    { name: '25-34', value: 32.8 },
-    { name: '13-17', value: 12.0 },
-    { name: '35-44', value: 7.0 },
-    { name: '45-54', value: 3.0 }
-  ];
+  const ageData = creator.demographics?.ageDistribution || [];
 
-  const followerRatioData = [
-    { name: 'Non-followers', value: 72.4 },
-    { name: 'Followers', value: 27.6 }
-  ];
-
-  const deviceData = [
-    { name: 'iOS (Apple)', value: 68.2 },
-    { name: 'Android (Samsung/Xiaomi/OPPO)', value: 31.8 }
-  ];
-
-  // Follower Trend Line Data dynamically relative to creator.followers
-  const baseFollowers = creator.followers || 50000;
-  const followerLineData = Array.from({ length: 30 }).map((_, i) => ({
-    day: `Day ${i + 1}`,
-    followers: Math.round(baseFollowers * (0.88 + (i / 30) * 0.12 + Math.sin(i) * 0.015))
-  }));
-  const avgFollowerVal = Math.round(followerLineData.reduce((acc, curr) => acc + curr.followers, 0) / followerLineData.length);
-
-  // Dynamic View Trend Summary calculated from displayVideos
-  const parsedViews = displayVideos.map(v => {
-    if (typeof v.views === 'number') return v.views;
-    const s = String(v.views).toUpperCase().trim();
-    if (s.endsWith('M')) return parseFloat(s) * 1000000;
-    if (s.endsWith('K')) return parseFloat(s) * 1000;
-    return parseFloat(s) || creator.avgViews || 35000;
-  });
-  const maxViewVal = parsedViews.length ? Math.max(...parsedViews) : creator.avgViews * 1.5;
-  const minViewVal = parsedViews.length ? Math.min(...parsedViews) : creator.avgViews * 0.6;
+  // Real view-count summary — undefined (not a fabricated number) when there's no video data
+  const parsedViews = displayVideos.map(v => parseView(v.views)).filter((v): v is number => v !== undefined);
+  const maxViewVal = parsedViews.length ? Math.max(...parsedViews) : undefined;
+  const minViewVal = parsedViews.length ? Math.min(...parsedViews) : undefined;
   const avgViewVal = parsedViews.length
     ? Math.round(parsedViews.reduce((a, b) => a + b, 0) / parsedViews.length)
-    : creator.avgViews;
+    : undefined;
 
   const handleNoteSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -326,9 +246,11 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                   alt={creator.displayName}
                   className="w-24 h-24 rounded-full object-cover ring-4 ring-teal-500/20 shadow-md"
                 />
-                <span className="absolute bottom-0 right-1 bg-white dark:bg-slate-800 rounded-full p-1 shadow-md text-xs">
-                  {creator.country === 'Vietnam' ? '🇻🇳' : '🇺🇸'}
-                </span>
+                {creator.country && (
+                  <span className="absolute bottom-0 right-1 bg-white dark:bg-slate-800 rounded-full p-1 shadow-md text-xs">
+                    {creator.country === 'Vietnam' ? '🇻🇳' : creator.country === 'United States' ? '🇺🇸' : '🌐'}
+                  </span>
+                )}
               </div>
 
               <h2 className="text-xl font-bold text-slate-900 dark:text-white leading-tight">
@@ -336,11 +258,17 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
               </h2>
               <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{creator.displayName}</p>
 
-              {/* Data Source Badge */}
-              <div className="mt-2.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 flex items-center justify-center gap-1.5 shadow-2xs">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Harvester: Auto-Synced from TikTok</span>
-              </div>
+              {/* Data Source Badge — reflects how this creator actually entered the CRM */}
+              {creator.source === 'scraper' ? (
+                <div className="mt-2.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 flex items-center justify-center gap-1.5 shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Auto-Synced từ TikTok One Extension</span>
+                </div>
+              ) : (
+                <div className="mt-2.5 px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center justify-center gap-1.5">
+                  <span>Nhập tay (Manual)</span>
+                </div>
+              )}
 
               <div className="mt-2 flex flex-col items-center gap-1">
                 <a
@@ -378,32 +306,41 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
 
               <div>
                 <h4 className="font-bold text-slate-800 dark:text-slate-200 mb-1">Languages spoken</h4>
-                <p className="text-slate-600 dark:text-slate-400">{creator.language || 'English'}</p>
+                <p className="text-slate-600 dark:text-slate-400">{creator.language || EMPTY}</p>
               </div>
 
               <div>
                 <h4 className="font-bold text-slate-800 dark:text-slate-200 mb-1.5">Video content tag</h4>
                 <div className="flex flex-wrap gap-1.5">
-                  <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
-                    {creator.category || 'Recreation Facility'}
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
-                    Comedy
-                  </span>
+                  {creator.category ? (
+                    <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
+                      {creator.category}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400 italic">{EMPTY}</span>
+                  )}
                 </div>
               </div>
 
               <div>
-                <h4 className="font-bold text-slate-800 dark:text-slate-200 mb-1">Collaboration evaluation</h4>
-                <span className="inline-block px-2.5 py-0.5 rounded-md bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300 font-bold text-sm">
-                  {creator.brandFitScore ? (creator.brandFitScore * 0.8 + 10).toFixed(1) : '74.2'}
-                </span>
+                <h4 className="font-bold text-slate-800 dark:text-slate-200 mb-1">Brand fit score</h4>
+                {creator.brandFitScore !== undefined ? (
+                  <span className="inline-block px-2.5 py-0.5 rounded-md bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300 font-bold text-sm">
+                    {creator.brandFitScore}
+                  </span>
+                ) : (
+                  <span className="text-slate-400 italic text-xs">{EMPTY}</span>
+                )}
               </div>
 
               <div>
                 <h4 className="font-bold text-slate-800 dark:text-slate-200 mb-0.5">Start from</h4>
                 <p className="text-lg font-black text-slate-900 dark:text-white">
-                  ${creator.rateCard || '1,500'} <span className="text-xs font-normal text-slate-500">USD</span>
+                  {creator.rateCard ? (
+                    <>${creator.rateCard} <span className="text-xs font-normal text-slate-500">USD</span></>
+                  ) : (
+                    <span className="text-slate-400 italic text-sm font-normal">{EMPTY}</span>
+                  )}
                 </p>
               </div>
 
@@ -544,8 +481,8 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                       <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
                         Follower growth rate <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
                       </span>
-                      <p className="text-2xl font-black text-slate-900 dark:text-white mt-1">
-                        {creator.followerGrowthRate || '+1.36%'}
+                      <p className={`text-2xl font-black mt-1 ${creator.followerGrowthRate ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                        {creator.followerGrowthRate || EMPTY}
                       </p>
                     </div>
 
@@ -553,9 +490,13 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                       <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
                         Posting frequency <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
                       </span>
-                      <p className="text-2xl font-black text-slate-900 dark:text-white mt-1">
-                        {creator.postingFrequency30d || 15} <span className="text-xs font-normal text-slate-400">/ 30 days</span>
-                      </p>
+                      {creator.postingFrequency30d !== undefined ? (
+                        <p className="text-2xl font-black text-slate-900 dark:text-white mt-1">
+                          {creator.postingFrequency30d} <span className="text-xs font-normal text-slate-400">/ 30 days</span>
+                        </p>
+                      ) : (
+                        <p className="text-sm font-normal text-slate-400 italic mt-1">{EMPTY}</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -572,19 +513,27 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                           Overall score <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
                         </span>
                       </div>
-                      <p className="text-3xl font-black text-teal-600 dark:text-teal-400 mb-4">
-                        {creator.scores?.overall || Math.round(((creator.brandFitScore || 85) + (creator.commercialScore || 80)) / 2) || 74.2}
+                      <p className={`text-3xl font-black mb-4 ${hasScores || creator.brandFitScore !== undefined ? 'text-teal-600 dark:text-teal-400' : 'text-slate-400 italic text-base font-normal'}`}>
+                        {creator.scores?.overall ?? (creator.brandFitScore !== undefined && creator.commercialScore !== undefined
+                          ? Math.round((creator.brandFitScore + creator.commercialScore) / 2)
+                          : EMPTY)}
                       </p>
 
-                      <div className="h-64 w-full flex items-center justify-center">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <RadarChart cx="50%" cy="50%" outerRadius="75%" data={radarData}>
-                            <PolarGrid stroke="#e2e8f0" />
-                            <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 12 }} />
-                            <Radar name="Creator Score" dataKey="value" stroke="#818cf8" fill="#818cf8" fillOpacity={0.3} />
-                          </RadarChart>
-                        </ResponsiveContainer>
-                      </div>
+                      {hasScores ? (
+                        <div className="h-64 w-full flex items-center justify-center">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <RadarChart cx="50%" cy="50%" outerRadius="75%" data={radarData}>
+                              <PolarGrid stroke="#e2e8f0" />
+                              <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 12 }} />
+                              <Radar name="Creator Score" dataKey="value" stroke="#818cf8" fill="#818cf8" fillOpacity={0.3} />
+                            </RadarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      ) : (
+                        <div className="h-64 w-full flex items-center justify-center text-slate-400 text-xs italic">
+                          {EMPTY} — cần cào từ TikTok One
+                        </div>
+                      )}
                     </div>
 
                     {/* Score Breakdown Cards */}
@@ -617,10 +566,9 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                           Broadcasting <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
                         </span>
                         <div className="flex items-baseline gap-2">
-                          <span className="text-2xl font-black text-slate-900 dark:text-white">
-                            {creator.scores?.broadcasting || 86}
+                          <span className={`text-2xl font-black ${creator.scores?.broadcasting !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                            {creator.scores?.broadcasting ?? EMPTY}
                           </span>
-                          <span className="text-xs font-bold text-emerald-600">↑ 3%</span>
                         </div>
                       </div>
 
@@ -628,8 +576,8 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                         <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
                           Diligence <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
                         </span>
-                        <p className="text-2xl font-black text-slate-900 dark:text-white">
-                          {creator.scores?.diligence || 72.8}
+                        <p className={`text-2xl font-black ${creator.scores?.diligence !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                          {creator.scores?.diligence ?? EMPTY}
                         </p>
                       </div>
 
@@ -637,8 +585,8 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                         <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
                           Commercial <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
                         </span>
-                        <p className="text-2xl font-black text-slate-900 dark:text-white">
-                          {creator.scores?.commercial || creator.commercialScore || 60}
+                        <p className={`text-2xl font-black ${(creator.scores?.commercial ?? creator.commercialScore) !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                          {creator.scores?.commercial ?? creator.commercialScore ?? EMPTY}
                         </p>
                       </div>
                     </div>
@@ -721,8 +669,8 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                       <span className="text-slate-500 flex items-center gap-1">
                         Industry benchmark <HelpCircle className="w-3 h-3 text-slate-400" />
                       </span>
-                      <span className="font-bold text-slate-800 dark:text-slate-200">
-                        {creator.medianViewsBenchmark || formatNumber(Math.round((creator.avgViews || 35000) * 0.85))}
+                      <span className={`font-bold ${creator.medianViewsBenchmark ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400 italic font-normal'}`}>
+                        {creator.medianViewsBenchmark || EMPTY}
                       </span>
                     </div>
                   </div>
@@ -732,16 +680,16 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                     <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
                       6-second video views <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
                     </span>
-                    <p className="text-3xl font-black text-slate-900 dark:text-white">
-                      {creator.sixSecondViewRate || '28.4%'}
+                    <p className={`text-3xl font-black ${creator.sixSecondViewRate ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                      {creator.sixSecondViewRate || EMPTY}
                     </p>
 
                     <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center text-xs">
                       <span className="text-slate-500 flex items-center gap-1">
                         Industry benchmark <HelpCircle className="w-3 h-3 text-slate-400" />
                       </span>
-                      <span className="font-bold text-slate-800 dark:text-slate-200">
-                        {creator.sixSecondViewRateBenchmark || '25.0%'}
+                      <span className={`font-bold ${creator.sixSecondViewRateBenchmark ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400 italic font-normal'}`}>
+                        {creator.sixSecondViewRateBenchmark || EMPTY}
                       </span>
                     </div>
                   </div>
@@ -751,16 +699,16 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                     <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
                       Engagement rate <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
                     </span>
-                    <p className="text-3xl font-black text-slate-900 dark:text-white">
-                      {creator.engagementRate}%
+                    <p className={`text-3xl font-black ${creator.engagementRate !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                      {creator.engagementRate !== undefined ? `${creator.engagementRate}%` : EMPTY}
                     </p>
 
                     <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center text-xs">
                       <span className="text-slate-500 flex items-center gap-1">
                         Industry benchmark <HelpCircle className="w-3 h-3 text-slate-400" />
                       </span>
-                      <span className="font-bold text-slate-800 dark:text-slate-200">
-                        {creator.engagementRateBenchmark || '4.5%'}
+                      <span className={`font-bold ${creator.engagementRateBenchmark ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400 italic font-normal'}`}>
+                        {creator.engagementRateBenchmark || EMPTY}
                       </span>
                     </div>
                   </div>
@@ -822,33 +770,41 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
 
                 {/* Bar Chart */}
                 <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-4">
-                  <div className="h-72 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={trendBarData}>
-                        <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} />
-                        <YAxis stroke="#94a3b8" fontSize={11} tickFormatter={v => `${(v / 1000).toFixed(0)}K`} />
-                        <Tooltip
-                          formatter={(val: any) => [`${(Number(val) / 1000).toFixed(1)}K`, 'Views']}
-                          contentStyle={{ borderRadius: '12px', fontSize: '12px' }}
-                        />
-                        <Bar dataKey="branded" stackId="a" fill="#c084fc" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="nonBranded" stackId="a" fill="#818cf8" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="boosted" stackId="a" fill="#2dd4bf" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                  {trendBarData.length > 0 ? (
+                    <>
+                      <div className="h-72 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={trendBarData}>
+                            <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} />
+                            <YAxis stroke="#94a3b8" fontSize={11} tickFormatter={v => `${(v / 1000).toFixed(0)}K`} />
+                            <Tooltip
+                              formatter={(val: any) => [`${(Number(val) / 1000).toFixed(1)}K`, 'Views']}
+                              contentStyle={{ borderRadius: '12px', fontSize: '12px' }}
+                            />
+                            <Bar dataKey="branded" stackId="a" fill="#c084fc" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="nonBranded" stackId="a" fill="#818cf8" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="boosted" stackId="a" fill="#2dd4bf" radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
 
-                  <div className="flex flex-wrap gap-4 text-xs font-medium text-slate-600 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-purple-400" /> Branded content
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-400" /> Non-branded content
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-teal-400" /> Boosted with paid traffic
-                    </span>
-                  </div>
+                      <div className="flex flex-wrap gap-4 text-xs font-medium text-slate-600 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-purple-400" /> Branded content
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-indigo-400" /> Non-branded content
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-teal-400" /> Boosted with paid traffic
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="h-40 w-full flex items-center justify-center text-slate-400 text-xs italic">
+                      {EMPTY} — chưa cào được video nào
+                    </div>
+                  )}
                 </div>
               </section>
 
@@ -870,11 +826,16 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 </div>
 
                 {/* Video Grid */}
+                {displayVideos.length === 0 && (
+                  <div className="p-8 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-slate-400 text-xs italic">
+                    {EMPTY} — chưa cào được video nào từ TikTok
+                  </div>
+                )}
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
                   {displayVideos.map(vid => (
                     <a
                       key={vid.id}
-                      href={vid.videoUrl || creator.profileUrl || `https://www.tiktok.com/@${creator.handle.replace(/^@/, '')}`}
+                      href={vid.videoUrl || creator.profileUrl || `https://www.tiktok.com/@${(creator.handle || '').replace(/^@/, '')}`}
                       target="_blank"
                       rel="noreferrer"
                       className="group bg-white dark:bg-slate-900 rounded-2xl overflow-hidden border border-slate-200/80 dark:border-slate-800 flex flex-col shadow-xs hover:shadow-md transition-all hover:-translate-y-0.5 cursor-pointer"
@@ -930,21 +891,27 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                     <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
                       Branded videos <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
                     </span>
-                    <p className="text-3xl font-black text-slate-900 dark:text-white">0</p>
+                    <p className={`text-3xl font-black ${creator.brandedVideosCount !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                      {creator.brandedVideosCount !== undefined ? creator.brandedVideosCount : EMPTY}
+                    </p>
                   </div>
 
                   <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
                     <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
                       Industry covered <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
                     </span>
-                    <p className="text-3xl font-black text-slate-900 dark:text-white">0</p>
+                    <p className={`text-3xl font-black ${creator.industryCoveredCount !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                      {creator.industryCoveredCount !== undefined ? creator.industryCoveredCount : EMPTY}
+                    </p>
                   </div>
 
                   <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
                     <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
                       Response rate <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
                     </span>
-                    <p className="text-3xl font-black text-slate-900 dark:text-white">--</p>
+                    <p className={`text-3xl font-black ${creator.responseRate ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                      {creator.responseRate || EMPTY}
+                    </p>
                   </div>
                 </div>
               </section>
@@ -993,341 +960,107 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                   {/* Summary row */}
                   <div className="flex flex-wrap items-center gap-6 text-xs text-slate-500 bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800">
                     <div>
-                      Gender <strong className="text-slate-900 dark:text-white ml-1">Female ({creator.demographics?.genderFemale || 78}%)</strong>
+                      Gender{' '}
+                      <strong className="text-slate-900 dark:text-white ml-1">
+                        {creator.demographics?.genderFemale !== undefined ? `Female (${creator.demographics.genderFemale}%)` : EMPTY}
+                      </strong>
                     </div>
                     <div className="h-3 w-px bg-slate-300 dark:bg-slate-700" />
                     <div>
-                      Top Age <strong className="text-slate-900 dark:text-white ml-1">{creator.demographics?.topAgeGroup || '18-24'}</strong>
-                    </div>
-                    <div className="h-3 w-px bg-slate-300 dark:bg-slate-700" />
-                    <div>
-                      Follower Reach Ratio <strong className="text-slate-900 dark:text-white ml-1">24.34%</strong>
+                      Top Age <strong className="text-slate-900 dark:text-white ml-1">{creator.demographics?.topAgeGroup || EMPTY}</strong>
                     </div>
                     <div className="h-3 w-px bg-slate-300 dark:bg-slate-700" />
                     <div>
                       Top country or region{' '}
-                      <strong className="text-slate-900 dark:text-white ml-1">{creator.demographics?.topCountry || creator.country || 'Vietnam'}</strong>
+                      <strong className="text-slate-900 dark:text-white ml-1">{creator.demographics?.topCountry || creator.country || EMPTY}</strong>
                     </div>
                   </div>
                 </div>
 
-                {/* 4 Donut Charts Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Gender */}
-                  <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3">
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">Gender</h4>
-                    <div className="h-48 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={genderData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={45}
-                            outerRadius={70}
-                            paddingAngle={3}
-                            dataKey="value"
-                          >
-                            {genderData.map((_, index) => (
-                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip formatter={val => `${val}%`} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className="flex justify-center gap-4 text-xs font-medium text-slate-500">
-                      {genderData.map((g, i) => (
-                        <span key={g.name} className="flex items-center gap-1">
-                          <span
-                            className="w-2.5 h-2.5 rounded-full"
-                            style={{ backgroundColor: COLORS[i % COLORS.length] }}
-                          />
-                          {g.name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Age */}
-                  <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3">
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1">
-                      Age <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-                    </h4>
-                    <div className="h-48 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={ageData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={45}
-                            outerRadius={70}
-                            paddingAngle={3}
-                            dataKey="value"
-                          >
-                            {ageData.map((_, index) => (
-                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip formatter={val => `${val}%`} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className="flex justify-center flex-wrap gap-3 text-xs font-medium text-slate-500">
-                      {ageData.map((a, i) => (
-                        <span key={a.name} className="flex items-center gap-1">
-                          <span
-                            className="w-2.5 h-2.5 rounded-full"
-                            style={{ backgroundColor: COLORS[i % COLORS.length] }}
-                          />
-                          {a.name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Creator's followers ratio */}
-                  <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3">
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1">
-                      Creator's followers <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-                    </h4>
-                    <div className="h-48 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={followerRatioData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={45}
-                            outerRadius={70}
-                            paddingAngle={3}
-                            dataKey="value"
-                          >
-                            {followerRatioData.map((_, index) => (
-                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip formatter={val => `${val}%`} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className="flex justify-center gap-4 text-xs font-medium text-slate-500">
-                      {followerRatioData.map((f, i) => (
-                        <span key={f.name} className="flex items-center gap-1">
-                          <span
-                            className="w-2.5 h-2.5 rounded-full"
-                            style={{ backgroundColor: COLORS[i % COLORS.length] }}
-                          />
-                          {f.name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Device */}
-                  <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3">
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">Device</h4>
-                    <div className="h-48 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={deviceData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={45}
-                            outerRadius={70}
-                            paddingAngle={3}
-                            dataKey="value"
-                          >
-                            {deviceData.map((_, index) => (
-                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip formatter={val => `${val}%`} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div className="flex justify-center flex-wrap gap-3 text-xs font-medium text-slate-500">
-                      {deviceData.map((d, i) => (
-                        <span key={d.name} className="flex items-center gap-1">
-                          <span
-                            className="w-2.5 h-2.5 rounded-full"
-                            style={{ backgroundColor: COLORS[i % COLORS.length] }}
-                          />
-                          {d.name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Top country or region section */}
-                <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-4">
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1">
-                    Top country or region <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-                  </h4>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-                    <div className="flex items-center justify-center p-4 bg-indigo-50/40 dark:bg-indigo-950/20 rounded-xl">
-                      <Globe className="w-36 h-36 text-indigo-300 dark:text-indigo-700 animate-pulse" />
-                    </div>
-
-                    <div className="space-y-3">
-                      <h5 className="text-xs font-bold text-slate-500">Top 5 countries or regions</h5>
-
-                      <div className="space-y-2 text-xs">
-                        {creator.country === 'Vietnam' || creator.demographics?.topCountry === 'Vietnam' ? (
-                          <>
-                            <div>
-                              <div className="flex justify-between font-medium mb-1">
-                                <span>Vietnam 🇻🇳</span>
-                                <span className="font-bold">82.50%</span>
-                              </div>
-                              <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                                <div className="bg-emerald-500 h-full rounded-full" style={{ width: '82.5%' }} />
-                              </div>
-                            </div>
-                            <div>
-                              <div className="flex justify-between font-medium mb-1">
-                                <span>United States</span>
-                                <span className="font-bold">8.20%</span>
-                              </div>
-                              <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                                <div className="bg-indigo-500 h-full rounded-full" style={{ width: '8.2%' }} />
-                              </div>
-                            </div>
-                            <div>
-                              <div className="flex justify-between font-medium mb-1">
-                                <span>Japan</span>
-                                <span className="font-bold">4.10%</span>
-                              </div>
-                              <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                                <div className="bg-indigo-500 h-full rounded-full" style={{ width: '4.1%' }} />
-                              </div>
-                            </div>
-                            <div>
-                              <div className="flex justify-between font-medium mb-1">
-                                <span>Korea</span>
-                                <span className="font-bold">3.10%</span>
-                              </div>
-                              <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                                <div className="bg-indigo-500 h-full rounded-full" style={{ width: '3.1%' }} />
-                              </div>
-                            </div>
-                            <div>
-                              <div className="flex justify-between font-medium mb-1">
-                                <span>Thailand</span>
-                                <span className="font-bold">2.10%</span>
-                              </div>
-                              <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                                <div className="bg-indigo-500 h-full rounded-full" style={{ width: '2.1%' }} />
-                              </div>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div>
-                              <div className="flex justify-between font-medium mb-1">
-                                <span>United States of America 🇺🇸</span>
-                                <span className="font-bold">78.60%</span>
-                              </div>
-                              <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                                <div className="bg-indigo-500 h-full rounded-full" style={{ width: '78.6%' }} />
-                              </div>
-                            </div>
-                            <div>
-                              <div className="flex justify-between font-medium mb-1">
-                                <span>United Kingdom 🇬🇧</span>
-                                <span className="font-bold">9.66%</span>
-                              </div>
-                              <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                                <div className="bg-indigo-500 h-full rounded-full" style={{ width: '9.66%' }} />
-                              </div>
-                            </div>
-                            <div>
-                              <div className="flex justify-between font-medium mb-1">
-                                <span>Canada 🇨🇦</span>
-                                <span className="font-bold">5.80%</span>
-                              </div>
-                              <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                                <div className="bg-indigo-500 h-full rounded-full" style={{ width: '5.8%' }} />
-                              </div>
-                            </div>
-                            <div>
-                              <div className="flex justify-between font-medium mb-1">
-                                <span>Australia 🇦🇺</span>
-                                <span className="font-bold">3.20%</span>
-                              </div>
-                              <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                                <div className="bg-indigo-500 h-full rounded-full" style={{ width: '3.2%' }} />
-                              </div>
-                            </div>
-                            <div>
-                              <div className="flex justify-between font-medium mb-1">
-                                <span>Vietnam 🇻🇳</span>
-                                <span className="font-bold">2.74%</span>
-                              </div>
-                              <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                                <div className="bg-indigo-500 h-full rounded-full" style={{ width: '2.74%' }} />
-                              </div>
-                            </div>
-                          </>
-                        )}
+                {/* Donut Charts — only rendered when the scraper actually captured this demographic */}
+                {(hasGenderData || ageData.length > 0) ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {hasGenderData && (
+                      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3">
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white">Gender</h4>
+                        <div className="h-48 w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={genderData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={45}
+                                outerRadius={70}
+                                paddingAngle={3}
+                                dataKey="value"
+                              >
+                                {genderData.map((_, index) => (
+                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                ))}
+                              </Pie>
+                              <Tooltip formatter={val => `${val}%`} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <div className="flex justify-center gap-4 text-xs font-medium text-slate-500">
+                          {genderData.map((g, i) => (
+                            <span key={g.name} className="flex items-center gap-1">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full"
+                                style={{ backgroundColor: COLORS[i % COLORS.length] }}
+                              />
+                              {g.name}
+                            </span>
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
+
+                    {ageData.length > 0 && (
+                      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3">
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1">
+                          Age <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
+                        </h4>
+                        <div className="h-48 w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={ageData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={45}
+                                outerRadius={70}
+                                paddingAngle={3}
+                                dataKey="value"
+                              >
+                                {ageData.map((_, index) => (
+                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                ))}
+                              </Pie>
+                              <Tooltip formatter={val => `${val}%`} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <div className="flex justify-center flex-wrap gap-3 text-xs font-medium text-slate-500">
+                          {ageData.map((a, i) => (
+                            <span key={a.name} className="flex items-center gap-1">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full"
+                                style={{ backgroundColor: COLORS[i % COLORS.length] }}
+                              />
+                              {a.name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-
-                {/* Follower Trend Line Chart */}
-                <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-4">
-                  <div className="flex justify-between items-center">
-                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">Follower trend</h4>
-
-                    <div className="flex items-center bg-slate-200/60 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold">
-                      <button
-                        onClick={() => setFollowerTrendType('count')}
-                        className={`px-3 py-1 rounded-lg transition-colors ${
-                          followerTrendType === 'count'
-                            ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                            : 'text-slate-500'
-                        }`}
-                      >
-                        Follower count
-                      </button>
-                      <button
-                        onClick={() => setFollowerTrendType('growth')}
-                        className={`px-3 py-1 rounded-lg transition-colors ${
-                          followerTrendType === 'growth'
-                            ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                            : 'text-slate-500'
-                        }`}
-                      >
-                        Follower growth rate
-                      </button>
-                    </div>
+                ) : (
+                  <div className="p-8 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-slate-400 text-xs italic">
+                    {EMPTY} — TikTok One chưa trả về audience demographics cho creator này
                   </div>
-
-                  <div className="text-xs text-indigo-600 font-semibold">Average: {formatNumber(avgFollowerVal)}</div>
-
-                  <div className="h-60 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={followerLineData}>
-                        <XAxis dataKey="day" hide />
-                        <YAxis hide domain={['auto', 'auto']} />
-                        <Tooltip formatter={(val: any) => [formatNumber(Number(val)), 'Followers']} />
-                        <ReferenceLine y={avgFollowerVal} stroke="#818cf8" strokeDasharray="3 3" />
-                        <Line
-                          type="monotone"
-                          dataKey="followers"
-                          stroke="#818cf8"
-                          strokeWidth={3}
-                          dot={false}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
+                )}
               </section>
 
               {/* SECTION 7: INTERNAL NOTES & CRM LOGS */}

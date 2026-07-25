@@ -1,27 +1,19 @@
 import React, { useState } from 'react';
 import {
   Send,
-  MessageSquare,
   Sparkles,
-  Search,
-  Filter,
   Kanban,
   Inbox,
   Clock,
-  CheckCircle2,
-  AlertCircle,
-  Plus,
   RefreshCw,
-  Mail,
-  UserCheck,
-  Bot
+  Mail
 } from 'lucide-react';
 import {
   Creator,
+  CreatorStatus,
   Campaign,
   OutreachEmail,
-  Conversation,
-  Message
+  Conversation
 } from '../../types';
 
 interface OutreachViewProps {
@@ -31,7 +23,7 @@ interface OutreachViewProps {
   conversations: Conversation[];
   onOpenEmailComposer: (cr: Creator) => void;
   onSendReply: (convId: string, content: string, isAiGenerated?: boolean) => void;
-  onUpdateCreatorStatus: (creatorId: string, status: any) => void;
+  onUpdateCreatorStatus: (creatorId: string, status: CreatorStatus) => void;
 }
 
 export const OutreachView: React.FC<OutreachViewProps> = ({
@@ -59,8 +51,8 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
   ];
 
   const currentConv = conversations.find(c => c.id === selectedConvId) || conversations[0];
-  const currentCreator = creators.find(c => c.id === currentConv?.creatorId) || creators[0];
-  const currentCampaign = campaigns.find(c => c.id === currentConv?.campaignId) || campaigns[0];
+  const currentCreator = creators.find(c => c.id === currentConv?.creatorId);
+  const currentCampaign = campaigns.find(c => c.id === currentConv?.campaignId);
 
   const handleGenerateAiReply = async () => {
     if (!currentConv || !currentCreator) return;
@@ -188,13 +180,15 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
                             </span>
                             <span className="text-[11px] text-slate-400 truncate">@{cr.handle}</span>
                           </div>
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
-                            Score {cr.brandFitScore}
-                          </span>
+                          {cr.brandFitScore !== undefined && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
+                              Score {cr.brandFitScore}
+                            </span>
+                          )}
                         </div>
 
                         <div className="text-[11px] text-slate-500 line-clamp-1">
-                          Category: <strong className="text-slate-700 dark:text-slate-300">{cr.category}</strong>
+                          Category: <strong className="text-slate-700 dark:text-slate-300">{cr.category || '—'}</strong>
                         </div>
 
                         {/* Move Stage dropdown */}
@@ -208,12 +202,12 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
 
                           <select
                             value={cr.status}
-                            onChange={e => onUpdateCreatorStatus(cr.id, e.target.value)}
+                            onChange={e => onUpdateCreatorStatus(cr.id, e.target.value as CreatorStatus)}
                             className="text-[10px] py-1 px-1.5 border border-slate-200 dark:border-slate-700 rounded bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-medium"
                           >
                             {pipelineStages.map(s => (
                               <option key={s.status} value={s.status}>
-                                Move: {s.label}
+                                {s.status === cr.status ? s.label : `Move: ${s.label}`}
                               </option>
                             ))}
                           </select>
@@ -262,7 +256,7 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
                       </span>
                     </div>
                     <p className="text-slate-600 dark:text-slate-300 truncate font-medium">
-                      {c.messages[c.messages.length - 1]?.content}
+                      {c.messages[c.messages.length - 1]?.content || <span className="italic text-slate-400">No messages yet</span>}
                     </p>
                     <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">
                       {c.status}

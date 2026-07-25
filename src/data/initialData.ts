@@ -22,7 +22,7 @@ export const INITIAL_WORKSPACES: Workspace[] = [
     description: 'Master Agency Dashboard consolidating all brand affiliate rosters, commissions & lead pools',
     isAgency: true,
     memberCount: 12,
-    creatorCount: 6,
+    creatorCount: 0,
     activeCampaignCount: 3
   },
   {
@@ -34,7 +34,7 @@ export const INITIAL_WORKSPACES: Workspace[] = [
     color: 'indigo',
     description: "Official TikTok Shop Affiliate Hub for d'Alba First Spray Serum & Tone-Up Sunscreens",
     memberCount: 6,
-    creatorCount: 4,
+    creatorCount: 0,
     activeCampaignCount: 2
   },
   {
@@ -46,344 +46,12 @@ export const INITIAL_WORKSPACES: Workspace[] = [
     color: 'rose',
     description: 'Affiliate Recruitment & Content Approval Portal for 2aN Tension Cushions & Lip Tints',
     memberCount: 4,
-    creatorCount: 2,
+    creatorCount: 0,
     activeCampaignCount: 1
   }
 ];
 
-export const INITIAL_CREATORS: Creator[] = [
-  {
-    id: 'cr-1',
-    workspaceId: 'ws-dalba',
-    handle: 'callme.duy',
-    displayName: 'Call Me Duy',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200',
-    platform: 'TikTok',
-    country: 'Vietnam',
-    language: 'Vietnamese',
-    bio: 'Skincare chemist & honest beauty reviews. 🌿 TikTok Shop Top Creator.',
-    profileUrl: 'https://tiktok.com/@callme.duy',
-    tiktokOneId: '6839848354256519173',
-    followers: 650000,
-    avgViews: 125000,
-    engagementRate: 5.8,
-    category: 'Beauty & Skincare',
-    niche: ['K-Beauty', 'Skincare Routine', 'Ingredient Review', 'ACNE Care'],
-    brandFitScore: 92,
-    commercialScore: 88,
-    riskScore: 15,
-    status: 'Approved',
-    owner: 'Anh Tuan',
-    email: 'duy.callme.contact@gmail.com',
-    phone: '+84901234567',
-    rateCard: '$450 / TikTok Video + 12% Affiliate Commission',
-    campaignId: 'cmp-1',
-    campaignName: "d'Alba Sunscreen Viral Launch",
-    lastContactAt: '2026-07-22T14:30:00Z',
-    createdAt: '2026-07-10T08:00:00Z',
-    tags: ['Top Performer', 'Skincare Expert', 'Verified Seller'],
-    notes: [
-      { id: 'n1', author: 'Anh Tuan', content: 'Responds best on Zalo/Email. Loves ingredient breakdowns. High conversion on d\'Alba Tone-up Sunscreen.', createdAt: '2026-07-12T10:00:00Z' }
-    ],
-    followerGrowthRate: '+2.45%',
-    postingFrequency30d: 22,
-    scores: {
-      overall: 89.2,
-      broadcasting: 92,
-      diligence: 88,
-      commercial: 85,
-      creativity: 91
-    },
-    demographics: {
-      genderFemale: 78,
-      genderMale: 22,
-      topAgeGroup: '18-24',
-      topCountry: 'Vietnam'
-    },
-    recentVideos: [
-      {
-        id: 'v1',
-        title: 'Review thành phần Kem chống nắng d\'Alba Waterfull Essence: Đáng tiền không?',
-        views: '342.5K',
-        thumb: 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&q=80&w=300',
-        date: '2026-07-20',
-        isBranded: true,
-        videoUrl: 'https://www.tiktok.com/@callme.duy/video/725891029381293'
-      },
-      {
-        id: 'v2',
-        title: 'Quy trình dưỡng da căng bóng Glass Skin ban đêm chuẩn Hàn Quốc',
-        views: '189.2K',
-        thumb: 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?auto=format&fit=crop&q=80&w=300',
-        date: '2026-07-18',
-        isBranded: false,
-        videoUrl: 'https://www.tiktok.com/@callme.duy/video/725881029381294'
-      },
-      {
-        id: 'v3',
-        title: 'Top 3 Xịt khoáng Serum cấp ẩm tức thì cho dân văn phòng điều hòa',
-        views: '215.8K',
-        thumb: 'https://images.unsplash.com/photo-1608248597261-e4d990f30509?auto=format&fit=crop&q=80&w=300',
-        date: '2026-07-15',
-        isBranded: true,
-        videoUrl: 'https://www.tiktok.com/@callme.duy/video/725871029381295'
-      },
-      {
-        id: 'v4',
-        title: 'Sai lầm phổ biến khiến da lên mụn ẩn khi dùng kem chống nắng',
-        views: '145.0K',
-        thumb: 'https://images.unsplash.com/photo-1512290900676-26c2a6a095ae?auto=format&fit=crop&q=80&w=300',
-        date: '2026-07-11',
-        isBranded: false,
-        videoUrl: 'https://www.tiktok.com/@callme.duy/video/725861029381296'
-      },
-      {
-        id: 'v5',
-        title: 'Góc bóc phốt các loại Serum HA thần thánh trên TikTok Shop',
-        views: '412.0K',
-        thumb: 'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?auto=format&fit=crop&q=80&w=300',
-        date: '2026-07-08',
-        isBranded: false,
-        videoUrl: 'https://www.tiktok.com/@callme.duy/video/725851029381297'
-      }
-    ]
-  },
-  {
-    id: 'cr-2',
-    workspaceId: 'ws-2an',
-    handle: 'goccuareview',
-    displayName: 'Góc Của Review',
-    avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&q=80&w=200',
-    platform: 'TikTok',
-    country: 'Vietnam',
-    language: 'Vietnamese',
-    bio: 'Review chân thật mỹ phẩm & makeup Hottrend | TikTok Shop Affiliate 🛍️',
-    profileUrl: 'https://tiktok.com/@goccuareview',
-    tiktokOneId: '7102938472918239012',
-    followers: 420000,
-    avgViews: 85000,
-    engagementRate: 4.5,
-    category: 'Makeup & Beauty',
-    niche: ['Cushion Review', 'Lips Swatch', 'GRWM', '2aN Cosmetics'],
-    brandFitScore: 88,
-    commercialScore: 91,
-    riskScore: 10,
-    status: 'Draft Submitted',
-    owner: 'Tu Quynh',
-    email: 'goccuareview.booking@gmail.com',
-    rateCard: '$300 / Video + 15% Commission',
-    campaignId: 'cmp-2',
-    campaignName: '2aN Gleaming Cushion Blast',
-    lastContactAt: '2026-07-23T09:15:00Z',
-    createdAt: '2026-07-11T09:00:00Z',
-    tags: ['Makeup Specialist', 'High Conversion', 'Fast Turnaround'],
-    notes: [
-      { id: 'n2', author: 'Tu Quynh', content: 'Draft submitted today. Video quality is sharp with good swatch closeups.', createdAt: '2026-07-23T09:20:00Z' }
-    ],
-    followerGrowthRate: '+1.80%',
-    postingFrequency30d: 18,
-    scores: {
-      overall: 84.5,
-      broadcasting: 87,
-      diligence: 90,
-      commercial: 89,
-      creativity: 82
-    },
-    demographics: {
-      genderFemale: 85,
-      genderMale: 15,
-      topAgeGroup: '18-24',
-      topCountry: 'Vietnam'
-    },
-    recentVideos: [
-      {
-        id: 'v21',
-        title: 'Test Cushion 2aN Gleaming #21 Light Beige xem có bị xuống tone không?',
-        views: '128.4K',
-        thumb: 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?auto=format&fit=crop&q=80&w=300',
-        date: '2026-07-22',
-        isBranded: true,
-        videoUrl: 'https://www.tiktok.com/@goccuareview/video/729102938102391'
-      },
-      {
-        id: 'v22',
-        title: 'Swatches trọn bộ Son Tint Bóng tone hồng đất cực sang cho nữ sinh',
-        views: '95.6K',
-        thumb: 'https://images.unsplash.com/photo-1586495777744-4413f21062fa?auto=format&fit=crop&q=80&w=300',
-        date: '2026-07-19',
-        isBranded: false,
-        videoUrl: 'https://www.tiktok.com/@goccuareview/video/729102938102392'
-      },
-      {
-        id: 'v23',
-        title: 'GRWM trang điểm đi học sương sương dưới 10 phút cực xinh',
-        views: '164.0K',
-        thumb: 'https://images.unsplash.com/photo-1512496015851-a90fb38ba796?auto=format&fit=crop&q=80&w=300',
-        date: '2026-07-16',
-        isBranded: true,
-        videoUrl: 'https://www.tiktok.com/@goccuareview/video/729102938102393'
-      }
-    ]
-  },
-  {
-    id: 'cr-3',
-    workspaceId: 'ws-dalba',
-    handle: 'trinhpham.beauty',
-    displayName: 'Trinh Phạm',
-    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=200',
-    platform: 'TikTok',
-    country: 'Vietnam',
-    language: 'Vietnamese',
-    bio: 'Beauty, Mom & Lifestyle tips! Sharing authentic daily favs.',
-    profileUrl: 'https://tiktok.com/@trinhpham.beauty',
-    tiktokOneId: '6982019382109283712',
-    followers: 890000,
-    avgViews: 210000,
-    engagementRate: 6.1,
-    category: 'Beauty & Lifestyle',
-    niche: ['Mom Life', 'Daily Vlogs', 'Sunscreen Comparison', 'High-end Beauty'],
-    brandFitScore: 95,
-    commercialScore: 94,
-    riskScore: 8,
-    status: 'Negotiating',
-    owner: 'Anh Tuan',
-    email: 'trinhpham.partner@gmail.com',
-    rateCard: '$800 / Video',
-    campaignId: 'cmp-1',
-    campaignName: "d'Alba Sunscreen Viral Launch",
-    lastContactAt: '2026-07-23T11:00:00Z',
-    createdAt: '2026-07-05T10:00:00Z',
-    tags: ['Tier 1 Creator', 'High Trust', 'Brand Ambassador Candidate'],
-    notes: [
-      { id: 'n3', author: 'Anh Tuan', content: 'Requested fee $700 instead of $800 if we commit 3-video package.', createdAt: '2026-07-23T11:05:00Z' }
-    ],
-    followerGrowthRate: '+3.12%',
-    postingFrequency30d: 25,
-    scores: {
-      overall: 94.0,
-      broadcasting: 96,
-      diligence: 92,
-      commercial: 95,
-      creativity: 93
-    },
-    demographics: {
-      genderFemale: 88,
-      genderMale: 12,
-      topAgeGroup: '25-34',
-      topCountry: 'Vietnam'
-    },
-    recentVideos: [
-      {
-        id: 'v31',
-        title: 'Chăm sóc da mẹ bỉm cùng xịt khoáng d\'Alba First Spray Serum cao cấp',
-        views: '482.0K',
-        thumb: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=300',
-        date: '2026-07-21',
-        isBranded: true,
-        videoUrl: 'https://www.tiktok.com/@trinhpham.beauty/video/730192837192831'
-      }
-    ]
-  },
-  {
-    id: 'cr-4',
-    workspaceId: 'ws-dalba',
-    handle: 'glowskin_katie',
-    displayName: 'Katie Glows',
-    avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&q=80&w=200',
-    platform: 'TikTok',
-    country: 'United States',
-    language: 'English',
-    bio: 'Glass skin secrets & Korean Skincare routine obsessed ✨ US TikTok Shop Creator',
-    profileUrl: 'https://tiktok.com/@glowskin_katie',
-    tiktokOneId: '7029381920391823019',
-    followers: 185000,
-    avgViews: 45000,
-    engagementRate: 4.8,
-    category: 'Skincare',
-    niche: ['Glass Skin', 'dAlba Serum', 'K-beauty US', 'Night Routine'],
-    brandFitScore: 85,
-    commercialScore: 82,
-    riskScore: 12,
-    status: 'Contacted',
-    owner: 'Tu Quynh',
-    email: 'katie.glowskin@yahoo.com',
-    campaignId: 'cmp-1',
-    campaignName: "d'Alba Sunscreen Viral Launch",
-    lastContactAt: '2026-07-21T16:00:00Z',
-    createdAt: '2026-07-15T12:00:00Z',
-    tags: ['US Market', 'Micro-influencer', 'Glass Skin Aesthetic'],
-    notes: [],
-    followerGrowthRate: '+1.15%',
-    postingFrequency30d: 14,
-    scores: {
-      overall: 82.0,
-      broadcasting: 84,
-      diligence: 80,
-      commercial: 81,
-      creativity: 83
-    },
-    demographics: {
-      genderFemale: 81,
-      genderMale: 19,
-      topAgeGroup: '18-24',
-      topCountry: 'United States'
-    }
-  },
-  {
-    id: 'cr-5',
-    workspaceId: 'ws-2an',
-    handle: 'haile_beauty',
-    displayName: 'Hà Lê Beauty',
-    avatar: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?auto=format&fit=crop&q=80&w=200',
-    platform: 'TikTok',
-    country: 'Vietnam',
-    language: 'Vietnamese',
-    bio: 'Mẹo trang điểm tự nhiên | Son & Cushion Hàn Quốc hót hòn họt 🌸',
-    profileUrl: 'https://tiktok.com/@haile_beauty',
-    tiktokOneId: '6910293847281920391',
-    followers: 310000,
-    avgViews: 68000,
-    engagementRate: 5.1,
-    category: 'Makeup',
-    niche: ['Natural Makeup', 'Korean Cushion', 'Student Budget'],
-    brandFitScore: 89,
-    commercialScore: 86,
-    riskScore: 14,
-    status: 'Qualified',
-    owner: 'Anh Tuan',
-    email: 'haile.makeup.booking@gmail.com',
-    createdAt: '2026-07-18T14:00:00Z',
-    tags: ['Gen Z', 'Affordable Beauty', 'K-beauty'],
-    notes: []
-  },
-  {
-    id: 'cr-6',
-    workspaceId: 'ws-pickdi',
-    handle: 'meoskin_review',
-    displayName: 'Mèo Skincare',
-    avatar: 'https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?auto=format&fit=crop&q=80&w=200',
-    platform: 'TikTok',
-    country: 'Vietnam',
-    language: 'Vietnamese',
-    bio: 'Chăm da chuẩn y khoa & test mỹ phẩm thực tế 🐈',
-    profileUrl: 'https://tiktok.com/@meoskin_review',
-    tiktokOneId: '6829103948291029381',
-    followers: 120000,
-    avgViews: 32000,
-    engagementRate: 3.9,
-    category: 'Beauty & Skincare',
-    niche: ['Acne Routine', 'Sunscreen Test', 'Budget Beauty'],
-    brandFitScore: 78,
-    commercialScore: 72,
-    riskScore: 20,
-    status: 'New Lead',
-    owner: 'Tu Quynh',
-    email: 'meoskin.contact@gmail.com',
-    createdAt: '2026-07-22T10:00:00Z',
-    tags: ['New Creator', 'Dermatology Focus'],
-    notes: []
-  }
-];
+export const INITIAL_CREATORS: Creator[] = [];
 
 export const INITIAL_CAMPAIGNS: Campaign[] = [
   {
@@ -592,7 +260,7 @@ export const INITIAL_TASKS: Task[] = [
     title: 'Review draft video from Góc Của Review (2aN Cushion)',
     description: 'Check product closeups, TikTok Shop product tag link, and verbal CTA.',
     priority: 'HIGH',
-    status: 'PENDING',
+    status: 'Pending',
     dueDate: '2026-07-24',
     owner: 'Tu Quynh',
     relatedCreatorId: 'cr-2',
@@ -606,7 +274,7 @@ export const INITIAL_TASKS: Task[] = [
     title: 'Follow-up with Trinh Phạm regarding 2-video package price',
     description: 'Counter offer $1,200 for 2 videos or confirm $750 for 1 video + 15% commission.',
     priority: 'CRITICAL',
-    status: 'PENDING',
+    status: 'Pending',
     dueDate: '2026-07-24',
     owner: 'Anh Tuan',
     relatedCreatorId: 'cr-3',
@@ -620,7 +288,7 @@ export const INITIAL_TASKS: Task[] = [
     title: 'Send follow-up email #2 to Katie Glows (US)',
     description: 'Offer free sample shipment tracking via DHL.',
     priority: 'MEDIUM',
-    status: 'PENDING',
+    status: 'Pending',
     dueDate: '2026-07-25',
     owner: 'Tu Quynh',
     relatedCreatorId: 'cr-4',
@@ -632,7 +300,7 @@ export const INITIAL_TASKS: Task[] = [
     title: 'Prepare sample shipment for Hà Lê Beauty',
     description: 'Pack 2aN Tension Cushion tone #21 + Dual Cheek Blush.',
     priority: 'LOW',
-    status: 'COMPLETED',
+    status: 'Completed',
     dueDate: '2026-07-22',
     owner: 'Anh Tuan',
     relatedCreatorId: 'cr-5',

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Sparkles, Send, RefreshCw, Copy, Check, Paperclip } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, Sparkles, Send, RefreshCw } from 'lucide-react';
 import { Creator, Campaign } from '../../types';
 
 interface EmailComposerModalProps {
@@ -21,7 +21,17 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
+
+  // Reset the draft whenever a different creator is opened, since this modal stays
+  // mounted and only toggles `isOpen` — otherwise the previous creator's draft leaks through.
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedCampaignId(campaigns[0]?.id || '');
+      setSubject('');
+      setBody('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, creator?.id]);
 
   if (!isOpen || !creator) return null;
 
@@ -171,7 +181,7 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
               onClick={onClose}
               className="text-slate-500 font-medium hover:text-slate-700"
             >
-              Save as Draft
+              Cancel
             </button>
 
             <button

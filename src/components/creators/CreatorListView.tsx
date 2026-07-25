@@ -1,23 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Users,
   Search,
   Plus,
-  FileSpreadsheet,
   Download,
-  Filter,
   Sparkles,
-  MoreVertical,
   ExternalLink,
   Mail,
   Archive,
   ChevronLeft,
   ChevronRight,
-  ShieldCheck,
-  Tag,
-  Building2,
-  CheckCircle2,
-  UserPlus,
   Zap
 } from 'lucide-react';
 import { Creator, Campaign, Workspace } from '../../types';
@@ -87,9 +79,9 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
       const matchQuery =
         c.displayName.toLowerCase().includes(q) ||
         c.handle.toLowerCase().includes(q) ||
-        c.category.toLowerCase().includes(q) ||
-        c.niche.some(n => n.toLowerCase().includes(q)) ||
-        c.email.toLowerCase().includes(q);
+        (c.category || '').toLowerCase().includes(q) ||
+        (c.niche || []).some(n => n.toLowerCase().includes(q)) ||
+        (c.email || '').toLowerCase().includes(q);
       if (!matchQuery) return false;
     }
 
@@ -100,6 +92,17 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
 
     return true;
   });
+
+  // Drop selections that fell out of view (e.g. filter changed) so bulk actions
+  // never silently apply to creators no longer visible in the table.
+  useEffect(() => {
+    setSelectedIds(prev => {
+      const visibleIds = new Set(filteredCreators.map(c => c.id));
+      const next = prev.filter(id => visibleIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredCreators]);
 
   const toggleSelectAll = () => {
     if (selectedIds.length === filteredCreators.length) {
@@ -117,6 +120,11 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     }
   };
 
+  const csvEscape = (value: unknown) => {
+    const str = value === undefined || value === null ? '' : String(value);
+    return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+  };
+
   const handleExportCSV = () => {
     const headers = ['Handle', 'Name', 'Category', 'Followers', 'AvgViews', 'ER%', 'BrandFitScore', 'Status', 'Email'];
     const rows = filteredCreators.map(c => [
@@ -130,17 +138,20 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
       c.status,
       c.email
     ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = [headers, ...rows].map(row => row.map(csvEscape).join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
+    link.setAttribute('href', url);
     link.setAttribute('download', `tiktok_creators_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
-  const formatNumber = (num: number) => {
+  const formatNumber = (num?: number | null) => {
+    if (num === undefined || num === null || isNaN(num)) return '—';
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
     if (num >= 1000) return (num / 1000).toFixed(0) + 'K';
     return num.toString();
@@ -453,10 +464,10 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                       <td className="py-3.5 px-4">
                         <div className="flex flex-col gap-1">
                           <span className="font-medium text-slate-800 dark:text-slate-200">
-                            {cr.category}
+                            {cr.category || <span className="text-slate-400 italic font-normal">—</span>}
                           </span>
                           <div className="flex flex-wrap gap-1">
-                            {cr.niche.slice(0, 2).map((n, i) => (
+                            {(cr.niche || []).slice(0, 2).map((n, i) => (
                               <span
                                 key={i}
                                 className="px-1.5 py-0.5 text-[10px] rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
@@ -480,23 +491,27 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
 
                       {/* ER % */}
                       <td className="py-3.5 px-4 text-center font-bold text-emerald-600 dark:text-emerald-400">
-                        {cr.engagementRate}%
+                        {cr.engagementRate !== undefined ? `${cr.engagementRate}%` : '—'}
                       </td>
 
                       {/* Score Badge */}
                       <td className="py-3.5 px-4 text-center">
-                        <span
-                          className={`px-2 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1 ${
-                            cr.brandFitScore >= 90
-                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                              : cr.brandFitScore >= 80
-                              ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}
-                        >
-                          <Sparkles className="w-3 h-3" />
-                          {cr.brandFitScore}
-                        </span>
+                        {cr.brandFitScore !== undefined ? (
+                          <span
+                            className={`px-2 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1 ${
+                              cr.brandFitScore >= 90
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                : cr.brandFitScore >= 80
+                                ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
+                                : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                            }`}
+                          >
+                            <Sparkles className="w-3 h-3" />
+                            {cr.brandFitScore}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 text-xs italic">—</span>
+                        )}
                       </td>
 
                       {/* Brand / Workspace */}

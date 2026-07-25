@@ -28,6 +28,7 @@ import { SettingsView } from './components/settings/SettingsView';
 
 import {
   Creator,
+  CreatorStatus,
   Campaign,
   OutreachEmail,
   Conversation,
@@ -78,7 +79,7 @@ export function App() {
   const [campaigns, setCampaigns] = useState<Campaign[]>(INITIAL_CAMPAIGNS);
   const [outreachList, setOutreachList] = useState<OutreachEmail[]>(INITIAL_OUTREACH);
   const [conversations, setConversations] = useState<Conversation[]>(INITIAL_CONVERSATIONS);
-  const [reviews, setReviews] = useState<DraftReview[]>(INITIAL_REVIEWS as any);
+  const [reviews, setReviews] = useState<DraftReview[]>(INITIAL_REVIEWS);
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
   const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
   const [activities, setActivities] = useState<ActivityItem[]>(INITIAL_ACTIVITIES);
@@ -104,12 +105,15 @@ export function App() {
   const displayActivities = showMockData ? activities : activities.filter(a => !isItemMock(a));
 
   // Filter Data according to active workspace
-  const workspaceCreators = displayCreators.filter(c => isAgencyWorkspace || !c.workspaceId || c.workspaceId === activeWorkspaceId || c.workspaceId === 'ws-pickdi');
-  const workspaceCampaigns = displayCampaigns.filter(cmp => isAgencyWorkspace || cmp.workspaceId === activeWorkspaceId || !cmp.workspaceId);
-  const workspaceOutreach = displayOutreach.filter(o => isAgencyWorkspace || o.workspaceId === activeWorkspaceId || !o.workspaceId);
-  const workspaceConversations = displayConversations.filter(c => isAgencyWorkspace || c.workspaceId === activeWorkspaceId || !c.workspaceId);
-  const workspaceReviews = displayReviews.filter(r => isAgencyWorkspace || r.workspaceId === activeWorkspaceId || !r.workspaceId);
-  const workspaceTasks = displayTasks.filter(t => isAgencyWorkspace || t.workspaceId === activeWorkspaceId || !t.workspaceId);
+  const inActiveWorkspace = (workspaceId?: string) =>
+    isAgencyWorkspace || !workspaceId || workspaceId === activeWorkspaceId || workspaceId === 'ws-pickdi';
+
+  const workspaceCreators = displayCreators.filter(c => inActiveWorkspace(c.workspaceId));
+  const workspaceCampaigns = displayCampaigns.filter(cmp => inActiveWorkspace(cmp.workspaceId));
+  const workspaceOutreach = displayOutreach.filter(o => inActiveWorkspace(o.workspaceId));
+  const workspaceConversations = displayConversations.filter(c => inActiveWorkspace(c.workspaceId));
+  const workspaceReviews = displayReviews.filter(r => inActiveWorkspace(r.workspaceId));
+  const workspaceTasks = displayTasks.filter(t => inActiveWorkspace(t.workspaceId));
 
   // Modals & Drawers state
   const [isAiDrawerOpen, setIsAiDrawerOpen] = useState(false);
@@ -197,7 +201,7 @@ export function App() {
   // Calculated Dashboard KPIs
   const kpis: DashboardKPIs = {
     todayEmailsSent: workspaceOutreach.length,
-    todayRepliesReceived: workspaceConversations.filter(c => c.status === 'Needs Review').length,
+    todayRepliesReceived: workspaceConversations.filter(c => c.status === 'Need Reply').length,
     pendingReviewsCount: workspaceReviews.filter(r => r.status === 'Pending Review').length,
     overdueTasksCount: workspaceTasks.filter(t => t.status === 'Pending').length,
     activeCampaignsCount: workspaceCampaigns.filter(c => c.status === 'Running').length,
@@ -229,8 +233,7 @@ export function App() {
     ]);
   };
 
-  // HANDLERS
-  const handleQuickAddCreator = async (newCr: any) => {
+  const handleQuickAddCreator = async (newCr: any): Promise<boolean> => {
     try {
       const res = await fetch('/api/creators', {
         method: 'POST',
@@ -238,37 +241,26 @@ export function App() {
         body: JSON.stringify(newCr)
       });
       const data = await res.json();
-      if (data.data) {
+      if (data.success && data.data) {
         setCreators(prev => [data.data, ...prev]);
+        return true;
       }
+      throw new Error(data.message || 'Failed to save creator');
     } catch (err) {
       console.error(err);
-      const fallback: Creator = {
-        id: `cr-${Date.now()}`,
-        handle: newCr.handle,
-        displayName: newCr.displayName,
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
-        platform: 'TikTok',
-        language: 'Vietnamese',
-        bio: newCr.bio || '',
-        followers: newCr.followers,
-        avgViews: newCr.avgViews,
-        engagementRate: 4.5,
-        category: newCr.category,
-        country: newCr.country,
-        niche: [newCr.category],
-        tags: ['NewLead'],
-        brandFitScore: 88,
-        commercialScore: 82,
-        riskScore: 10,
-        status: 'New Lead',
-        owner: 'Anh Tuan',
-        email: newCr.email,
-        createdAt: new Date().toISOString(),
-        profileUrl: `https://www.tiktok.com/@${newCr.handle}`,
-        notes: newCr.notes ? [{ id: 'n1', author: 'Anh Tuan', content: newCr.notes, createdAt: new Date().toISOString() }] : []
-      };
-      setCreators(prev => [fallback, ...prev]);
+      setNotifications(prev => [
+        {
+          id: `notif-${Date.now()}`,
+          title: 'Lưu creator thất bại',
+          description: `Không thể lưu @${newCr.handle} vào CRM. Vui lòng kiểm tra kết nối và thử lại.`,
+          priority: 'HIGH',
+          category: 'System',
+          isRead: false,
+          createdAt: new Date().toISOString()
+        },
+        ...prev
+      ]);
+      return false;
     }
   };
 
@@ -343,7 +335,7 @@ export function App() {
           };
           return {
             ...c,
-            status: 'Contacted' as const,
+            status: 'Waiting Reply' as const,
             lastMessageAt: new Date().toISOString(),
             messages: [...c.messages, newMsg]
           };
@@ -394,7 +386,7 @@ export function App() {
     );
   };
 
-  const handleUpdateCreatorStatus = (creatorId: string, status: any) => {
+  const handleUpdateCreatorStatus = (creatorId: string, status: CreatorStatus) => {
     setCreators(prev =>
       prev.map(c => (c.id === creatorId ? { ...c, status } : c))
     );
@@ -418,7 +410,7 @@ export function App() {
     );
   };
 
-  const handleUpdateReviewStatus = (reviewId: string, status: any, feedback?: string) => {
+  const handleUpdateReviewStatus = (reviewId: string, status: DraftReview['status'], feedback?: string) => {
     setReviews(prev =>
       prev.map(r =>
         r.id === reviewId ? { ...r, status, feedbackNote: feedback } : r
@@ -428,34 +420,20 @@ export function App() {
   };
 
   const handleAddCreatorNote = (creatorId: string, content: string) => {
+    const newNote = {
+      id: `n-${Date.now()}`,
+      author: 'Anh Tuan',
+      content,
+      createdAt: new Date().toISOString()
+    };
+
     setCreators(prev =>
-      prev.map(c => {
-        if (c.id === creatorId) {
-          const newNote = {
-            id: `n-${Date.now()}`,
-            author: 'Anh Tuan',
-            content,
-            createdAt: new Date().toISOString()
-          };
-          return {
-            ...c,
-            notes: [newNote, ...(c.notes || [])]
-          };
-        }
-        return c;
-      })
+      prev.map(c => (c.id === creatorId ? { ...c, notes: [newNote, ...(c.notes || [])] } : c))
     );
+
     if (selectedCreatorDetail?.id === creatorId) {
       setSelectedCreatorDetail(prev =>
-        prev
-          ? {
-              ...prev,
-              notes: [
-                { id: `n-${Date.now()}`, author: 'Anh Tuan', content, createdAt: new Date().toISOString() },
-                ...(prev.notes || [])
-              ]
-            }
-          : null
+        prev ? { ...prev, notes: [newNote, ...(prev.notes || [])] } : null
       );
     }
   };
@@ -585,7 +563,12 @@ export function App() {
           )}
 
           {activeTab === 'reports' && (
-            <ReportsView creators={workspaceCreators} campaigns={workspaceCampaigns} />
+            <ReportsView
+              creators={workspaceCreators}
+              campaigns={workspaceCampaigns}
+              outreachList={workspaceOutreach}
+              conversations={workspaceConversations}
+            />
           )}
 
           {activeTab === 'settings' && (
@@ -613,7 +596,11 @@ export function App() {
         isOpen={isNotificationDrawerOpen}
         onClose={() => setIsNotificationDrawerOpen(false)}
         notifications={notifications}
-        onMarkAllAsRead={() => setNotifications(prev => prev.map(n => ({ ...n, isRead: true })))}
+        onMarkAllRead={() => setNotifications(prev => prev.map(n => ({ ...n, isRead: true })))}
+        onSelectTab={tab => {
+          setActiveTab(tab);
+          setIsNotificationDrawerOpen(false);
+        }}
       />
 
       <CommandPalette
@@ -621,11 +608,15 @@ export function App() {
         onClose={() => setIsCommandPaletteOpen(false)}
         creators={creators}
         campaigns={campaigns}
+        tasks={tasks}
         onSelectCreator={cr => {
           setSelectedCreatorDetail(cr);
           setActiveTab('creators');
         }}
+        onSelectCampaign={() => setActiveTab('campaigns')}
         onSelectTab={setActiveTab}
+        onOpenQuickAdd={() => setIsQuickAddModalOpen(true)}
+        onOpenAi={() => setIsAiDrawerOpen(true)}
       />
 
       <QuickAddCreatorModal

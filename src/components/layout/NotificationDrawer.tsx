@@ -4,10 +4,7 @@ import {
   X,
   CheckCheck,
   Filter,
-  AlertTriangle,
-  Info,
-  Clock,
-  Sparkles
+  Clock
 } from 'lucide-react';
 import { NotificationItem } from '../../types';
 

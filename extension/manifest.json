@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Pickdi TikTok One Scraper",
+  "version": "1.0.0",
+  "description": "Cào creator thật từ TikTok One / TikTok và đẩy vào Pickdi Operator CRM.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://ads.tiktok.com/*",
+    "https://www.tiktok.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.tiktok.com/*"],
+      "js": ["interceptor.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

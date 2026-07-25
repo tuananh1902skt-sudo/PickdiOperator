@@ -39,20 +39,16 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onOpenAi
 }) => {
   const [query, setQuery] = useState('');
-  const [selectedIndex, setSelectedIndex] = useState(0);
 
+  // ⌘K open/close toggling is owned by the parent (App.tsx); this only needs to
+  // handle Escape and clearing the query when the palette closes.
   useEffect(() => {
+    if (!isOpen) {
+      setQuery('');
+      return;
+    }
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        if (isOpen) onClose();
-        else {
-          setQuery('');
-          // trigger openhandled by parent
-        }
-      } else if (e.key === 'Escape' && isOpen) {
-        onClose();
-      }
+      if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -68,7 +64,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         c =>
           c.displayName.toLowerCase().includes(q) ||
           c.handle.toLowerCase().includes(q) ||
-          c.category.toLowerCase().includes(q)
+          (c.category || '').toLowerCase().includes(q)
       )
     : creators.slice(0, 3);
 

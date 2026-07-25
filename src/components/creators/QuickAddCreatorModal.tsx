@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { X, Plus, Sparkles } from 'lucide-react';
+import { X, Plus } from 'lucide-react';
 
 interface QuickAddCreatorModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (data: any) => void;
+  onSubmit: (data: any) => Promise<boolean> | void;
 }
 
 export const QuickAddCreatorModal: React.FC<QuickAddCreatorModalProps> = ({
@@ -16,31 +16,38 @@ export const QuickAddCreatorModal: React.FC<QuickAddCreatorModalProps> = ({
   const [displayName, setDisplayName] = useState('');
   const [category, setCategory] = useState('Beauty & Skincare');
   const [country, setCountry] = useState('Vietnam');
-  const [followers, setFollowers] = useState('150000');
-  const [avgViews, setAvgViews] = useState('35000');
+  const [followers, setFollowers] = useState('');
+  const [avgViews, setAvgViews] = useState('');
   const [email, setEmail] = useState('');
   const [bio, setBio] = useState('');
   const [notes, setNotes] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!handle.trim()) return;
+    if (!handle.trim() || isSaving) return;
 
-    onSubmit({
-      handle,
-      displayName: displayName || handle,
-      category,
-      country,
-      followers: Number(followers) || 100000,
-      avgViews: Number(avgViews) || 20000,
-      email: email || `${handle.replace(/^@/, '')}@gmail.com`,
-      bio,
-      notes
-    });
-
-    onClose();
+    setIsSaving(true);
+    try {
+      const result = await onSubmit({
+        handle,
+        displayName: displayName || handle,
+        category,
+        country,
+        followers: followers.trim() ? Number(followers) : undefined,
+        avgViews: avgViews.trim() ? Number(avgViews) : undefined,
+        email: email.trim() || undefined,
+        bio,
+        notes
+      });
+      // Only close on confirmed success — keep the form filled in on failure so
+      // the user doesn't lose what they typed and can retry.
+      if (result !== false) onClose();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -122,6 +129,7 @@ export const QuickAddCreatorModal: React.FC<QuickAddCreatorModalProps> = ({
               <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Followers Count</label>
               <input
                 type="number"
+                placeholder="Chưa biết — để trống"
                 value={followers}
                 onChange={e => setFollowers(e.target.value)}
                 className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
@@ -132,6 +140,7 @@ export const QuickAddCreatorModal: React.FC<QuickAddCreatorModalProps> = ({
               <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Avg Video Views</label>
               <input
                 type="number"
+                placeholder="Chưa biết — để trống"
                 value={avgViews}
                 onChange={e => setAvgViews(e.target.value)}
                 className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
@@ -171,9 +180,10 @@ export const QuickAddCreatorModal: React.FC<QuickAddCreatorModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-xs"
+              disabled={isSaving}
+              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-xs disabled:opacity-60"
             >
-              Save Creator Profile
+              {isSaving ? 'Saving...' : 'Save Creator Profile'}
             </button>
           </div>
         </form>
