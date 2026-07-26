@@ -212,6 +212,45 @@ export function App() {
   };
 
   // HANDLERS
+  const WORKSPACE_COLOR_CYCLE: Workspace['color'][] = ['indigo', 'rose', 'emerald', 'amber'];
+
+  // Workspace brand cụ thể (khác Agency) chỉ được tạo khi thật sự cần — ở đây là lúc tạo
+  // campaign mới từ view Agency mà brand đã nhập chưa có workspace tương ứng. Không hardcode
+  // sẵn danh sách brand nào (xem INITIAL_WORKSPACES) — khớp tên (không phân biệt hoa/thường)
+  // với workspace đã có trước, nếu chưa có thì tạo mới.
+  const resolveOrCreateWorkspaceForBrand = (brandName: string): string => {
+    const trimmed = brandName.trim();
+    if (!trimmed) return activeWorkspaceId;
+    const existing = workspaces.find(
+      w => w.brandName.toLowerCase() === trimmed.toLowerCase() || w.name.toLowerCase() === trimmed.toLowerCase()
+    );
+    if (existing) return existing.id;
+
+    const codeBase = trimmed.replace(/[^a-zA-Z0-9]/g, '').slice(0, 5).toUpperCase() || 'BRND';
+    const existingCodes = new Set(workspaces.map(w => w.code));
+    let code = codeBase;
+    let suffix = 2;
+    while (existingCodes.has(code)) {
+      code = `${codeBase}${suffix}`.slice(0, 6);
+      suffix++;
+    }
+
+    const newWs: Workspace = {
+      id: `ws-${Date.now()}`,
+      name: trimmed,
+      code,
+      brandName: trimmed,
+      category: 'Brand Affiliate Program',
+      color: WORKSPACE_COLOR_CYCLE[workspaces.length % WORKSPACE_COLOR_CYCLE.length],
+      description: `Affiliate campaign workspace tự động tạo cho ${trimmed}`,
+      memberCount: 1,
+      creatorCount: 0,
+      activeCampaignCount: 0
+    };
+    setWorkspaces(prev => [...prev, newWs]);
+    return newWs.id;
+  };
+
   const handleAddWorkspace = (newWsData: Omit<Workspace, 'id'>) => {
     const newWs: Workspace = {
       ...newWsData,
@@ -354,11 +393,19 @@ export function App() {
   };
 
   const handleCreateCampaign = (campData: any) => {
+    // Ở view Agency (nhiều brand), campaign mới gắn vào đúng workspace theo tên Brand đã nhập,
+    // tự tạo workspace nếu brand đó chưa tồn tại. Nếu đang ở trong 1 workspace brand cụ thể thì
+    // giữ nguyên context đó (không tạo workspace khác dựa theo field Brand).
+    const workspaceId = isAgencyWorkspace && campData.brand
+      ? resolveOrCreateWorkspaceForBrand(campData.brand)
+      : activeWorkspaceId;
+
     const newCamp: Campaign = {
       currency: 'USD',
       targetCategories: ['Beauty'],
       ...campData,
       id: `cmp-${Date.now()}`,
+      workspaceId,
       spent: 0,
       creatorIds: [],
       createdAt: new Date().toISOString()
@@ -418,6 +465,25 @@ export function App() {
           : cmp
       )
     );
+  };
+
+  // Chấm điểm creator CHO 1 campaign cụ thể (Niche/Audience Fit khớp đúng campaign đó) —
+  // lưu riêng vào creator.campaignScores, không đụng brandFitScore (điểm nền) vì cùng 1
+  // creator còn dùng lại cho campaign/brand khác.
+  const handleScoreCreatorForCampaign = async (creatorId: string, campaignId: string) => {
+    try {
+      const res = await fetch(`/api/creators/${creatorId}/score`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCreators(prev => prev.map(c => (c.id === creatorId ? data.data.creator : c)));
+      }
+    } catch (err) {
+      console.error('Error scoring creator for campaign:', err);
+    }
   };
 
   const handleUpdateReviewStatus = (reviewId: string, status: DraftReview['status'], feedback?: string) => {
@@ -553,6 +619,7 @@ export function App() {
               onOpenSettings={() => setActiveTab('settings')}
               onOpenCreateCampaign={() => setIsCreateCampaignModalOpen(true)}
               onSelectCreator={setSelectedCreatorDetail}
+              onScoreCreator={handleScoreCreatorForCampaign}
               preselectCampaignId={preselectCampaignId}
             />
           )}
@@ -670,7 +737,6 @@ export function App() {
       <CreatorDetailDrawer
         creator={selectedCreatorDetail}
         onClose={() => setSelectedCreatorDetail(null)}
-        campaigns={campaigns}
         onOpenEmailComposer={cr => {
           setSelectedCreatorForEmail(cr);
           setIsEmailComposerOpen(true);

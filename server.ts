@@ -292,8 +292,15 @@ app.post('/api/creators/batch-import', (req, res) => {
 
     const existingIndex = creators.findIndex(c => c.handle.toLowerCase() === rawHandle.toLowerCase());
 
-    const targetWs = workspaceId || 'ws-dalba';
-    const countryName = item.country || region || (rawHandle.includes('_us') ? 'United States' : rawHandle.includes('_uk') ? 'United Kingdom' : 'Vietnam');
+    // 'ws-dalba' không còn là workspace hardcode sẵn (chỉ tạo khi user thật sự tạo campaign/brand
+    // mới) — mặc định creator cào về chưa gắn workspaceId nào thì đưa vào ws-pickdi (Agency/Master
+    // Hub) để luôn thấy được, thay vì trỏ vào 1 workspace brand có thể không còn tồn tại.
+    const targetWs = workspaceId || 'ws-pickdi';
+    // Extension hiện chưa cào được country/region thật của creator (normalizeCreator() không
+    // trích field này) — trước đây mặc định cứng về 'Vietnam' khiến creator Mỹ/Anh bị gắn nhầm
+    // cờ Việt Nam. Chỉ suy ra khi có tín hiệu thật (item.country/region hoặc handle có hậu tố
+    // rõ ràng), còn lại để trống thay vì đoán bừa.
+    const countryName = item.country || region || (rawHandle.includes('_us') ? 'United States' : rawHandle.includes('_uk') ? 'United Kingdom' : undefined);
 
     const scrapedTiktokOneId = item.tiktokOneId || item.creator_id || item.creator_o_id || item.star_id || item.user_id || undefined;
     const cleanDisplayName = sanitizeCreatorDisplayName(item.displayName || item.nickname || item.name || rawHandle, rawHandle);
@@ -326,6 +333,7 @@ app.post('/api/creators/batch-import', (req, res) => {
         tags: Array.from(new Set([...(existing.tags || []), 'Scraper Enriched', source || 'Pickdi Extension'])),
         updatedAt: new Date().toISOString()
       };
+      applyScore(creators[existingIndex], undefined);
       updatedCount++;
     } else {
       // Create new creator profile from scraped data — leave a field undefined if the scraper didn't find it,
@@ -339,7 +347,7 @@ app.post('/api/creators/batch-import', (req, res) => {
         avatar: item.avatar || item.avatar_thumb || item.head_url || undefined,
         platform: 'TikTok',
         country: countryName,
-        language: countryName === 'United States' || countryName === 'United Kingdom' ? 'English' : 'Vietnamese',
+        language: countryName === 'United States' || countryName === 'United Kingdom' ? 'English' : (countryName ? 'Vietnamese' : undefined),
         bio: item.bio || undefined,
         profileUrl: item.profileUrl || `https://tiktok.com/@${rawHandle}`,
         tiktokOneId: scrapedTiktokOneId,
@@ -357,12 +365,13 @@ app.post('/api/creators/batch-import', (req, res) => {
         email: item.email || item.contact_email || undefined,
         phone: item.phone || undefined,
         createdAt: new Date().toISOString(),
-        tags: ['TikTok Scraped', source || 'Auto Extension', countryName],
+        tags: ['TikTok Scraped', source || 'Auto Extension', ...(countryName ? [countryName] : [])],
         notes: [],
         recentVideos: item.recentVideos || [],
         demographics: item.demographics || undefined,
         scores: item.scores || undefined
       };
+      applyScore(newCr, undefined);
       creators.unshift(newCr);
       importedCount++;
     }
@@ -375,7 +384,7 @@ app.post('/api/creators/batch-import', (req, res) => {
   notifications.unshift({
     id: `notif-${Date.now()}`,
     title: 'TikTok Sync Complete 🚀',
-    description: `Successfully synced ${importedCount} new creators (${updatedCount} enriched) into workspace (${workspaceId || 'ws-dalba'})!`,
+    description: `Successfully synced ${importedCount} new creators (${updatedCount} enriched) into workspace (${workspaceId || 'ws-pickdi'})!`,
     priority: 'HIGH',
     category: 'System',
     isRead: false,
@@ -436,25 +445,39 @@ app.post('/api/creators/update-detail', (req, res) => {
     if (detail.sixSecondViewRateBenchmark) creator.sixSecondViewRateBenchmark = detail.sixSecondViewRateBenchmark;
     if (detail.engagementRateContent) creator.engagementRate = parseFloat(detail.engagementRateContent) || creator.engagementRate;
     if (detail.engagementRateBenchmark) creator.engagementRateBenchmark = detail.engagementRateBenchmark;
-    if (detail.responseRate) creator.responseRate = detail.responseRate;
     if (detail.brandedVideosCount != null) creator.brandedVideosCount = detail.brandedVideosCount;
     if (detail.industryCoveredCount != null) creator.industryCoveredCount = detail.industryCoveredCount;
 
-    // % Gender thật lấy từ mảng ratio follower demographics (TikTok One trả ratio 0-1 theo
-    // từng giới tính) — trước đây chỉ lưu "top gender" dạng label, UI cần đúng % Female/Male.
-    const genderRatios: { gender?: string; ratio?: number }[] =
-      (detail.audienceDemographics && detail.audienceDemographics.follower && detail.audienceDemographics.follower.gender) || [];
+    // % Gender/Age/Country thật lấy từ mảng ratio follower demographics (TikTok One trả ratio
+    // 0-1 theo từng giá trị) — đây là dữ liệu "Follower demographics", KHÔNG phải "Audience
+    // reached/engaged" (2 loại đó TikTok cũng trả về nhưng ta chỉ lưu thô ở audienceDemographicsFull,
+    // chưa chuẩn hoá field riêng nên UI không hiển thị tách biệt được).
+    const followerDemo = (detail.audienceDemographics && detail.audienceDemographics.follower) || {};
+    const genderRatios: { gender?: string; ratio?: number }[] = followerDemo.gender || [];
+    const ageRatios: { ageInterval?: string; ratio?: number }[] = followerDemo.age || [];
+    const countryRatios: { country?: string; ratio?: number }[] = followerDemo.region || [];
     const femaleRatio = genderRatios.find((g) => g.gender === 'Female');
     const maleRatio = genderRatios.find((g) => g.gender === 'Male');
+    const ageDistribution = ageRatios
+      .filter((a) => a.ageInterval && a.ratio != null)
+      .map((a) => ({ name: a.ageInterval as string, value: Math.round((a.ratio as number) * 100) }));
+    const countryDistribution = countryRatios
+      .filter((c) => c.country && c.ratio != null)
+      .map((c) => ({ name: c.country as string, value: Math.round((c.ratio as number) * 100) }));
 
-    if (detail.audienceTopGender || detail.audienceTopAgeRange || detail.audienceTopCountry || femaleRatio || maleRatio) {
+    if (
+      detail.audienceTopGender || detail.audienceTopAgeRange || detail.audienceTopCountry ||
+      femaleRatio || maleRatio || ageDistribution.length > 0 || countryDistribution.length > 0
+    ) {
       creator.demographics = {
         ...creator.demographics,
         ...(detail.audienceTopGender ? { topGender: detail.audienceTopGender } : {}),
         ...(detail.audienceTopAgeRange ? { topAgeGroup: detail.audienceTopAgeRange } : {}),
         ...(detail.audienceTopCountry ? { topCountry: detail.audienceTopCountry } : {}),
         ...(femaleRatio && femaleRatio.ratio != null ? { genderFemale: Math.round(femaleRatio.ratio * 100) } : {}),
-        ...(maleRatio && maleRatio.ratio != null ? { genderMale: Math.round(maleRatio.ratio * 100) } : {})
+        ...(maleRatio && maleRatio.ratio != null ? { genderMale: Math.round(maleRatio.ratio * 100) } : {}),
+        ...(ageDistribution.length > 0 ? { ageDistribution } : {}),
+        ...(countryDistribution.length > 0 ? { countryDistribution } : {})
       };
     }
 
@@ -465,7 +488,7 @@ app.post('/api/creators/update-detail', (req, res) => {
     if (detail.recentVideos) creator.recentVideosFull = detail.recentVideos;
     if (detail.brandInfoList) creator.brandPartners = detail.brandInfoList;
 
-    creator.updatedAt = new Date().toISOString();
+    applyScore(creator, undefined);
   }
 
   addActivity('TikTok One Extension', `updated detail metrics for @${creator.handle}`, `@${creator.handle}`, 'creator', creator.id);
@@ -501,7 +524,7 @@ app.post('/api/creators/update-engagement', (req, res) => {
     if (engagement.erView) creator.engagementRate = engagement.erView;
     if (engagement.erFollower) creator.erFollower = engagement.erFollower;
 
-    creator.updatedAt = new Date().toISOString();
+    applyScore(creator, undefined);
   }
 
   addActivity('TikTok Extension', `updated engagement metrics for @${creator.handle}`, `@${creator.handle}`, 'creator', creator.id);
@@ -716,7 +739,24 @@ app.get('/api/search', (req, res) => {
 });
 
 // Deterministic Brand-Fit Scoring — thay cho việc dùng Gemini đoán điểm theo cảm tính.
-// Công thức nằm ở src/scoring.ts, ở đây chỉ tra creator/campaign thật rồi tính + lưu lại.
+// Công thức nằm ở src/scoring.ts. Có campaignId -> đây là điểm CHO CAMPAIGN đó, lưu riêng
+// vào creator.campaignScores (không đụng brandFitScore) vì cùng 1 creator dùng lại được cho
+// nhiều campaign/brand khác nhau, mỗi campaign có Niche/Audience Fit khác nhau, không thể
+// dùng chung 1 con số. Không có campaignId -> đây là điểm NỀN (baseline), ghi vào
+// brandFitScore/scoreBreakdown như cũ.
+function applyScore(creator: any, campaign: any | undefined) {
+  const breakdown = scoreCreator(creator, campaign);
+  if (campaign) {
+    const entry = { campaignId: campaign.id, breakdown, scoredAt: new Date().toISOString() };
+    creator.campaignScores = [...(creator.campaignScores || []).filter((s: any) => s.campaignId !== campaign.id), entry];
+  } else {
+    creator.scoreBreakdown = breakdown;
+    creator.brandFitScore = breakdown.totalScore;
+  }
+  creator.updatedAt = new Date().toISOString();
+  return breakdown;
+}
+
 app.post('/api/creators/:id/score', (req, res) => {
   const creator = creators.find(c => c.id === req.params.id);
   if (!creator) {
@@ -724,13 +764,12 @@ app.post('/api/creators/:id/score', (req, res) => {
   }
   const campaignId = req.body.campaignId as string | undefined;
   const campaign = campaignId ? campaigns.find(c => c.id === campaignId) : undefined;
+  if (campaignId && !campaign) {
+    return res.status(404).json({ success: false, message: 'Campaign not found' });
+  }
 
-  const breakdown = scoreCreator(creator, campaign);
-  creator.scoreBreakdown = breakdown;
-  creator.brandFitScore = breakdown.totalScore;
-  creator.updatedAt = new Date().toISOString();
-
-  addActivity('Anh Tuan', 'scored creator', `@${creator.handle}`, 'creator', creator.id);
+  const breakdown = applyScore(creator, campaign);
+  addActivity('Anh Tuan', campaign ? `scored creator for campaign "${campaign.name}"` : 'scored creator (baseline)', `@${creator.handle}`, 'creator', creator.id);
   res.json({ success: true, data: { creator, breakdown } });
 });
 
@@ -741,14 +780,8 @@ app.post('/api/ai/research', async (req, res) => {
   const creator = creators.find(c => c.id === creatorInput?.id) || creatorInput;
   const campaign = campaignId ? campaigns.find(c => c.id === campaignId) : undefined;
 
-  const breakdown = scoreCreator(creator, campaign);
-
   const stored = creators.find(c => c.id === creator?.id);
-  if (stored) {
-    stored.scoreBreakdown = breakdown;
-    stored.brandFitScore = breakdown.totalScore;
-    stored.updatedAt = new Date().toISOString();
-  }
+  const breakdown = stored ? applyScore(stored, campaign) : scoreCreator(creator, campaign);
 
   const summary = breakdown.groups
     .filter(g => g.available)

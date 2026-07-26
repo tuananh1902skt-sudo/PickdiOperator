@@ -8,7 +8,6 @@ import {
   Bookmark,
   HelpCircle,
   Play,
-  BarChart2,
   ArrowDown
 } from 'lucide-react';
 import {
@@ -26,12 +25,19 @@ import {
   Pie,
   Cell
 } from 'recharts';
-import { Creator, Campaign } from '../../types';
+import { Creator } from '../../types';
+
+// Data cào từ trước khi videoUrl được thêm vào extension chỉ có itemID — dựng lại link video
+// thật (format chuẩn của TikTok) từ handle + itemID khi field videoUrl chưa có sẵn.
+function buildVideoUrl(handle: string | undefined, itemID: unknown, existingUrl?: string): string | undefined {
+  if (existingUrl) return existingUrl;
+  const cleanHandle = (handle || '').replace(/^@/, '');
+  return itemID && cleanHandle ? `https://www.tiktok.com/@${cleanHandle}/video/${itemID}` : undefined;
+}
 
 interface CreatorDetailDrawerProps {
   creator: Creator | null;
   onClose: () => void;
-  campaigns: Campaign[];
   onOpenEmailComposer: (cr: Creator) => void;
   onArchiveCreator: (id: string) => void;
   onAddNote: (creatorId: string, content: string) => void;
@@ -41,7 +47,6 @@ interface CreatorDetailDrawerProps {
 export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
   creator,
   onClose,
-  campaigns,
   onOpenEmailComposer,
   onArchiveCreator,
   onAddNote,
@@ -49,11 +54,14 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
 }) => {
   const [activeSection, setActiveSection] = useState<string>('sec-overview');
   const [bookmarked, setBookmarked] = useState(false);
-  const [scoreTab, setScoreTab] = useState<'overall' | 'creativity'>('overall');
   const [contentFilter, setContentFilter] = useState<'all' | 'branded' | 'non-branded'>('all');
   const [trendSort, setTrendSort] = useState<'recent' | 'popular'>('recent');
-  const [demoTab, setDemoTab] = useState<'reached' | 'engaged' | 'followers'>('reached');
   const [newNoteText, setNewNoteText] = useState('');
+  // Ảnh bìa thật lấy lazy qua TikTok oEmbed API công khai (không cần login/API key) — TikTok One
+  // network-intercept không trả field ảnh bìa nên phải bổ sung riêng theo video, cache theo id
+  // trong phiên xem này (không lưu server vì link CDN có chữ ký kèm hạn, không cache lâu được).
+  const [thumbCache, setThumbCache] = useState<Record<string, string>>({});
+  const [playingVideo, setPlayingVideo] = useState<{ itemID: string; title: string } | null>(null);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isManualScroll = useRef(false);
@@ -104,6 +112,40 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
     }
   }, [activeSection]);
 
+  // Lazy-load ảnh bìa thật qua TikTok oEmbed (public, không cần login) cho video chưa có thumb.
+  // Đặt TRƯỚC early-return `if (!creator)` bên dưới vì hook không được gọi có điều kiện — tự
+  // tính lại danh sách video ở đây thay vì dùng displayVideos (biến đó khai báo sau early-return).
+  useEffect(() => {
+    if (!creator) return;
+    const videos = (creator.recentVideos && creator.recentVideos.length > 0)
+      ? creator.recentVideos
+      : (creator.recentVideosFull || []).map((v: any) => ({
+          id: String(v.itemID),
+          thumb: '',
+          videoUrl: buildVideoUrl(creator.handle, v.itemID, v.videoUrl)
+        }));
+
+    const toFetch = videos.filter(v => !v.thumb && v.videoUrl && !thumbCache[v.id]);
+    if (toFetch.length === 0) return;
+    let cancelled = false;
+    toFetch.forEach(async v => {
+      try {
+        const res = await fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(v.videoUrl!)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data.thumbnail_url) {
+          setThumbCache(prev => (prev[v.id] ? prev : { ...prev, [v.id]: data.thumbnail_url }));
+        }
+      } catch {
+        // Video bị xoá/riêng tư hoặc mạng lỗi — bỏ qua, giữ nguyên placeholder.
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creator?.id]);
+
   if (!creator) return null;
 
   const EMPTY = 'Chưa có dữ liệu';
@@ -133,8 +175,7 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
     { subject: 'Broadcasting', value: creator.scores?.broadcasting ?? 0, fullMark: 100 },
     { subject: 'Diligence', value: creator.scores?.diligence ?? 0, fullMark: 100 },
     { subject: 'Commercial', value: creator.scores?.commercial ?? creator.commercialScore ?? 0, fullMark: 100 },
-    { subject: 'Brand Fit', value: creator.brandFitScore ?? 0, fullMark: 100 },
-    { subject: 'Creativity', value: creator.scores?.creativity ?? 0, fullMark: 100 }
+    { subject: 'Brand Fit', value: creator.brandFitScore ?? 0, fullMark: 100 }
   ];
 
   // Videos Grid Data — creator.recentVideos (batch-scrape shape) hoặc creator.recentVideosFull
@@ -148,7 +189,7 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
         thumb: '',
         date: v.createTime ? new Date(Number(v.createTime) * 1000).toISOString().slice(0, 10) : undefined,
         isBranded: !!v.isSponsoredVideo,
-        videoUrl: undefined,
+        videoUrl: buildVideoUrl(creator.handle, v.itemID, v.videoUrl),
       }));
 
   // Performance Trend Bar Chart Data — only built when real video views exist
@@ -169,8 +210,7 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
         date: v.date ? (v.date.includes('/') ? v.date.split(' ')[0].slice(0, 5) : v.date) : `V${i + 1}`,
         views: numViews,
         branded: v.isBranded ? numViews : 0,
-        nonBranded: !v.isBranded ? numViews : 0,
-        boosted: 0
+        nonBranded: !v.isBranded ? numViews : 0
       };
     })
     .sort((a, b) => (trendSort === 'popular' ? b.views - a.views : 0));
@@ -197,6 +237,7 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
   ] : [];
 
   const ageData = creator.demographics?.ageDistribution || [];
+  const countryData = creator.demographics?.countryDistribution || [];
 
   // Real view-count summary — undefined (not a fabricated number) when there's no video data
   const parsedViews = displayVideos.map(v => parseView(v.views)).filter((v): v is number => v !== undefined);
@@ -214,20 +255,14 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
   };
 
   return (
+    <>
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto">
       <div
         className="w-full max-w-7xl bg-slate-50 dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[92vh] overflow-hidden my-auto"
         onClick={e => e.stopPropagation()}
       >
         {/* Top Control Header Bar */}
-        <div className="px-6 py-3 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <span className="px-2.5 py-1 rounded-md bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 font-bold text-xs flex items-center gap-1 border border-teal-200 dark:border-teal-800">
-              <BarChart2 className="w-3.5 h-3.5" /> TikTok Creator Profile Analytics (Scroll View)
-            </span>
-            <span className="text-xs text-slate-400 font-mono hidden sm:inline">ID: {creator.id}</span>
-          </div>
-
+        <div className="px-6 py-3 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-end shrink-0">
           <div className="flex items-center gap-2">
             <button
               onClick={() => onOpenEmailComposer(creator)}
@@ -356,17 +391,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 ) : (
                   <span className="text-slate-400 italic text-xs">{EMPTY}</span>
                 )}
-              </div>
-
-              <div>
-                <h4 className="font-bold text-slate-800 dark:text-slate-200 mb-0.5">Start from</h4>
-                <p className="text-lg font-black text-slate-900 dark:text-white">
-                  {creator.rateCard ? (
-                    <>${creator.rateCard} <span className="text-xs font-normal text-slate-500">USD</span></>
-                  ) : (
-                    <span className="text-slate-400 italic text-sm font-normal">{EMPTY}</span>
-                  )}
-                </p>
               </div>
 
               <div className="flex items-center gap-2 pt-2">
@@ -561,72 +585,39 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                       )}
                     </div>
 
-                    {/* Score Breakdown Cards */}
+                    {/* Score Breakdown Cards — điểm thành phần thật từ TikTok One (comprehensiveScore
+                        được tách ra broadcasting/diligence/commercial), độc lập với Overall score
+                        ở trên (đó là comprehensiveScore riêng của TikTok, không phải trung bình cộng
+                        của các thẻ này). */}
                     <div className="space-y-4">
-                      <div className="flex justify-between items-center bg-slate-200/60 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold">
-                        <button
-                          onClick={() => setScoreTab('overall')}
-                          className={`flex-1 py-1.5 rounded-lg text-center transition-colors ${
-                            scoreTab === 'overall'
-                              ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                              : 'text-slate-500'
-                          }`}
-                        >
-                          Overall
-                        </button>
-                        <button
-                          onClick={() => setScoreTab('creativity')}
-                          className={`flex-1 py-1.5 rounded-lg text-center transition-colors flex items-center justify-center gap-1 ${
-                            scoreTab === 'creativity'
-                              ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                              : 'text-slate-500'
-                          }`}
-                        >
-                          Creativity & Talent <HelpCircle className="w-3 h-3 text-slate-400" />
-                        </button>
+                      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
+                        <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
+                          Broadcasting <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
+                        </span>
+                        <div className="flex items-baseline gap-2">
+                          <span className={`text-2xl font-black ${creator.scores?.broadcasting !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                            {creator.scores?.broadcasting ?? EMPTY}
+                          </span>
+                        </div>
                       </div>
 
-                      {scoreTab === 'overall' ? (
-                        <>
-                          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
-                            <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                              Broadcasting <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-                            </span>
-                            <div className="flex items-baseline gap-2">
-                              <span className={`text-2xl font-black ${creator.scores?.broadcasting !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
-                                {creator.scores?.broadcasting ?? EMPTY}
-                              </span>
-                            </div>
-                          </div>
+                      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
+                        <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
+                          Diligence <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
+                        </span>
+                        <p className={`text-2xl font-black ${creator.scores?.diligence !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                          {creator.scores?.diligence ?? EMPTY}
+                        </p>
+                      </div>
 
-                          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
-                            <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                              Diligence <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-                            </span>
-                            <p className={`text-2xl font-black ${creator.scores?.diligence !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
-                              {creator.scores?.diligence ?? EMPTY}
-                            </p>
-                          </div>
-
-                          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
-                            <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                              Commercial <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-                            </span>
-                            <p className={`text-2xl font-black ${(creator.scores?.commercial ?? creator.commercialScore) !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
-                              {creator.scores?.commercial ?? creator.commercialScore ?? EMPTY}
-                            </p>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
-                          <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                            Creativity & Talent <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-                          </span>
-                          <p className={`text-2xl font-black ${creator.scores?.creativity !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
-                            {creator.scores?.creativity ?? EMPTY}
-                          </p>
-                        </div>
-                      )}
+                      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
+                        <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
+                          Commercial <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
+                        </span>
+                        <p className={`text-2xl font-black ${(creator.scores?.commercial ?? creator.commercialScore) !== undefined ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
+                          {creator.scores?.commercial ?? creator.commercialScore ?? EMPTY}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -653,40 +644,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                   </div>
                 </div>
 
-                {/* Filter Sub-pills */}
-                <div className="flex items-center gap-1 bg-slate-200/60 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold w-fit">
-                  <button
-                    onClick={() => setContentFilter('all')}
-                    className={`px-4 py-1.5 rounded-lg transition-colors ${
-                      contentFilter === 'all'
-                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                        : 'text-slate-500'
-                    }`}
-                  >
-                    All
-                  </button>
-                  <button
-                    onClick={() => setContentFilter('branded')}
-                    className={`px-4 py-1.5 rounded-lg transition-colors ${
-                      contentFilter === 'branded'
-                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                        : 'text-slate-500'
-                    }`}
-                  >
-                    Branded content
-                  </button>
-                  <button
-                    onClick={() => setContentFilter('non-branded')}
-                    className={`px-4 py-1.5 rounded-lg transition-colors ${
-                      contentFilter === 'non-branded'
-                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                        : 'text-slate-500'
-                    }`}
-                  >
-                    Non-branded content
-                  </button>
-                </div>
-
                 {/* Metrics Cards Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   {/* Median views */}
@@ -694,9 +651,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
                         Median views <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-                      </span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
-                        Top 10 %
                       </span>
                     </div>
                     <p className="text-3xl font-black text-slate-900 dark:text-white">
@@ -821,7 +775,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                             />
                             <Bar dataKey="branded" stackId="a" fill="#c084fc" radius={[4, 4, 0, 0]} />
                             <Bar dataKey="nonBranded" stackId="a" fill="#818cf8" radius={[4, 4, 0, 0]} />
-                            <Bar dataKey="boosted" stackId="a" fill="#2dd4bf" radius={[4, 4, 0, 0]} />
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
@@ -832,9 +785,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                         </span>
                         <span className="flex items-center gap-1.5">
                           <span className="w-2.5 h-2.5 rounded-full bg-indigo-400" /> Non-branded content
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full bg-teal-400" /> Boosted with paid traffic
                         </span>
                       </div>
                     </>
@@ -895,45 +845,66 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                   </div>
                 )}
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-                  {sortedFilteredVideos.map(vid => (
-                    <a
-                      key={vid.id}
-                      href={vid.videoUrl || creator.profileUrl || `https://www.tiktok.com/@${(creator.handle || '').replace(/^@/, '')}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="group bg-white dark:bg-slate-900 rounded-2xl overflow-hidden border border-slate-200/80 dark:border-slate-800 flex flex-col shadow-xs hover:shadow-md transition-all hover:-translate-y-0.5 cursor-pointer"
-                    >
-                      <div className="relative aspect-[3/4] bg-slate-100 overflow-hidden">
-                        <img
-                          src={vid.thumb}
-                          alt={vid.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-
-                        {/* Play count badge */}
-                        <div className="absolute bottom-2 left-2 flex items-center gap-1 text-white text-xs font-bold bg-black/40 backdrop-blur-xs px-2 py-0.5 rounded-full">
-                          <Play className="w-3 h-3 fill-white text-white" />
-                          {typeof vid.views === 'number' ? formatNumber(vid.views) : vid.views}
-                        </div>
-                      </div>
-
-                      <div className="p-3 flex-1 flex flex-col justify-between space-y-2">
-                        <p className="text-xs font-medium text-slate-800 dark:text-slate-200 line-clamp-2 group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
-                          {vid.title}
-                        </p>
-
-                        <div>
-                          {vid.isBranded && (
-                            <span className="inline-block px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300 text-[10px] font-bold mb-1">
-                              Branded content
-                            </span>
+                  {sortedFilteredVideos.map(vid => {
+                    const thumbUrl = vid.thumb || thumbCache[vid.id];
+                    const itemIdMatch = vid.videoUrl && vid.videoUrl.match(/\/video\/(\d+)/);
+                    return (
+                      <button
+                        key={vid.id}
+                        type="button"
+                        onClick={() => {
+                          if (itemIdMatch) {
+                            setPlayingVideo({ itemID: itemIdMatch[1], title: vid.title });
+                          } else {
+                            window.open(
+                              vid.videoUrl || creator.profileUrl || `https://www.tiktok.com/@${(creator.handle || '').replace(/^@/, '')}`,
+                              '_blank',
+                              'noopener,noreferrer'
+                            );
+                          }
+                        }}
+                        className="group text-left bg-white dark:bg-slate-900 rounded-2xl overflow-hidden border border-slate-200/80 dark:border-slate-800 flex flex-col shadow-xs hover:shadow-md transition-all hover:-translate-y-0.5 cursor-pointer"
+                      >
+                        <div className="relative aspect-[3/4] bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                          {thumbUrl ? (
+                            <img
+                              src={thumbUrl}
+                              alt={vid.title}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                          ) : (
+                            // Đang lazy-fetch ảnh bìa thật qua TikTok oEmbed (xem useEffect ở trên) — hiện
+                            // placeholder trong lúc chờ hoặc khi video đã bị xoá/riêng tư (oEmbed lỗi).
+                            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-800 group-hover:scale-105 transition-transform duration-300">
+                              <Play className="w-8 h-8 text-white/70 fill-white/70" />
+                            </div>
                           )}
-                          <p className="text-[10px] text-slate-400 font-mono">{vid.date}</p>
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+
+                          {/* Play count badge */}
+                          <div className="absolute bottom-2 left-2 flex items-center gap-1 text-white text-xs font-bold bg-black/40 backdrop-blur-xs px-2 py-0.5 rounded-full">
+                            <Play className="w-3 h-3 fill-white text-white" />
+                            {typeof vid.views === 'number' ? formatNumber(vid.views) : vid.views}
+                          </div>
                         </div>
-                      </div>
-                    </a>
-                  ))}
+
+                        <div className="p-3 flex-1 flex flex-col justify-between space-y-2">
+                          <p className="text-xs font-medium text-slate-800 dark:text-slate-200 line-clamp-2 group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
+                            {vid.title}
+                          </p>
+
+                          <div>
+                            {vid.isBranded && (
+                              <span className="inline-block px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300 text-[10px] font-bold mb-1">
+                                Branded content
+                              </span>
+                            )}
+                            <p className="text-[10px] text-slate-400 font-mono">{vid.date}</p>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </section>
 
@@ -949,7 +920,7 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                   </select>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
                     <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
                       Branded videos <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
@@ -967,15 +938,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                       {creator.industryCoveredCount !== undefined ? creator.industryCoveredCount : EMPTY}
                     </p>
                   </div>
-
-                  <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-1">
-                    <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                      Response rate <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-                    </span>
-                    <p className={`text-3xl font-black ${creator.responseRate ? 'text-slate-900 dark:text-white' : 'text-slate-400 italic text-sm font-normal'}`}>
-                      {creator.responseRate || EMPTY}
-                    </p>
-                  </div>
                 </div>
               </section>
 
@@ -984,41 +946,12 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 <div>
                   <h3 className="text-lg font-black text-slate-900 dark:text-white mb-3 flex items-center gap-2">
                     <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block" />
-                    6. Audience demographics
+                    6. Follower demographics
                   </h3>
-
-                  <div className="flex items-center gap-1 bg-slate-200/60 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold w-fit mb-4">
-                    <button
-                      onClick={() => setDemoTab('reached')}
-                      className={`px-4 py-1.5 rounded-lg transition-colors ${
-                        demoTab === 'reached'
-                          ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                          : 'text-slate-500'
-                      }`}
-                    >
-                      Audience reached
-                    </button>
-                    <button
-                      onClick={() => setDemoTab('engaged')}
-                      className={`px-4 py-1.5 rounded-lg transition-colors ${
-                        demoTab === 'engaged'
-                          ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                          : 'text-slate-500'
-                      }`}
-                    >
-                      Audience engaged
-                    </button>
-                    <button
-                      onClick={() => setDemoTab('followers')}
-                      className={`px-4 py-1.5 rounded-lg transition-colors ${
-                        demoTab === 'followers'
-                          ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                          : 'text-slate-500'
-                      }`}
-                    >
-                      Follower demographics
-                    </button>
-                  </div>
+                  <p className="text-xs text-slate-500 mb-4">
+                    Chỉ hiển thị Follower demographics — TikTok One có trả Audience reached/engaged nhưng
+                    hệ thống chưa chuẩn hoá riêng được 2 loại đó nên tạm ẩn thay vì hiện data trùng lặp.
+                  </p>
 
                   {/* Summary row */}
                   <div className="flex flex-wrap items-center gap-6 text-xs text-slate-500 bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800">
@@ -1041,8 +974,8 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 </div>
 
                 {/* Donut Charts — only rendered when the scraper actually captured this demographic */}
-                {(hasGenderData || ageData.length > 0) ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {(hasGenderData || ageData.length > 0 || countryData.length > 0) ? (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {hasGenderData && (
                       <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3">
                         <h4 className="text-xs font-bold text-slate-900 dark:text-white">Gender</h4>
@@ -1118,10 +1051,49 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                         </div>
                       </div>
                     )}
+
+                    {countryData.length > 0 && (
+                      <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-3">
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1">
+                          Country <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
+                        </h4>
+                        <div className="h-48 w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={countryData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={45}
+                                outerRadius={70}
+                                paddingAngle={3}
+                                dataKey="value"
+                              >
+                                {countryData.map((_, index) => (
+                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                ))}
+                              </Pie>
+                              <Tooltip formatter={val => `${val}%`} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <div className="flex justify-center flex-wrap gap-3 text-xs font-medium text-slate-500">
+                          {countryData.map((c, i) => (
+                            <span key={c.name} className="flex items-center gap-1">
+                              <span
+                                className="w-2.5 h-2.5 rounded-full"
+                                style={{ backgroundColor: COLORS[i % COLORS.length] }}
+                              />
+                              {c.name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="p-8 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-slate-400 text-xs italic">
-                    {EMPTY} — TikTok One chưa trả về audience demographics cho creator này
+                    {EMPTY} — TikTok One chưa trả về follower demographics cho creator này
                   </div>
                 )}
               </section>
@@ -1174,5 +1146,34 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
         </div>
       </div>
     </div>
+
+    {/* Modal phát video inline — dùng iframe embed chính chủ TikTok (tiktok.com/embed/v2/{itemID}),
+        không tải file mp4 hay vi phạm gì, chỉ nhúng player gốc của TikTok. */}
+    {playingVideo && (
+      <div
+        className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4"
+        onClick={() => setPlayingVideo(null)}
+      >
+        <div className="relative w-full max-w-sm" onClick={e => e.stopPropagation()}>
+          <button
+            onClick={() => setPlayingVideo(null)}
+            className="absolute -top-10 right-0 text-white/80 hover:text-white p-1.5"
+          >
+            <X className="w-6 h-6" />
+          </button>
+          <div className="bg-black rounded-2xl overflow-hidden shadow-2xl" style={{ aspectRatio: '9/16' }}>
+            <iframe
+              key={playingVideo.itemID}
+              src={`https://www.tiktok.com/embed/v2/${playingVideo.itemID}`}
+              className="w-full h-full"
+              allow="autoplay; encrypted-media; picture-in-picture"
+              allowFullScreen
+              title={playingVideo.title || 'TikTok video'}
+            />
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 };

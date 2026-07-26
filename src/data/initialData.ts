@@ -11,6 +11,9 @@ import {
   DashboardKPIs
 } from '../types';
 
+// Chỉ giữ workspace Agency (tổng) sẵn có — các workspace brand cụ thể (d'Alba, 2aN cũ...) không
+// còn hardcode nữa, chỉ được tạo khi người dùng thật sự tạo campaign/brand mới (xem
+// App.tsx#resolveOrCreateWorkspace và SettingsView "Create New Workspace").
 export const INITIAL_WORKSPACES: Workspace[] = [
   {
     id: 'ws-pickdi',
@@ -24,30 +27,6 @@ export const INITIAL_WORKSPACES: Workspace[] = [
     memberCount: 12,
     creatorCount: 0,
     activeCampaignCount: 3
-  },
-  {
-    id: 'ws-dalba',
-    name: "d'Alba Vietnam Official",
-    code: 'DALBA',
-    brandName: "d'Alba Piedmont Vietnam",
-    category: 'Skincare & K-Beauty',
-    color: 'indigo',
-    description: "Official TikTok Shop Affiliate Hub for d'Alba First Spray Serum & Tone-Up Sunscreens",
-    memberCount: 6,
-    creatorCount: 0,
-    activeCampaignCount: 2
-  },
-  {
-    id: 'ws-2an',
-    name: '2aN Cosmetics Brand Store',
-    code: '2AN',
-    brandName: '2aN Cosmetics Vietnam',
-    category: 'Makeup & Cosmetics',
-    color: 'rose',
-    description: 'Affiliate Recruitment & Content Approval Portal for 2aN Tension Cushions & Lip Tints',
-    memberCount: 4,
-    creatorCount: 0,
-    activeCampaignCount: 1
   }
 ];
 

@@ -15,7 +15,7 @@ export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
   onSubmit
 }) => {
   const [name, setName] = useState('');
-  const [brand, setBrand] = useState("d'Alba Piedmont");
+  const [brand, setBrand] = useState('');
   const [objective, setObjective] = useState('');
   const [description, setDescription] = useState('');
   const [budget, setBudget] = useState('10000');
@@ -107,7 +107,7 @@ export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
               <input
                 type="text"
                 required
-                placeholder="Brand Name"
+                placeholder="e.g. Innisfree Vietnam — brand mới sẽ tự tạo workspace"
                 value={brand}
                 onChange={e => setBrand(e.target.value)}
                 className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium"

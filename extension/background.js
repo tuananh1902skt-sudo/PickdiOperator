@@ -252,10 +252,15 @@ function extractCreatorDetailFromNetwork() {
     return n != null ? (n * 100).toFixed(2) + '%' : null;
   }
   function summarizeVideo(v) {
+    // TikTok One không trả link video/thumbnail trực tiếp trong videoPerformance, nhưng
+    // itemID + handle là đủ để dựng đúng URL video thật theo format chuẩn của TikTok
+    // (https://www.tiktok.com/@handle/video/itemID) — không cần đoán field ảnh bìa không có thật.
+    const videoUrl = v.itemID ? `https://www.tiktok.com/${handle}/video/${v.itemID}` : null;
     return {
       itemID: v.itemID, title: v.title, views: Number(v.views) || 0,
       likes: v.heart || 0, comments: v.comment || 0, shares: v.share || 0,
       createTime: v.createTime, isSponsoredVideo: !!v.isSponsoredVideo,
+      videoUrl,
     };
   }
 
@@ -280,7 +285,6 @@ function extractCreatorDetailFromNetwork() {
       engagementRateBenchmark: pct(stat.engagementRateBenchMark),
       brandedVideosCount: coop.bcVideoCnt90d != null ? Number(coop.bcVideoCnt90d) : null,
       industryCoveredCount: coop.collabIndustryCnt90d != null ? Number(coop.collabIndustryCnt90d) : null,
-      responseRate: null,
       audienceTopGender: topByRatio(followerDist.gender, 'gender'),
       audienceTopAgeRange: topByRatio(followerDist.age, 'ageInterval'),
       audienceTopCountry: topByRatio(followerDist.region, 'country'),

@@ -54,6 +54,7 @@ export interface CreatorDemographics {
   topAgeGroup?: string;
   topCountry?: string;
   ageDistribution?: { name: string; value: number }[];
+  countryDistribution?: { name: string; value: number }[];
 }
 
 export interface CreatorScores {
@@ -61,7 +62,6 @@ export interface CreatorScores {
   broadcasting?: number;
   diligence?: number;
   commercial?: number;
-  creativity?: number;
 }
 
 export interface Creator {
@@ -109,7 +109,6 @@ export interface Creator {
   sixSecondViewRate?: string;
   sixSecondViewRateBenchmark?: string;
   engagementRateBenchmark?: string;
-  responseRate?: string;
   industryTag?: string;
   videoContentTag?: string;
   brandedVideosCount?: number;
@@ -127,7 +126,14 @@ export interface Creator {
   brandPartners?: string[];
   // Kết quả scoreCreator() (server/scoring.ts) — lưu lại để hiển thị breakdown chi tiết
   // trong UI thay vì chỉ có brandFitScore tổng.
+  // brandFitScore/scoreBreakdown = điểm NỀN (baseline), tự động tính lại sau mỗi lần
+  // scrape/update-detail, KHÔNG gắn với campaign nào — chỉ dùng Content/Follower/Ops
+  // (3 nhóm không cần biết campaign) để có 1 con số tham khảo khi lướt cả kho creator.
   scoreBreakdown?: CreatorScoreBreakdown;
+  // Điểm CHO TỪNG CAMPAIGN cụ thể — 1 creator dùng lại được cho nhiều campaign/brand khác
+  // nhau, mỗi campaign có Niche Fit/Audience Fit riêng nên không thể dùng chung 1 con số.
+  // Chỉ được ghi khi ai đó chủ động chấm cho đúng campaign đó (không tự động).
+  campaignScores?: { campaignId: string; breakdown: CreatorScoreBreakdown; scoredAt: string }[];
 }
 
 export interface CreatorScoreBreakdown {

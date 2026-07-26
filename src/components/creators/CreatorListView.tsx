@@ -57,6 +57,13 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   // Tab Mode: 'workspace' (current workspace creators) vs 'global' (all agency creators)
   const [viewScope, setViewScope] = useState<'workspace' | 'global'>('workspace');
 
+  // Ở view Agency (PICKDI, tổng hợp nhiều brand) chưa gắn campaign cụ thể nên hiển thị Overall
+  // score (comprehensiveScore riêng của TikTok One) để so sánh nhanh cả kho creator. Khi chuyển
+  // sang 1 workspace brand cụ thể, đổi lại thành Brand Fit (điểm nền tự tính, xem src/scoring.ts).
+  const isAgencyView = !activeWorkspace || activeWorkspace.isAgency || activeWorkspace.id === 'ws-pickdi';
+  const scoreColumnLabel = isAgencyView ? 'Overall Score' : 'Brand Fit';
+  const getScoreValue = (cr: Creator) => (isAgencyView ? cr.scores?.overall : cr.brandFitScore);
+
   // Search & Filter state
   const [search, setSearch] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
@@ -403,7 +410,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                 <th className="py-3 px-4 text-right">Followers</th>
                 <th className="py-3 px-4 text-right">Avg Views</th>
                 <th className="py-3 px-4 text-center">ER %</th>
-                <th className="py-3 px-4 text-center">Brand Fit</th>
+                <th className="py-3 px-4 text-center">{scoreColumnLabel}</th>
                 <th className="py-3 px-4">Brand / Workspace</th>
                 <th className="py-3 px-4">Campaign</th>
                 <th className="py-3 px-4">Status</th>
@@ -494,24 +501,27 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                         {cr.engagementRate !== undefined ? `${cr.engagementRate}%` : '—'}
                       </td>
 
-                      {/* Score Badge */}
+                      {/* Score Badge — Overall score (agency view) hoặc Brand Fit (brand view), xem isAgencyView ở trên */}
                       <td className="py-3.5 px-4 text-center">
-                        {cr.brandFitScore !== undefined ? (
-                          <span
-                            className={`px-2 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1 ${
-                              cr.brandFitScore >= 90
-                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                                : cr.brandFitScore >= 80
-                                ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
-                                : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                            }`}
-                          >
-                            <Sparkles className="w-3 h-3" />
-                            {cr.brandFitScore}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 text-xs italic">—</span>
-                        )}
+                        {(() => {
+                          const scoreVal = getScoreValue(cr);
+                          return scoreVal !== undefined ? (
+                            <span
+                              className={`px-2 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1 ${
+                                scoreVal >= 90
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : scoreVal >= 80
+                                  ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
+                                  : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                              }`}
+                            >
+                              <Sparkles className="w-3 h-3" />
+                              {scoreVal}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-xs italic">—</span>
+                          );
+                        })()}
                       </td>
 
                       {/* Brand / Workspace */}
