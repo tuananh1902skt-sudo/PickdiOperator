@@ -1,21 +1,18 @@
 import React, { useEffect, useRef } from 'react';
 import {
   Search,
-  Plus,
   Sparkles,
   Bell,
   Sun,
   Moon,
   ChevronDown,
   Check,
-  PlusCircle,
-  Database
+  PlusCircle
 } from 'lucide-react';
 import { Workspace } from '../../types';
 
 interface NavbarProps {
   openCommandPalette: () => void;
-  openQuickAdd: () => void;
   openAiDrawer: () => void;
   openNotifDrawer: () => void;
   unreadNotifsCount: number;
@@ -25,13 +22,10 @@ interface NavbarProps {
   workspaces: Workspace[];
   onSelectWorkspace: (id: string) => void;
   onOpenSettings?: () => void;
-  showMockData?: boolean;
-  setShowMockData?: (val: boolean) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   openCommandPalette,
-  openQuickAdd,
   openAiDrawer,
   openNotifDrawer,
   unreadNotifsCount,
@@ -40,9 +34,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeWorkspace,
   workspaces,
   onSelectWorkspace,
-  onOpenSettings,
-  showMockData = true,
-  setShowMockData
+  onOpenSettings
 }) => {
   const [wsDropdownOpen, setWsDropdownOpen] = React.useState(false);
   const wsDropdownRef = useRef<HTMLDivElement>(null);
@@ -149,43 +141,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Right Action Icons */}
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* Mock Data Toggle Button */}
-        {setShowMockData && (
-          <button
-            id="mockdata-toggle-btn"
-            onClick={() => setShowMockData(!showMockData)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
-              showMockData
-                ? 'border-amber-200 dark:border-amber-900/80 bg-amber-50/90 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/80 shadow-2xs'
-                : 'border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
-            }`}
-            title={
-              showMockData
-                ? 'Đang bật dữ liệu mẫu. Nhấp để ẩn dữ liệu mẫu (chỉ xem data thực)'
-                : 'Đang ẩn dữ liệu mẫu. Nhấp để bật dữ liệu mẫu'
-            }
-          >
-            <Database className={`w-3.5 h-3.5 ${showMockData ? 'text-amber-600 dark:text-amber-400 animate-pulse' : 'text-slate-400'}`} />
-            <span className="hidden lg:inline">
-              Mock Data: <strong className={showMockData ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500'}>{showMockData ? 'HIỆN' : 'ẨN'}</strong>
-            </span>
-            <span className="lg:hidden">
-              {showMockData ? 'Mock: ON' : 'Mock: OFF'}
-            </span>
-          </button>
-        )}
-
-        {/* Quick Add Button */}
-        <button
-          id="quick-add-btn"
-          onClick={openQuickAdd}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-medium shadow-sm transition-all active:scale-95"
-          title="Quick Add Creator / Task"
-        >
-          <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">Add Creator</span>
-        </button>
-
         {/* AI Assistant Button */}
         <button
           id="ai-assistant-header-btn"

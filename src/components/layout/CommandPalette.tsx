@@ -12,6 +12,7 @@ import {
   BarChart3
 } from 'lucide-react';
 import { Creator, Campaign, Task } from '../../types';
+import { ActiveTab } from './Sidebar';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -21,7 +22,7 @@ interface CommandPaletteProps {
   tasks: Task[];
   onSelectCreator: (cr: Creator) => void;
   onSelectCampaign: (cmp: Campaign) => void;
-  onSelectTab: (tab: any) => void;
+  onSelectTab: (tab: ActiveTab) => void;
   onOpenQuickAdd: () => void;
   onOpenAi: () => void;
 }
@@ -200,12 +201,12 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     }}
                     className="w-full px-3 py-2 rounded-lg flex items-center gap-3 text-xs text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                   >
-                    <img src={cr.avatar} alt={cr.displayName} className="w-7 h-7 rounded-full object-cover" />
-                    <div className="flex flex-col text-left">
-                      <span className="font-semibold">{cr.displayName}</span>
-                      <span className="text-[11px] text-slate-400">@{cr.handle} • {cr.category}</span>
+                    <img src={cr.avatar} alt={cr.displayName} className="w-7 h-7 rounded-full object-cover shrink-0" />
+                    <div className="flex flex-col text-left min-w-0">
+                      <span className="font-semibold truncate">{cr.displayName}</span>
+                      <span className="text-[11px] text-slate-400 truncate">@{cr.handle} • {cr.category}</span>
                     </div>
-                    <span className="ml-auto px-2 py-0.5 text-[10px] font-semibold rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                    <span className="ml-auto shrink-0 px-2 py-0.5 text-[10px] font-semibold rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
                       Score: {cr.brandFitScore}
                     </span>
                   </button>

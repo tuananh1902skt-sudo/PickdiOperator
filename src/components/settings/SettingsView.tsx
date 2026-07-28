@@ -1,24 +1,33 @@
-import React, { useEffect, useState } from 'react';
-import { Settings, User, Sparkles, Database, Building2, Plus, Check } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Settings, User, Sparkles, Building2, Plus, Check, Mail, Save, KeyRound } from 'lucide-react';
 import { Workspace } from '../../types';
 import { WorkspaceBanner } from '../layout/WorkspaceBanner';
+import { AgentPromptStudio } from './AgentPromptStudio';
+import { AiProviderSettings } from './AiProviderSettings';
+import { OutreachTemplateSettings } from './OutreachTemplateSettings';
+
+const SECTIONS = [
+  { id: 'workspaces', label: 'Brand Workspaces', icon: Building2 },
+  { id: 'ai-copilot', label: 'AI Copilot', icon: Sparkles },
+  { id: 'ai-providers', label: 'AI Providers', icon: Sparkles },
+  { id: 'agent-studio', label: 'Agent Prompt Studio', icon: Sparkles },
+  { id: 'profile', label: 'Operator Profile', icon: User },
+  { id: 'email', label: 'Gmail Outreach Sync', icon: Mail },
+  { id: 'outreach-templates', label: 'Outreach Templates', icon: Mail },
+] as const;
 
 interface SettingsViewProps {
   activeWorkspace?: Workspace;
   workspaces?: Workspace[];
   onSelectWorkspace?: (id: string) => void;
   onAddWorkspace?: (ws: Omit<Workspace, 'id'>) => void;
-  showMockData?: boolean;
-  setShowMockData?: (val: boolean) => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   activeWorkspace,
   workspaces = [],
   onSelectWorkspace,
-  onAddWorkspace,
-  showMockData = true,
-  setShowMockData
+  onAddWorkspace
 }) => {
   const defaultSignature =
     "Best regards,\nAnh Tuan | Affiliate Operator\n" + (activeWorkspace?.name || "d'Alba Official Store Vietnam");
@@ -39,6 +48,64 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     () => localStorage.getItem('pickdi_auto_draft') !== 'false'
   );
 
+  // Gmail SMTP/IMAP configuration state
+  const [gmailUser, setGmailUser] = useState('');
+  const [appPassword, setAppPassword] = useState('');
+  const [emailBrand, setEmailBrand] = useState('');
+  const [emailProduct, setEmailProduct] = useState('');
+  const [hasAppPassword, setHasAppPassword] = useState(false);
+  const [emailConfigLoading, setEmailConfigLoading] = useState(false);
+  const [emailConfigSaving, setEmailConfigSaving] = useState(false);
+  const [emailSaveMessage, setEmailSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Load Gmail email config on mount
+  useEffect(() => {
+    setEmailConfigLoading(true);
+    fetch('/api/settings/email')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.data) {
+          setGmailUser(data.data.gmailUser || '');
+          setEmailBrand(data.data.brand || '');
+          setEmailProduct(data.data.product || '');
+          setHasAppPassword(Boolean(data.data.hasAppPassword));
+        }
+      })
+      .catch(err => console.error('Failed to load email config:', err))
+      .finally(() => setEmailConfigLoading(false));
+  }, []);
+
+  const handleSaveEmailConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEmailConfigSaving(true);
+    setEmailSaveMessage(null);
+    try {
+      const res = await fetch('/api/settings/email', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gmailUser,
+          appPassword: appPassword.trim() || undefined,
+          brand: emailBrand,
+          product: emailProduct
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setHasAppPassword(Boolean(data.data.hasAppPassword));
+        setAppPassword('');
+        setEmailSaveMessage({ type: 'success', text: 'Đã lưu cấu hình Gmail Outreach thành công!' });
+      } else {
+        setEmailSaveMessage({ type: 'error', text: data.message || 'Lưu thất bại' });
+      }
+    } catch (err: any) {
+      console.error('Save email config error:', err);
+      setEmailSaveMessage({ type: 'error', text: 'Lỗi kết nối máy chủ. Vui lòng kiểm tra mạng và thử lại.' });
+    } finally {
+      setEmailConfigSaving(false);
+    }
+  };
+
   // Auto-save operator preferences as they change — there's no separate Save button,
   // so without this every edit was silently lost on navigation/reload.
   useEffect(() => {
@@ -56,6 +123,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   useEffect(() => {
     localStorage.setItem('pickdi_auto_draft', String(autoDraftEnabled));
   }, [autoDraftEnabled]);
+
+  // Scrollspy for the section nav
+  const [activeSection, setActiveSection] = useState<string>(SECTIONS[0].id);
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      entries => {
+        const visible = entries
+          .filter(e => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible[0]) setActiveSection(visible[0].target.id);
+      },
+      { rootMargin: '-15% 0px -70% 0px', threshold: 0 }
+    );
+    SECTIONS.forEach(s => {
+      const el = sectionRefs.current[s.id];
+      if (el) observer.observe(el);
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  const scrollToSection = (id: string) => {
+    sectionRefs.current[id]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   // New Workspace Modal state
   const [isCreatingWs, setIsCreatingWs] = useState(false);
@@ -92,19 +184,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-12 max-w-4xl animate-in fade-in duration-200">
+    <div className="pb-12 max-w-7xl mx-auto animate-in fade-in duration-200">
       {/* Workspace Banner */}
       {activeWorkspace && (
-        <WorkspaceBanner
-          activeWorkspace={activeWorkspace}
-          workspaces={workspaces}
-          onSelectWorkspace={onSelectWorkspace || (() => {})}
-          activeCreatorCount={activeWorkspace.creatorCount || 0}
-          activeCampaignCount={activeWorkspace.activeCampaignCount || 0}
-        />
+        <div className="mb-6">
+          <WorkspaceBanner
+            activeWorkspace={activeWorkspace}
+            workspaces={workspaces}
+            onSelectWorkspace={onSelectWorkspace || (() => {})}
+            activeCreatorCount={activeWorkspace.creatorCount || 0}
+            activeCampaignCount={activeWorkspace.activeCampaignCount || 0}
+          />
+        </div>
       )}
 
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs flex items-center justify-between">
+      <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <Settings className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
@@ -117,15 +211,48 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <button
           onClick={() => setIsCreatingWs(true)}
-          className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
+          className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all shrink-0"
         >
           <Plus className="w-4 h-4" />
           Create New Workspace
         </button>
       </div>
 
+      <div className="flex items-start gap-6">
+        {/* Section Nav */}
+        <nav className="hidden lg:block w-56 shrink-0 sticky top-6 self-start">
+          <ul className="space-y-1">
+            {SECTIONS.map(s => {
+              const Icon = s.icon;
+              const isActive = activeSection === s.id;
+              return (
+                <li key={s.id}>
+                  <button
+                    onClick={() => scrollToSection(s.id)}
+                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-left transition-all ${
+                      isActive
+                        ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300'
+                        : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800/60 dark:text-slate-400'
+                    }`}
+                  >
+                    <Icon className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'}`} />
+                    {s.label}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0 space-y-6">
+
       {/* Workspaces Management Section */}
-      <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-4">
+      <div
+        id="workspaces"
+        ref={el => { sectionRefs.current['workspaces'] = el; }}
+        className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-4 scroll-mt-6"
+      >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Building2 className="w-5 h-5 text-indigo-600" />
@@ -136,7 +263,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <span className="text-xs text-slate-400">Data & creators are isolated per workspace</span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {workspaces.map(ws => {
             const isActive = ws.id === activeWorkspace?.id;
             return (
@@ -277,48 +404,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         )}
       </div>
 
-      {/* Settings Section: Mock Data Controls */}
-      <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Database className="w-5 h-5 text-amber-500" />
-            <div>
-              <h3 className="font-bold text-slate-900 dark:text-white text-sm">
-                Hiển thị Dữ liệu Mẫu (Mock Data)
-              </h3>
-              <p className="text-xs text-slate-500">
-                Cho phép ẩn/hiện toàn bộ dữ liệu creator, chiến dịch, email mẫu để bạn chỉ làm việc với data thật đã quét bằng Extension.
-              </p>
-            </div>
-          </div>
-
-          {setShowMockData && (
-            <button
-              onClick={() => setShowMockData(!showMockData)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-                showMockData
-                  ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-sm'
-                  : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700'
-              }`}
-            >
-              <Database className="w-4 h-4" />
-              <span>{showMockData ? 'Đang BẬT Dữ liệu mẫu' : 'Đang ẨN Dữ liệu mẫu'}</span>
-            </button>
-          )}
-        </div>
-
-        <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl text-xs text-slate-600 dark:text-slate-300 space-y-1">
-          <p>
-            • <strong>Khi Bật:</strong> Hệ thống bao gồm 6 Creator mẫu, 3 Chiến dịch mẫu & Lịch sử tương tác mẫu để trải nghiệm giao diện.
-          </p>
-          <p>
-            • <strong>Khi Tắt:</strong> Toàn bộ dữ liệu mẫu bị ẩn. CRM chỉ hiển thị những Creator do Tampermonkey Userscript cào trực tiếp từ TikTok One / Affiliate.
-          </p>
-        </div>
-      </div>
-
       {/* Settings Section 1: AI & Gemini Status */}
-      <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-4">
+      <div
+        id="ai-copilot"
+        ref={el => { sectionRefs.current['ai-copilot'] = el; }}
+        className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-4 scroll-mt-6"
+      >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-indigo-600" />
@@ -335,9 +426,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           Server-side API key is automatically injected by AI Studio at runtime into Express server.
         </p>
 
-        <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl space-y-3 text-xs">
-          <div className="flex items-center justify-between">
-            <div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl">
+            <div className="pr-3">
               <span className="font-bold text-slate-800 dark:text-slate-200">Auto-Score New Lead Profile</span>
               <p className="text-slate-400 text-[11px]">Automatically calculate Brand Fit & Risk score on creator creation</p>
             </div>
@@ -345,12 +436,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               type="checkbox"
               checked={autoScoreEnabled}
               onChange={e => setAutoScoreEnabled(e.target.checked)}
-              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 shrink-0"
             />
           </div>
 
-          <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-700">
-            <div>
+          <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl">
+            <div className="pr-3">
               <span className="font-bold text-slate-800 dark:text-slate-200">Auto-Generate Outreach Drafts</span>
               <p className="text-slate-400 text-[11px]">Pre-generate email draft when assigning creator to campaign</p>
             </div>
@@ -358,20 +449,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               type="checkbox"
               checked={autoDraftEnabled}
               onChange={e => setAutoDraftEnabled(e.target.checked)}
-              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 shrink-0"
             />
           </div>
         </div>
       </div>
 
+      <div
+        id="ai-providers"
+        ref={el => { sectionRefs.current['ai-providers'] = el; }}
+        className="scroll-mt-6"
+      >
+        <AiProviderSettings />
+      </div>
+
+      <div
+        id="agent-studio"
+        ref={el => { sectionRefs.current['agent-studio'] = el; }}
+        className="scroll-mt-6"
+      >
+        <AgentPromptStudio />
+      </div>
+
       {/* Settings Section 2: Operator Profile */}
-      <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-4 text-xs">
+      <div
+        id="profile"
+        ref={el => { sectionRefs.current['profile'] = el; }}
+        className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-4 text-xs scroll-mt-6"
+      >
         <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
           <User className="w-4 h-4 text-indigo-600" />
           Operator Profile & Email Signature
         </h3>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Operator Display Name</label>
             <input
@@ -401,6 +512,144 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             onChange={e => setSignature(e.target.value)}
             className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-[11px]"
           />
+        </div>
+      </div>
+
+      {/* Settings Section 3: Gmail SMTP/IMAP Outreach Config */}
+      <div
+        id="email"
+        ref={el => { sectionRefs.current['email'] = el; }}
+        className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-4 text-xs scroll-mt-6"
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+            <Mail className="w-4 h-4 text-indigo-600" />
+            Gmail Outreach 2-way Sync (SMTP / IMAP)
+          </h3>
+          {hasAppPassword ? (
+            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 flex items-center gap-1">
+              <Check className="w-3 h-3" /> Gmail Connected
+            </span>
+          ) : (
+            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+              Chưa cấu hình App Password
+            </span>
+          )}
+        </div>
+
+        <p className="text-slate-500 text-xs">
+          Cấu hình Gmail App Password để tự động gửi email outreach thực tế và đồng bộ tin nhắn creator phản hồi qua IMAP.
+        </p>
+
+        {/* Security Guide Callout */}
+        <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-xl text-[11px] text-amber-900 dark:text-amber-200 space-y-1">
+          <div className="font-bold flex items-center gap-1.5">
+            <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+            Hướng dẫn tạo Google App Password:
+          </div>
+          <p>
+            Cần bật 2FA trên Google Account rồi tạo App Password tại{' '}
+            <a
+              href="https://myaccount.google.com/apppasswords"
+              target="_blank"
+              rel="noreferrer"
+              className="underline font-bold text-indigo-600 dark:text-indigo-400"
+            >
+              myaccount.google.com/apppasswords
+            </a>{' '}
+            — không dùng mật khẩu Gmail thông thường.
+          </p>
+        </div>
+
+        <form onSubmit={handleSaveEmailConfig} className="space-y-3 pt-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Địa chỉ Gmail *
+              </label>
+              <input
+                type="email"
+                required
+                placeholder="your.brand@gmail.com"
+                value={gmailUser}
+                onChange={e => setGmailUser(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Gmail App Password {hasAppPassword ? '(Đã lưu - để trống nếu không đổi)' : '*'}
+              </label>
+              <input
+                type="password"
+                placeholder={hasAppPassword ? '•••••••••••••••• (Đã lưu)' : 'xxxx xxxx xxxx xxxx'}
+                value={appPassword}
+                onChange={e => setAppPassword(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Tên Brand mặc định
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. d'Alba Vietnam"
+                value={emailBrand}
+                onChange={e => setEmailBrand(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Tên Sản phẩm mặc định
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. First Spray Serum"
+                value={emailProduct}
+                onChange={e => setEmailProduct(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+          </div>
+
+          {emailSaveMessage && (
+            <div
+              className={`p-2.5 rounded-xl text-xs font-semibold ${
+                emailSaveMessage.type === 'success'
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900'
+                  : 'bg-rose-50 text-rose-800 border border-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-900'
+              }`}
+            >
+              {emailSaveMessage.text}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end pt-2">
+            <button
+              type="submit"
+              disabled={emailConfigSaving || !gmailUser.trim()}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-xs flex items-center gap-1.5 text-xs"
+            >
+              <Save className="w-3.5 h-3.5" />
+              {emailConfigSaving ? 'Đang lưu...' : 'Lưu cấu hình Gmail'}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div
+        id="outreach-templates"
+        ref={el => { sectionRefs.current['outreach-templates'] = el; }}
+        className="scroll-mt-6"
+      >
+        <OutreachTemplateSettings />
+      </div>
+
         </div>
       </div>
     </div>

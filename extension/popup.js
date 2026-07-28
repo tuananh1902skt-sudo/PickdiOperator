@@ -19,6 +19,46 @@ function getWebappUrl() {
   return (document.getElementById('webappUrl').value.trim() || 'http://localhost:3000').replace(/\/$/, '');
 }
 
+// host_permissions only covers tiktok.com/localhost/127.0.0.1 out of the box — a custom
+// (e.g. staging/production) webappUrl needs its origin granted at runtime via the
+// optional_host_permissions declared in manifest.json, or fetches to it hit plain CORS
+// failures with no recovery path.
+async function ensureWebappHostPermission(webappUrl) {
+  let origin;
+  try {
+    origin = new URL(webappUrl).origin + '/*';
+  } catch {
+    return false;
+  }
+  const hasPermission = await chrome.permissions.contains({ origins: [origin] });
+  if (hasPermission) return true;
+  return chrome.permissions.request({ origins: [origin] });
+}
+
+// Renders plain text safely (no innerHTML) — several status strings here embed data
+// scraped from TikTok (handle/bio/nickname), which the creator themselves controls, so
+// building HTML via string interpolation would let an attacker-crafted profile execute
+// script inside this extension's popup (chrome.storage/chrome.tabs/chrome.scripting access).
+function setStatusText(el, text, color) {
+  el.textContent = text;
+  el.style.color = color || '';
+}
+
+// AGENTS.md network/CORS-fallback rule: when a direct POST sync to the CRM fails
+// (CORS error, network drop, non-JSON response), copy the payload to the clipboard
+// instead of just losing the scraped data, so the user can paste it into the CRM's
+// Import modal.
+async function copyToClipboardFallback(payload, statusEl) {
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    const prevColor = statusEl.style.color;
+    const prevText = statusEl.textContent;
+    setStatusText(statusEl, `${prevText} — 📋 Đã copy data vào clipboard, dán thủ công vào CRM Import.`, prevColor);
+  } catch (err) {
+    console.error('Clipboard fallback failed:', err);
+  }
+}
+
 // ================== TÌM CREATOR TỰ ĐỘNG QUA TIKTOK ONE ==================
 // Toàn bộ việc cào (mở tab, gọi API, đẩy về webapp) chạy trong background.js —
 // KHÔNG chạy trong popup, vì popup.html bị Chrome tự đóng ngay khi mất focus
@@ -28,8 +68,13 @@ function getWebappUrl() {
 
 function renderFindStatus(log, running) {
   const statusDiv = document.getElementById('findStatus');
-  const text = (log && log.length) ? log.join('<br>') : '';
-  statusDiv.innerHTML = running ? (text + '<br>⏳ Đang chạy...') : text;
+  statusDiv.textContent = '';
+  const lines = (log && log.length) ? [...log] : [];
+  if (running) lines.push('⏳ Đang chạy...');
+  lines.forEach((line, i) => {
+    if (i > 0) statusDiv.appendChild(document.createElement('br'));
+    statusDiv.appendChild(document.createTextNode(line));
+  });
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -41,8 +86,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-document.getElementById('findCreatorsBtn').addEventListener('click', () => {
+document.getElementById('findCreatorsBtn').addEventListener('click', async () => {
   const webappUrl = getWebappUrl();
+  if (!(await ensureWebappHostPermission(webappUrl))) {
+    renderFindStatus(['❌ Cần cấp quyền truy cập webapp URL này trước khi cào.'], false);
+    return;
+  }
   const filters = {
     follower_min: Number(document.getElementById('followerMin').value) || undefined,
     follower_max: Number(document.getElementById('followerMax').value) || undefined,
@@ -161,7 +210,12 @@ document.getElementById('pushDetailBtn').addEventListener('click', async () => {
   const webappUrl = getWebappUrl();
   chrome.storage.local.set({ webappUrl });
 
-  detailStatusDiv.innerHTML = '⏳ Đang đọc data đã bắt được...';
+  if (!(await ensureWebappHostPermission(webappUrl))) {
+    setStatusText(detailStatusDiv, '❌ Cần cấp quyền truy cập webapp URL này trước.', 'red');
+    return;
+  }
+
+  setStatusText(detailStatusDiv, '⏳ Đang đọc data đã bắt được...');
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
   chrome.scripting.executeScript({
@@ -171,15 +225,15 @@ document.getElementById('pushDetailBtn').addEventListener('click', async () => {
   }, async (results) => {
     const scraped = results && results[0] && results[0].result;
     if (!scraped) {
-      detailStatusDiv.innerHTML = "<span style='color:red;'>❌ Không đọc được trang.</span>";
+      setStatusText(detailStatusDiv, '❌ Không đọc được trang.', 'red');
       return;
     }
     if (scraped.error) {
-      detailStatusDiv.innerHTML = `<span style='color:orange;'>⚠️ ${scraped.error}</span>`;
+      setStatusText(detailStatusDiv, `⚠️ ${scraped.error}`, 'orange');
       return;
     }
 
-    detailStatusDiv.innerHTML = '🔄 Đang đẩy chi tiết về webapp...';
+    setStatusText(detailStatusDiv, '🔄 Đang đẩy chi tiết về webapp...');
     try {
       const res = await fetch(`${webappUrl}/api/creators/update-detail`, {
         method: 'POST',
@@ -187,11 +241,15 @@ document.getElementById('pushDetailBtn').addEventListener('click', async () => {
         body: JSON.stringify({ handle: scraped.handle, tiktokOneId: scraped.tiktokOneId, detail: scraped.detail }),
       });
       const data = await res.json();
-      detailStatusDiv.innerHTML = data.status === 'ok'
-        ? `<span style='color:green;'>✅ Đã cập nhật chi tiết cho ${data.creator.handle}</span>`
-        : `<span style='color:red;'>❌ ${data.message}</span>`;
+      if (data.status === 'ok') {
+        setStatusText(detailStatusDiv, `✅ Đã cập nhật chi tiết cho ${data.creator.handle}`, 'green');
+      } else {
+        setStatusText(detailStatusDiv, `❌ ${data.message}`, 'red');
+      }
     } catch (err) {
-      detailStatusDiv.innerHTML = `<span style='color:red;'>❌ Lỗi kết nối webapp: ${err.message}</span>`;
+      console.error('Update detail error:', err);
+      setStatusText(detailStatusDiv, '❌ Không thể kết nối tới webapp. Đã sao chép dữ liệu vào clipboard để dán thủ công.', 'red');
+      await copyToClipboardFallback({ handle: scraped.handle, tiktokOneId: scraped.tiktokOneId, detail: scraped.detail }, detailStatusDiv);
     }
   });
 });
@@ -328,7 +386,12 @@ document.getElementById('pushEngagementBtn').addEventListener('click', async () 
   const webappUrl = getWebappUrl();
   chrome.storage.local.set({ webappUrl });
 
-  engagementStatusDiv.innerHTML = '⏳ Đang đọc trang...';
+  if (!(await ensureWebappHostPermission(webappUrl))) {
+    setStatusText(engagementStatusDiv, '❌ Cần cấp quyền truy cập webapp URL này trước.', 'red');
+    return;
+  }
+
+  setStatusText(engagementStatusDiv, '⏳ Đang đọc trang...');
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
   chrome.scripting.executeScript({
@@ -338,34 +401,40 @@ document.getElementById('pushEngagementBtn').addEventListener('click', async () 
   }, async (results) => {
     const scraped = results && results[0] && results[0].result;
     if (!scraped) {
-      engagementStatusDiv.innerHTML = "<span style='color:red;'>❌ Không đọc được trang.</span>";
+      setStatusText(engagementStatusDiv, '❌ Không đọc được trang.', 'red');
       return;
     }
     if (scraped.error) {
-      engagementStatusDiv.innerHTML = `<span style='color:orange;'>⚠️ ${scraped.error}</span>`;
+      setStatusText(engagementStatusDiv, `⚠️ ${scraped.error}`, 'orange');
       return;
     }
 
-    engagementStatusDiv.innerHTML = '🔄 Đang đẩy engagement metrics về webapp...';
+    const payload = {
+      handle: scraped.handle,
+      avatarUrl: scraped.avatarUrl,
+      bio: scraped.bio,
+      email: scraped.email,
+      instagram: scraped.instagram,
+      engagement: scraped.engagement,
+    };
+
+    setStatusText(engagementStatusDiv, '🔄 Đang đẩy engagement metrics về webapp...');
     try {
       const res = await fetch(`${webappUrl}/api/creators/update-engagement`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          handle: scraped.handle,
-          avatarUrl: scraped.avatarUrl,
-          bio: scraped.bio,
-          email: scraped.email,
-          instagram: scraped.instagram,
-          engagement: scraped.engagement,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
-      engagementStatusDiv.innerHTML = data.status === 'ok'
-        ? `<span style='color:green;'>✅ Đã cập nhật engagement cho ${data.creator.handle}</span>`
-        : `<span style='color:red;'>❌ ${data.message}</span>`;
+      if (data.status === 'ok') {
+        setStatusText(engagementStatusDiv, `✅ Đã cập nhật engagement cho ${data.creator.handle}`, 'green');
+      } else {
+        setStatusText(engagementStatusDiv, `❌ ${data.message}`, 'red');
+      }
     } catch (err) {
-      engagementStatusDiv.innerHTML = `<span style='color:red;'>❌ Lỗi kết nối webapp: ${err.message}</span>`;
+      console.error('Update engagement error:', err);
+      setStatusText(engagementStatusDiv, '❌ Không thể kết nối tới webapp. Đã sao chép dữ liệu vào clipboard để dán thủ công.', 'red');
+      await copyToClipboardFallback(payload, engagementStatusDiv);
     }
   });
 });

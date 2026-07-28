@@ -61,11 +61,15 @@
     const p = origFetch.apply(this, args);
     if (url.includes('/api/post/item_list')) {
       p.then(function (res) {
-        res.clone().text().then(ingest);
+        if (res && res.clone) {
+          res.clone().text().then(ingest).catch(function () {});
+        }
       }).catch(function () {});
     } else if (url.includes('/CreativeOne/MatchPack/MGetCreatorsCard')) {
       p.then(function (res) {
-        res.clone().text().then(ingestCreatorCard);
+        if (res && res.clone) {
+          res.clone().text().then(ingestCreatorCard).catch(function () {});
+        }
       }).catch(function () {});
     }
     return p;

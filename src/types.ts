@@ -66,7 +66,11 @@ export interface CreatorScores {
 
 export interface Creator {
   id: string;
-  workspaceId?: string; // Active workspace ID or null if global lead
+  // Workspace nơi creator này được tạo ra đầu tiên (hiển thị "Created by") — KHÔNG dùng để
+  // xác định creator "thuộc" brand nào nữa. 1 creator có thể chạy campaign ở nhiều brand cùng
+  // lúc; brand nào đang làm việc với creator này được suy ra từ CreatorCampaignAssignment[]
+  // (xem bên dưới), không phải field đơn này.
+  workspaceId?: string;
   source?: 'scraper' | 'manual'; // how this creator entered the CRM — drives the "Auto-Synced" badge
   handle: string;
   displayName: string;
@@ -92,9 +96,10 @@ export interface Creator {
   phone?: string;
   instagram?: string;
   rateCard?: string;
-  campaignId?: string;
-  campaignName?: string;
   lastContactAt?: string;
+  // Đã đánh dấu "Không liên hệ nữa" — loại vĩnh viễn khỏi mọi đợt gửi outreach hàng loạt
+  // (vẫn cho phép gửi tay từng người nếu operator chủ động mở EmailComposerModal).
+  doNotContact?: boolean;
   createdAt: string;
   updatedAt?: string;
   notes: CreatorNote[];
@@ -181,10 +186,50 @@ export interface Campaign {
   isMock?: boolean;
 }
 
+// Quan hệ nhiều-nhiều Creator ↔ Campaign — 1 creator có thể chạy nhiều campaign ở nhiều
+// brand/workspace cùng lúc. workspaceId được copy từ campaign.workspaceId lúc assign (để
+// filter theo workspace không cần join), và status là trạng thái RIÊNG của lần hợp tác này —
+// không dùng chung Creator.status vì cùng 1 creator có thể đang "Negotiating" ở brand A nhưng
+// đã "Posted" ở brand B.
+export interface CreatorCampaignAssignment {
+  id: string;
+  creatorId: string;
+  campaignId: string;
+  campaignName: string;
+  workspaceId?: string;
+  status: CreatorStatus;
+  assignedAt: string;
+  ratePaid?: number;
+  notes?: string;
+}
+
 export interface CampaignTargetAudience {
   gender?: 'Male' | 'Female' | 'Any';
   ageGroups?: string[]; // vd ['18-24','25-34'] — khớp với format topAgeGroup của TikTok One
   countries?: string[];
+}
+
+export interface UnmatchedInboundEmail {
+  id: string;
+  senderEmail: string;
+  senderName?: string;
+  subject: string;
+  content: string; // đã strip quote
+  receivedAt: string;
+  candidateCreatorIds: string[]; // các creator khớp senderEmail, chờ Operator chọn 1
+  resolved: boolean; // true sau khi Operator đã gán vào 1 conversation cụ thể
+}
+
+export interface CheckInboxResult {
+  imported: number;
+  skipped: number;
+  skippedReasons: {
+    forwarded: number;
+    duplicate: number;
+    no_match: number;
+    ambiguous_multi_match: number;
+  };
+  needsManualReview: number;
 }
 
 export interface OutreachEmail {
@@ -201,6 +246,10 @@ export interface OutreachEmail {
   sentAt?: string;
   repliedAt?: string;
   followUpCount: number;
+  // Drives which outreach agent (first contact / reminder 1-3) generates the next message
+  // for this thread — see src/lib/agents/outreach.ts.
+  sequenceStage?: 'first' | 'reminder_1' | 'reminder_2' | 'reminder_3' | 'closed';
+  messageId?: string;
   isMock?: boolean;
 }
 
@@ -211,6 +260,9 @@ export interface Message {
   content: string;
   isAiGenerated?: boolean;
   createdAt: string;
+  messageId?: string;
+  inReplyTo?: string;
+  subject?: string;
 }
 
 export interface Conversation {
@@ -299,7 +351,7 @@ export interface ActivityItem {
   actor: string;
   action: string;
   target: string;
-  entityType: 'creator' | 'campaign' | 'task' | 'review' | 'outreach' | 'email';
+  entityType: 'creator' | 'campaign' | 'task' | 'review' | 'outreach' | 'email' | 'workspace';
   entityId: string;
   timestamp: string;
   isMock?: boolean;
@@ -318,4 +370,46 @@ export interface DashboardKPIs {
 export interface AiRequestPayload {
   action: 'research' | 'email' | 'reply' | 'review' | 'daily-summary';
   promptData: Record<string, any>;
+}
+
+// One draft (and eventual send outcome) for a single creator inside a bulk outreach job —
+// see src/lib/agents/outreach.ts + server.ts /api/outreach/bulk/* routes.
+export interface BulkOutreachItem {
+  creatorId: string;
+  creatorName: string;
+  creatorHandle: string;
+  email?: string;
+  subject: string;
+  body: string;
+  // 'ai' = written by a configured AI provider; 'template_fallback' = every configured
+  // provider failed, filled from data/outreach-templates.json instead — surfaced to the
+  // operator as a warning in the review step, never sent silently.
+  source: 'ai' | 'template_fallback';
+  status:
+    | 'pending'
+    | 'skipped_no_email'
+    | 'skipped_do_not_contact'
+    | 'skipped_cooldown'
+    | 'draft'
+    | 'sending'
+    | 'sent'
+    | 'failed';
+  skipReason?: string;
+  error?: string;
+  sentAt?: string;
+  outreachId?: string;
+}
+
+export interface BulkOutreachJob {
+  id: string;
+  workspaceId?: string;
+  campaignId?: string;
+  campaignName?: string;
+  sequenceStage: 'first' | 'reminder_1' | 'reminder_2' | 'reminder_3';
+  status: 'generating' | 'ready' | 'sending' | 'done';
+  pacingMinSeconds: number;
+  pacingMaxSeconds: number;
+  dailyCap: number;
+  createdAt: string;
+  items: BulkOutreachItem[];
 }

@@ -19,14 +19,29 @@ async function setLastLog(line) {
   await chrome.storage.local.set({ findCreatorsLog: next });
 }
 
-function waitForTabComplete(tabId) {
-  return new Promise((resolve) => {
+// Timeout guard: if the tab is closed/discarded/suspended before reaching 'complete',
+// the listener would otherwise never resolve — permanently wedging findCreatorsRunning
+// and leaking the tab (the caller's `finally { chrome.tabs.remove(...) }` never runs).
+function waitForTabComplete(tabId, timeoutMs = 25000) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
     function listener(id, info) {
       if (id === tabId && info.status === 'complete') {
-        chrome.tabs.onUpdated.removeListener(listener);
+        cleanup();
         resolve();
       }
     }
+    function cleanup() {
+      if (settled) return;
+      settled = true;
+      chrome.tabs.onUpdated.removeListener(listener);
+      clearTimeout(timer);
+    }
+    const timer = setTimeout(() => {
+      if (settled) return;
+      cleanup();
+      reject(new Error(`Tab ${tabId} did not finish loading within ${timeoutMs}ms`));
+    }, timeoutMs);
     chrome.tabs.onUpdated.addListener(listener);
   });
 }
@@ -382,15 +397,28 @@ async function runFindCreators(webappUrl, filters, fetchFullDetail) {
       await fetchAllCreatorFullDetails(webappUrl, normalized);
     }
   } catch (err) {
-    await setLastLog(`❌ ${err.message}`);
+    console.error('runFindCreators error:', err);
+    await setLastLog('❌ Đã xảy ra lỗi khi cào dữ liệu TikTok One. Vui lòng kiểm tra bạn đã đăng nhập TikTok One và thử lại.');
   }
 
   await appendLog('🎉 Hoàn tất.');
   await chrome.storage.local.set({ findCreatorsRunning: false });
 }
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Defense-in-depth: this extension has no externally_connectable configured today, so no
+  // web page can reach this listener, but guard against a future manifest change regardless.
+  if (sender.id !== chrome.runtime.id) return;
+
   if (message && message.type === 'FIND_CREATORS') {
-    runFindCreators(message.webappUrl, message.filters || {}, !!message.fetchFullDetail);
+    chrome.storage.local.get(['findCreatorsRunning']).then(({ findCreatorsRunning }) => {
+      if (findCreatorsRunning) {
+        sendResponse({ status: 'already_running' });
+        return;
+      }
+      runFindCreators(message.webappUrl, message.filters || {}, !!message.fetchFullDetail);
+      sendResponse({ status: 'started' });
+    });
   }
+  return true;
 });

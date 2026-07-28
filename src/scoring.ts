@@ -197,8 +197,11 @@ export function scoreCreator(creator: Creator, campaign?: Campaign): CreatorScor
   const { flags, penalty } = computeRiskFlags(creator);
   const totalScore = Math.round(clamp01((weightedScore - penalty) / 100) * 100);
 
+  // A creator with zero scorable fields (not yet scraped/enriched) must not read the same
+  // as one that scored poorly on every available metric — those are very different states.
   const recommendation =
-    totalScore >= 85 ? 'Priority A - Immediate Outreach'
+    usableWeight === 0 ? 'Insufficient Data - Not Yet Scraped'
+    : totalScore >= 85 ? 'Priority A - Immediate Outreach'
     : totalScore >= 70 ? 'Priority B - Recommended'
     : totalScore >= 50 ? 'Priority C - Optional'
     : 'Not Recommended';

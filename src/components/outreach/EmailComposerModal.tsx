@@ -7,7 +7,7 @@ interface EmailComposerModalProps {
   onClose: () => void;
   creator: Creator | null;
   campaigns: Campaign[];
-  onSendEmail: (payload: { creatorId: string; creatorName: string; creatorHandle: string; campaignId?: string; campaignName?: string; subject: string; body: string }) => void;
+  onSendEmail: (payload: { creatorId: string; creatorName: string; creatorHandle: string; campaignId?: string; campaignName?: string; subject: string; body: string }) => Promise<boolean>;
 }
 
 export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
@@ -21,6 +21,8 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [generateError, setGenerateError] = useState('');
 
   // Reset the draft whenever a different creator is opened, since this modal stays
   // mounted and only toggles `isOpen` — otherwise the previous creator's draft leaks through.
@@ -39,6 +41,7 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
 
   const handleGenerateAiEmail = async () => {
     setLoading(true);
+    setGenerateError('');
     try {
       const res = await fetch('/api/ai/email', {
         method: 'POST',
@@ -51,31 +54,43 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
       });
       const data = await res.json();
       if (data.success && data.data) {
-        setSubject(data.data.subject || `Collaboration Offer: ${currentCampaign.name}`);
+        setSubject(data.data.subject || `Collaboration Offer: ${currentCampaign?.name || 'Partnership'}`);
         setBody(data.data.body || '');
+      } else {
+        setGenerateError(data.message || 'AI không thể tạo bản nháp. Vui lòng tự soạn email.');
       }
     } catch (err) {
       console.error(err);
+      setGenerateError('Không thể kết nối tới dịch vụ AI. Vui lòng tự soạn email.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!subject.trim() || !body.trim()) return;
+    if (!subject.trim() || !body.trim() || isSending) return;
 
-    onSendEmail({
-      creatorId: creator.id,
-      creatorName: creator.displayName,
-      creatorHandle: `@${creator.handle}`,
-      campaignId: currentCampaign?.id,
-      campaignName: currentCampaign?.name,
-      subject,
-      body
-    });
+    setIsSending(true);
+    try {
+      const success = await onSendEmail({
+        creatorId: creator.id,
+        creatorName: creator.displayName,
+        creatorHandle: `@${creator.handle}`,
+        campaignId: currentCampaign?.id,
+        campaignName: currentCampaign?.name,
+        subject,
+        body
+      });
 
-    onClose();
+      // Keep the draft open on failure so the composed subject/body aren't lost —
+      // the parent already surfaces an error notification/alert on failure.
+      if (success !== false) {
+        onClose();
+      }
+    } finally {
+      setIsSending(false);
+    }
   };
 
   return (
@@ -110,11 +125,16 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
               <select
                 value={selectedCampaignId}
                 onChange={e => setSelectedCampaignId(e.target.value)}
-                className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
+                disabled={campaigns.length === 0}
+                className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium disabled:opacity-60"
               >
-                {campaigns.map(cmp => (
-                  <option key={cmp.id} value={cmp.id}>{cmp.name}</option>
-                ))}
+                {campaigns.length === 0 ? (
+                  <option value="">No campaigns yet — create one first</option>
+                ) : (
+                  campaigns.map(cmp => (
+                    <option key={cmp.id} value={cmp.id}>{cmp.name}</option>
+                  ))
+                )}
               </select>
             </div>
 
@@ -137,6 +157,10 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
               )}
             </button>
           </div>
+
+          {generateError && (
+            <p className="text-[11px] text-red-600 dark:text-red-400 font-medium -mt-1">{generateError}</p>
+          )}
 
           {/* Email Subject Input */}
           <div>
@@ -186,11 +210,11 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
 
             <button
               type="submit"
-              disabled={!subject.trim() || !body.trim()}
+              disabled={!subject.trim() || !body.trim() || isSending}
               className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-sm flex items-center gap-2"
             >
               <Send className="w-4 h-4" />
-              Send Outreach Email
+              {isSending ? 'Sending...' : 'Send Outreach Email'}
             </button>
           </div>
         </form>

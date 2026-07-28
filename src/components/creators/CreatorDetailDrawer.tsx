@@ -25,7 +25,7 @@ import {
   Pie,
   Cell
 } from 'recharts';
-import { Creator } from '../../types';
+import { Creator, Campaign, Workspace, CreatorCampaignAssignment } from '../../types';
 
 // Data cào từ trước khi videoUrl được thêm vào extension chỉ có itemID — dựng lại link video
 // thật (format chuẩn của TikTok) từ handle + itemID khi field videoUrl chưa có sẵn.
@@ -37,20 +37,30 @@ function buildVideoUrl(handle: string | undefined, itemID: unknown, existingUrl?
 
 interface CreatorDetailDrawerProps {
   creator: Creator | null;
+  campaigns?: Campaign[];
+  workspaces?: Workspace[];
+  assignments?: CreatorCampaignAssignment[];
   onClose: () => void;
   onOpenEmailComposer: (cr: Creator) => void;
   onArchiveCreator: (id: string) => void;
   onAddNote: (creatorId: string, content: string) => void;
   onRunAiResearch: (cr: Creator) => void;
+  onAssignCampaign?: (creatorId: string, campaignId: string) => void;
+  onUnassignCampaign?: (assignmentId: string) => void;
 }
 
 export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
   creator,
+  campaigns = [],
+  workspaces = [],
+  assignments = [],
   onClose,
   onOpenEmailComposer,
   onArchiveCreator,
   onAddNote,
-  onRunAiResearch
+  onRunAiResearch,
+  onAssignCampaign,
+  onUnassignCampaign
 }) => {
   const [activeSection, setActiveSection] = useState<string>('sec-overview');
   const [bookmarked, setBookmarked] = useState(false);
@@ -69,6 +79,7 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
   useEffect(() => {
     const sectionIds = [
       'sec-overview',
+      'sec-campaigns',
       'sec-content',
       'sec-trend',
       'sec-videos',
@@ -144,6 +155,18 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creator?.id]);
+
+  // This drawer stays mounted and only swaps `creator` — without this, a half-typed
+  // note, bookmark, filter, or open video modal from the previous creator leaks
+  // into the next one (e.g. a note gets attached to the wrong creator).
+  useEffect(() => {
+    setBookmarked(false);
+    setNewNoteText('');
+    setContentFilter('all');
+    setTrendSort('recent');
+    setPlayingVideo(null);
+    setActiveSection('sec-overview');
   }, [creator?.id]);
 
   if (!creator) return null;
@@ -435,6 +458,18 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
               </button>
 
               <button
+                id="tab-sec-campaigns"
+                onClick={() => scrollToSection('sec-campaigns')}
+                className={`py-1.5 px-3 rounded-lg whitespace-nowrap transition-all ${
+                  activeSection === 'sec-campaigns'
+                    ? 'bg-teal-600 text-white shadow-xs'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                }`}
+              >
+                Brands & Campaigns ({assignments.filter(a => a.creatorId === creator.id).length})
+              </button>
+
+              <button
                 id="tab-sec-content"
                 onClick={() => scrollToSection('sec-content')}
                 className={`py-1.5 px-3 rounded-lg whitespace-nowrap transition-all ${
@@ -621,6 +656,84 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                     </div>
                   </div>
                 </div>
+              </section>
+
+              {/* SECTION 1B: BRANDS & CAMPAIGNS — 1 creator có thể chạy nhiều campaign ở nhiều
+                  brand cùng lúc, mỗi lần hợp tác có status riêng (xem CreatorCampaignAssignment) */}
+              <section id="sec-campaigns" className="space-y-6 pt-6 border-t border-slate-200 dark:border-slate-800">
+                <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-purple-500 inline-block" />
+                  Brands & Campaigns
+                </h3>
+
+                {(() => {
+                  const crAssignments = assignments.filter(a => a.creatorId === creator.id);
+                  const assignedCampaignIds = new Set(crAssignments.map(a => a.campaignId));
+                  const availableCampaigns = campaigns.filter(cmp => !assignedCampaignIds.has(cmp.id));
+
+                  return (
+                    <div className="space-y-3">
+                      {crAssignments.length === 0 ? (
+                        <p className="text-slate-400 py-6 text-center text-xs">
+                          Creator này chưa được gán vào campaign/brand nào.
+                        </p>
+                      ) : (
+                        crAssignments.map(a => {
+                          const ws = workspaces.find(w => w.id === a.workspaceId);
+                          return (
+                            <div
+                              key={a.id}
+                              className="p-4 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-3"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {ws && (
+                                    <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                                      {ws.code}
+                                    </span>
+                                  )}
+                                  <span className="font-bold text-sm text-slate-900 dark:text-white truncate">{a.campaignName}</span>
+                                </div>
+                                <p className="text-[11px] text-slate-400 mt-0.5">
+                                  Assigned {new Date(a.assignedAt).toLocaleDateString()}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300">
+                                  {a.status}
+                                </span>
+                                {onUnassignCampaign && (
+                                  <button
+                                    onClick={() => onUnassignCampaign(a.id)}
+                                    className="text-xs text-slate-400 hover:text-rose-600 font-bold"
+                                    title="Gỡ khỏi campaign này"
+                                  >
+                                    Gỡ
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+
+                      {onAssignCampaign && availableCampaigns.length > 0 && (
+                        <select
+                          value=""
+                          onChange={e => {
+                            if (e.target.value) onAssignCampaign(creator.id, e.target.value);
+                          }}
+                          className="w-full sm:w-auto p-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold text-slate-500"
+                        >
+                          <option value="">+ Thêm campaign khác cho creator này</option>
+                          {availableCampaigns.map(cmp => (
+                            <option key={cmp.id} value={cmp.id}>{cmp.name} ({cmp.brand})</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  );
+                })()}
               </section>
 
               {/* SECTION 2: CONTENT PERFORMANCE */}

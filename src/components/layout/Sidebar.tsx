@@ -3,6 +3,7 @@ import {
   LayoutGrid,
   Users,
   Send,
+  Inbox,
   Target,
   FileCheck2,
   CheckSquare,
@@ -20,6 +21,7 @@ export type ActiveTab =
   | 'dashboard'
   | 'creators'
   | 'outreach'
+  | 'inbox'
   | 'campaigns'
   | 'reviews'
   | 'tasks'
@@ -35,6 +37,7 @@ interface SidebarProps {
   setCollapsed: (collapsed: boolean) => void;
   unreadNotifsCount: number;
   creatorsCount?: number;
+  unreadInboxCount?: number;
   openAiDrawer: () => void;
   openNotifDrawer?: () => void;
 }
@@ -46,6 +49,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setCollapsed,
   unreadNotifsCount,
   creatorsCount = 0,
+  unreadInboxCount = 0,
   openAiDrawer,
   openNotifDrawer
 }) => {
@@ -53,6 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'dashboard' as ActiveTab, label: 'Dashboard', icon: LayoutGrid },
     { id: 'creators' as ActiveTab, label: 'Creators CRM', icon: Users, countText: creatorsCount > 0 ? `${creatorsCount}` : undefined },
     { id: 'outreach' as ActiveTab, label: 'Outreach & Pipeline', icon: Send },
+    { id: 'inbox' as ActiveTab, label: 'Inbox', icon: Inbox, count: unreadInboxCount },
     { id: 'campaigns' as ActiveTab, label: 'Campaigns', icon: Target },
     { id: 'reviews' as ActiveTab, label: 'Content Reviews', icon: FileCheck2 },
     { id: 'tasks' as ActiveTab, label: 'Tasks', icon: CheckSquare },

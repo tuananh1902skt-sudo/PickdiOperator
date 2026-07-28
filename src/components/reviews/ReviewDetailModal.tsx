@@ -151,13 +151,30 @@ export const ReviewDetailModal: React.FC<ReviewDetailModalProps> = ({
 
               {/* AI Review Results if generated */}
               {aiReviewResult && (
-                <div className="p-3.5 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50/60 dark:bg-indigo-950/40 text-xs space-y-2 animate-in fade-in duration-150">
-                  <div className="flex items-center justify-between font-bold text-indigo-900 dark:text-indigo-200">
-                    <span>Hook Quality Score:</span>
-                    <span className="text-sm text-indigo-600">{aiReviewResult.hookQualityScore}/100</span>
+                <div className="p-3.5 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50/60 dark:bg-indigo-950/40 text-xs space-y-2.5 animate-in fade-in duration-150">
+                  <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-lg text-amber-800 dark:text-amber-300 text-[11px] font-medium flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <span>⚠️ Phân tích dựa trên tiêu đề & context, chưa xem nội dung video thật — Operator cần tự xem video trước khi Approve.</span>
                   </div>
-                  <p><strong>Suggestions:</strong> {aiReviewResult.improvementSuggestions}</p>
-                  <p><strong>AI Verdict:</strong> <span className="font-bold text-emerald-600">{aiReviewResult.recommendation}</span></p>
+
+                  {Array.isArray(aiReviewResult.keyObservations) && aiReviewResult.keyObservations.length > 0 && (
+                    <div>
+                      <span className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Nhận xét từ Metadata:</span>
+                      <ul className="list-disc pl-4 space-y-0.5 text-slate-600 dark:text-slate-300">
+                        {aiReviewResult.keyObservations.map((obs: string, idx: number) => (
+                          <li key={idx}>{obs}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {aiReviewResult.improvementSuggestions && (
+                    <p><strong>Gợi ý cải thiện:</strong> {aiReviewResult.improvementSuggestions}</p>
+                  )}
+
+                  {aiReviewResult.recommendation && (
+                    <p><strong>Khuyến nghị AI:</strong> <span className="font-bold text-emerald-600">{aiReviewResult.recommendation}</span></p>
+                  )}
                 </div>
               )}
 

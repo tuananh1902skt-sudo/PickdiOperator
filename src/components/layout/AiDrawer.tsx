@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Sparkles,
   X,
@@ -12,22 +12,42 @@ import {
   Check,
   RefreshCw,
   Zap,
-  Bot
+  Bot,
+  HelpCircle,
+  Lightbulb
 } from 'lucide-react';
-import { Creator, Campaign } from '../../types';
+import { Creator, Campaign, Conversation, DraftReview, Workspace } from '../../types';
+import { ChatMessage } from './ChatMessage';
+
+// Maps backend errorType codes to a plain-language label instead of showing raw jargon.
+const AI_ERROR_LABELS: Record<string, string> = {
+  missing_api_key: 'Chưa cấu hình AI',
+  invalid_ai_response: 'Phản hồi AI không hợp lệ',
+  ai_call_failed: 'Lỗi hệ thống AI',
+};
+
+function friendlyAiErrorLabel(errorType?: string): string {
+  return (errorType && AI_ERROR_LABELS[errorType]) || 'Lỗi AI';
+}
 
 interface AiDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   creators: Creator[];
   campaigns: Campaign[];
+  conversations?: Conversation[];
+  reviews?: DraftReview[];
+  activeWorkspace?: Workspace;
 }
 
 export const AiDrawer: React.FC<AiDrawerProps> = ({
   isOpen,
   onClose,
   creators,
-  campaigns
+  activeWorkspace,
+  campaigns,
+  conversations = [],
+  reviews = []
 }) => {
   const [activeMode, setActiveTabMode] = useState<
     'chat' | 'research' | 'email' | 'reply' | 'review' | 'digest'
@@ -41,14 +61,37 @@ export const AiDrawer: React.FC<AiDrawerProps> = ({
   const [aiResult, setAiResult] = useState<any>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
+  // Custom inputs for Review mode when no review exists
+  const [customVideoTitle, setCustomVideoTitle] = useState<string>('');
+  const [customDraftUrl, setCustomDraftUrl] = useState<string>('');
+
+  // Tracks which mode + request a fetch was fired for, so a slow response from a mode
+  // the user has since navigated away from can't overwrite the current mode's result.
+  const aiRequestRef = useRef(0);
+  const activeModeRef = useRef(activeMode);
+  activeModeRef.current = activeMode;
+
+  // Initial welcome message formatted in Markdown
+  const initialWelcomeMsg = `### 👋 Xin chào! Tôi là Pickdi AI Affiliate Operator (Gemini 3.6)
+
+Tôi có thể hỗ trợ bạn vận hành chương trình Affiliate TikTok Shop:
+
+* **📌 Hướng dẫn cào dữ liệu**: Cách dùng Pickdi Extension đồng bộ Creator & Chiến dịch về CRM.
+* **📊 Phân tích Creator**: Tính điểm Brand Fit Score, nhận diện kênh thật / kênh ảo.
+* **✉️ Viết Kịch bản Outreach**: Soạn Email tiếp cận ngắn gọn, tỉ lệ phản hồi cao.
+* **💰 Thương lượng & Đàm phán**: Đề xuất mức hoa hồng & phí phẩy tối ưu.
+* **📹 Kiểm tra Video Draft**: Đánh giá Hook power & tuân thủ quy định TikTok.
+
+> 💡 **Mẹo:** Bạn có thể chọn nhanh các mẫu gợi ý bên dưới hoặc gõ câu hỏi cụ thể cho tôi nhé!`;
+
   // Chat message history
   const [chatMessages, setChatMessages] = useState<
     { role: 'user' | 'assistant'; text: string; time: string }[]
   >([
     {
       role: 'assistant',
-      text: 'Xin chào! I am your AI Affiliate Operator Copilot powered by Gemini. How can I assist your TikTok Shop operations today?',
-      time: 'Just now'
+      text: initialWelcomeMsg,
+      time: 'Vừa xong'
     }
   ]);
 
@@ -58,99 +101,174 @@ export const AiDrawer: React.FC<AiDrawerProps> = ({
   const currentCampaign = campaigns.find(c => c.id === selectedCampaignId) || campaigns[0];
 
   const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(err => console.error('Copy to clipboard failed:', err));
   };
 
-  const handleRunAi = async () => {
+  const handleQuickPrompt = (promptText: string) => {
+    if (loading) return; // avoid firing a second overlapping chat request mid-flight
+    setUserPrompt(promptText);
+    executeChatPrompt(promptText);
+  };
+
+  const executeChatPrompt = async (promptText: string) => {
+    if (!promptText.trim()) return;
+
     setLoading(true);
-    setAiResult(null);
+    const updatedHistory = [
+      ...chatMessages,
+      {
+        role: 'user' as const,
+        text: promptText,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+    ];
+    setChatMessages(updatedHistory);
+    setUserPrompt('');
 
     try {
-      if (activeMode === 'chat') {
-        const textMsg = userPrompt;
-        if (!textMsg) return;
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: promptText,
+          messages: updatedHistory,
+          creatorId: currentCreator?.id,
+          campaignId: currentCampaign?.id
+        })
+      });
+      const data = await res.json();
 
-        setChatMessages(prev => [
-          ...prev,
-          { role: 'user', text: textMsg, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
-        ]);
-        setUserPrompt('');
-
-        const res = await fetch('/api/ai/research', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ creator: currentCreator })
-        });
-        const data = await res.json();
-
+      if (!res.ok || !data.success) {
         setChatMessages(prev => [
           ...prev,
           {
             role: 'assistant',
-            text: `Analyzed @${currentCreator.handle}: Brand Fit Score is ${data.data?.brandFitScore || 90}/100. ${data.data?.summary || 'Great candidate for skincare & beauty campaigns!'}`,
+            text: `> ⚠️ **${friendlyAiErrorLabel(data.errorType)}**: ${data.message || 'Không nhận được phản hồi từ AI. Vui lòng thử lại.'}`,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }
         ]);
-      } else if (activeMode === 'research') {
-        const res = await fetch('/api/ai/research', {
+        return;
+      }
+
+      setChatMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          text: data.text || data.message || 'Không có phản hồi từ Gemini.',
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      ]);
+    } catch (err: any) {
+      console.error(err);
+      setChatMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          text: '> ⚠️ **Lỗi kết nối**: Vui lòng kiểm tra lại kết nối mạng hoặc cấu hình máy chủ.',
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRunAi = async () => {
+    if (activeMode === 'chat') {
+      executeChatPrompt(userPrompt);
+      return;
+    }
+
+    setLoading(true);
+    setAiResult(null);
+
+    const requestId = ++aiRequestRef.current;
+    const isStale = () => aiRequestRef.current !== requestId || activeModeRef.current !== activeMode;
+
+    try {
+      let res: Response;
+      if (activeMode === 'research') {
+        if (!currentCreator) {
+          setAiResult({ error: 'Chưa chọn Creator để phân tích.' });
+          return;
+        }
+        res = await fetch('/api/ai/research', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ creator: currentCreator, campaignId: currentCampaign?.id })
         });
-        const json = await res.json();
-        setAiResult(json.data);
       } else if (activeMode === 'email') {
-        const res = await fetch('/api/ai/email', {
+        if (!currentCreator) {
+          setAiResult({ error: 'Chưa chọn Creator để viết mail.' });
+          return;
+        }
+        res = await fetch('/api/ai/email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ creator: currentCreator, campaign: currentCampaign })
         });
-        const json = await res.json();
-        setAiResult(json.data);
       } else if (activeMode === 'reply') {
-        const res = await fetch('/api/ai/reply', {
+        // Tìm cuộc hội thoại thực tế của Creator trong CRM
+        const realConv = conversations.find(
+          c => c.creatorId === currentCreator?.id || c.creatorHandle?.toLowerCase() === `@${currentCreator?.handle?.toLowerCase()}`
+        );
+
+        res = await fetch('/api/ai/reply', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             creator: currentCreator,
             campaign: currentCampaign,
-            conversation: {
-              messages: [
-                { senderName: currentCreator.displayName, senderType: 'CREATOR', content: 'Hi, I received your proposal. Can you cover $800 rate + 15% commission?' }
-              ]
-            }
+            conversation: realConv || { messages: [] }
           })
         });
-        const json = await res.json();
-        setAiResult(json.data);
       } else if (activeMode === 'review') {
-        const res = await fetch('/api/ai/review', {
+        const realReview = reviews.find(
+          r => r.creatorId === currentCreator?.id || r.creatorHandle?.toLowerCase() === `@${currentCreator?.handle?.toLowerCase()}`
+        );
+
+        const vTitle = customVideoTitle.trim() || realReview?.videoTitle || `Draft review video cho ${currentCreator?.displayName || 'Creator'}`;
+        const dUrl = customDraftUrl.trim() || realReview?.draftUrl || '';
+
+        res = await fetch('/api/ai/review', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            videoTitle: `Draft video test for ${currentCampaign.name}`,
-            campaignName: currentCampaign.name,
-            draftUrl: 'https://tiktok.com/@sample/video'
+            videoTitle: vTitle,
+            campaignName: currentCampaign?.name || 'Campaign',
+            draftUrl: dUrl
           })
         });
-        const json = await res.json();
-        setAiResult(json.data);
       } else if (activeMode === 'digest') {
-        const res = await fetch('/api/ai/daily-summary', {
+        res = await fetch('/api/ai/daily-summary', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
+          body: JSON.stringify({ workspaceId: activeWorkspace?.isAgency ? undefined : activeWorkspace?.id })
         });
-        const json = await res.json();
+      } else {
+        return;
+      }
+
+      const json = await res.json();
+      if (isStale()) return;
+      if (!res.ok || !json.success) {
+        setAiResult({
+          error: json.message || 'Yêu cầu AI thất bại. Vui lòng thử lại.',
+          errorType: json.errorType
+        });
+      } else {
         setAiResult(json.data);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setAiResult({ error: 'AI request failed. Please verify process.env.GEMINI_API_KEY.' });
+      if (!isStale()) {
+        setAiResult({ error: 'Lỗi kết nối tới máy chủ. Vui lòng thử lại sau.' });
+      }
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   };
 
@@ -285,104 +403,190 @@ export const AiDrawer: React.FC<AiDrawerProps> = ({
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {activeMode === 'chat' && (
-            <div className="space-y-3">
-              {chatMessages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+            <div className="space-y-4">
+              {/* Quick Suggestion Chips */}
+              <div className="flex flex-wrap gap-1.5 pb-2 border-b border-slate-100 dark:border-slate-800">
+                <span className="text-[10px] font-bold text-slate-400 uppercase w-full flex items-center gap-1 mb-1">
+                  <Lightbulb className="w-3 h-3 text-amber-500" /> Gợi ý câu hỏi nhanh:
+                </span>
+                <button
+                  onClick={() => handleQuickPrompt('Hướng dẫn cào dữ liệu TikTok Creator qua Pickdi Extension từng bước')}
+                  disabled={loading}
+                  className="px-2.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 border border-indigo-200 dark:border-indigo-800 text-[11px] font-medium text-indigo-700 dark:text-indigo-300 transition-all text-left flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <div
-                    className={`max-w-[85%] p-3 rounded-2xl text-xs leading-relaxed ${
-                      msg.role === 'user'
-                        ? 'bg-indigo-600 text-white rounded-br-none'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-bl-none border border-slate-200 dark:border-slate-700'
-                    }`}
-                  >
-                    {msg.text}
+                  📌 Hướng dẫn cào Extension
+                </button>
+                <button
+                  onClick={() => handleQuickPrompt(`Phân tích độ phù hợp thương hiệu (Brand Fit) của Creator @${currentCreator?.handle || 'creator'}`)}
+                  disabled={loading}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-700 dark:text-slate-200 transition-all text-left flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  📊 Phân tích Creator hiện tại
+                </button>
+                <button
+                  onClick={() => handleQuickPrompt(`Soạn kịch bản Outreach email mời mở mẫu thử & hoa hồng cho campaign ${currentCampaign?.name || 'Chiến dịch'}`)}
+                  disabled={loading}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-700 dark:text-slate-200 transition-all text-left flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  ✉️ Kịch bản Outreach mời mở mẫu
+                </button>
+                <button
+                  onClick={() => handleQuickPrompt('Tư vấn chiến lược thương lượng hoa hồng % và Booking Fee cho Creator TikTok Shop')}
+                  disabled={loading}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-700 dark:text-slate-200 transition-all text-left flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  💰 Thương lượng Hoa hồng & Fee
+                </button>
+              </div>
+
+              {/* Message List */}
+              <div className="space-y-4">
+                {chatMessages.map((msg, idx) => (
+                  <ChatMessage key={idx} role={msg.role} text={msg.text} time={msg.time} />
+                ))}
+
+                {/* Loading indicator bubble */}
+                {loading && (
+                  <div className="flex gap-2.5 items-start">
+                    <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center shrink-0 animate-pulse">
+                      <Bot className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="p-3 rounded-2xl rounded-tl-xs bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-xs text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                      <span>Gemini 3.6 đang phân tích dữ liệu CRM & phản hồi...</span>
+                    </div>
                   </div>
-                  <span className="text-[10px] text-slate-400 mt-1 px-1">{msg.time}</span>
-                </div>
-              ))}
+                )}
+              </div>
             </div>
           )}
 
           {/* AI Result Cards for structured modes */}
           {aiResult && (
             <div className="p-4 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50/50 dark:bg-indigo-950/30 space-y-3 animate-in fade-in duration-200 text-xs text-slate-800 dark:text-slate-200">
-              <div className="flex items-center justify-between border-b border-indigo-200 dark:border-indigo-900 pb-2">
-                <span className="font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-indigo-500" />
-                  Gemini Generated Result
-                </span>
-                <button
-                  onClick={() => handleCopy(JSON.stringify(aiResult, null, 2))}
-                  className="px-2 py-1 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 rounded text-[11px] flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-semibold"
-                >
-                  {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-
-              {/* Research render */}
-              {activeMode === 'research' && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-700 dark:text-slate-300">Brand Fit Score:</span>
-                    <span className="px-2 py-0.5 rounded font-bold bg-emerald-100 text-emerald-800">
-                      {aiResult.brandFitScore || 90}/100
+              {aiResult.error ? (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-lg text-rose-800 dark:text-rose-200 text-xs space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-rose-700 dark:text-rose-300">
+                    <HelpCircle className="w-4 h-4 shrink-0" />
+                    <span>Thông báo AI</span>
+                  </div>
+                  <p className="leading-relaxed">{aiResult.error}</p>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between border-b border-indigo-200 dark:border-indigo-900 pb-2">
+                    <span className="font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-indigo-500" />
+                      {aiResult.source === 'deterministic' ? 'Thống kê Tổng quan (Deterministic)' : 'Kết quả từ Gemini AI'}
+                      {aiResult.cached && (
+                        <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800 font-semibold">
+                          ⚡ Cached
+                        </span>
+                      )}
                     </span>
+                    <button
+                      onClick={() => handleCopy(JSON.stringify(aiResult, null, 2))}
+                      className="px-2 py-1 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 rounded text-[11px] flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-semibold"
+                    >
+                      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                      {copied ? 'Copied' : 'Copy'}
+                    </button>
                   </div>
-                  <p><strong>Summary:</strong> {aiResult.summary}</p>
-                  <div>
-                    <strong>Strengths:</strong>
-                    <ul className="list-disc pl-4 space-y-0.5 mt-1">
-                      {aiResult.strengths?.map((s: string, i: number) => <li key={i}>{s}</li>)}
-                    </ul>
-                  </div>
-                  <p><strong>Recommendation:</strong> <span className="font-bold text-indigo-600">{aiResult.recommendation}</span></p>
-                </div>
-              )}
 
-              {/* Email render */}
-              {activeMode === 'email' && (
-                <div className="space-y-2">
-                  <p><strong>Subject:</strong> {aiResult.subject}</p>
-                  <div className="p-2.5 bg-white dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-800 whitespace-pre-wrap font-sans text-xs">
-                    {aiResult.body}
-                  </div>
-                  <p><strong>Lead CTA:</strong> {aiResult.cta}</p>
-                </div>
-              )}
+                  {/* Research render */}
+                  {activeMode === 'research' && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">Brand Fit Score:</span>
+                        <span className="px-2 py-0.5 rounded font-bold bg-emerald-100 text-emerald-800">
+                          {aiResult.brandFitScore || 90}/100
+                        </span>
+                      </div>
+                      <p><strong>Summary:</strong> {aiResult.summary}</p>
+                      <div>
+                        <strong>Strengths:</strong>
+                        <ul className="list-disc pl-4 space-y-0.5 mt-1">
+                          {aiResult.strengths?.map((s: string, i: number) => <li key={i}>{s}</li>)}
+                        </ul>
+                      </div>
+                      <p><strong>Recommendation:</strong> <span className="font-bold text-indigo-600">{aiResult.recommendation}</span></p>
+                    </div>
+                  )}
 
-              {/* Reply render */}
-              {activeMode === 'reply' && (
-                <div className="space-y-2">
-                  <p><strong>Negotiation Strategy:</strong> {aiResult.negotiationStrategy}</p>
-                  <div className="p-2.5 bg-white dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-800 whitespace-pre-wrap text-xs font-sans">
-                    {aiResult.suggestedReply}
-                  </div>
-                  <p><strong>Suggested Action:</strong> <span className="font-bold text-emerald-600">{aiResult.suggestedNextAction}</span></p>
-                </div>
-              )}
+                  {/* Email render */}
+                  {activeMode === 'email' && (
+                    <div className="space-y-2">
+                      <p><strong>Subject:</strong> {aiResult.subject}</p>
+                      <div className="p-2.5 bg-white dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-800 whitespace-pre-wrap font-sans text-xs">
+                        {aiResult.body}
+                      </div>
+                      <p><strong>Lead CTA:</strong> {aiResult.cta}</p>
+                    </div>
+                  )}
 
-              {/* Review render */}
-              {activeMode === 'review' && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span>Hook Quality Score:</span>
-                    <span className="font-bold text-indigo-600">{aiResult.hookQualityScore}/100</span>
-                  </div>
-                  <p><strong>Improvement Suggestions:</strong> {aiResult.improvementSuggestions}</p>
-                  <p><strong>Recommendation:</strong> <span className="font-bold text-emerald-600">{aiResult.recommendation}</span></p>
-                </div>
-              )}
+                  {/* Reply render */}
+                  {activeMode === 'reply' && (
+                    <div className="space-y-2">
+                      <p><strong>Negotiation Strategy:</strong> {aiResult.negotiationStrategy}</p>
+                      <div className="p-2.5 bg-white dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-800 whitespace-pre-wrap text-xs font-sans">
+                        {aiResult.suggestedReply}
+                      </div>
+                      <p><strong>Suggested Action:</strong> <span className="font-bold text-emerald-600">{aiResult.suggestedNextAction}</span></p>
+                    </div>
+                  )}
 
-              {/* Digest render */}
-              {activeMode === 'digest' && (
-                <div className="space-y-2">
-                  <p><strong>Progress Summary:</strong> {aiResult.progressSummary}</p>
-                  <p><strong>Strategic AI Focus:</strong> {aiResult.aiRecommendation}</p>
-                </div>
+                  {/* Review render */}
+                  {activeMode === 'review' && (
+                    <div className="space-y-2.5">
+                      <div className="p-2 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-lg text-amber-800 dark:text-amber-300 text-[11px] font-medium flex items-start gap-1.5">
+                        <Lightbulb className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <span>⚠️ Phân tích dựa trên tiêu đề & context, chưa xem nội dung video thật — Operator cần tự xem video trước khi Approve.</span>
+                      </div>
+
+                      {Array.isArray(aiResult.keyObservations) && aiResult.keyObservations.length > 0 && (
+                        <div>
+                          <strong>Nhận xét từ Metadata:</strong>
+                          <ul className="list-disc pl-4 space-y-0.5 mt-1 text-slate-600 dark:text-slate-300">
+                            {aiResult.keyObservations.map((obs: string, idx: number) => (
+                              <li key={idx}>{obs}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {aiResult.improvementSuggestions && (
+                        <p><strong>Gợi ý cải thiện:</strong> {aiResult.improvementSuggestions}</p>
+                      )}
+
+                      {aiResult.recommendation && (
+                        <p><strong>Khuyến nghị AI:</strong> <span className="font-bold text-emerald-600">{aiResult.recommendation}</span></p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Digest render */}
+                  {activeMode === 'digest' && (
+                    <div className="space-y-2">
+                      {aiResult.source === 'deterministic' && (
+                        <div className="p-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded text-[11px] font-medium text-slate-600 dark:text-slate-300 mb-1">
+                          ℹ️ Bản tóm tắt này được tổng hợp tự động từ số liệu hệ thống (Chưa cấu hình Gemini API hoặc dùng Fallback).
+                        </div>
+                      )}
+                      <p><strong>Progress Summary:</strong> {aiResult.progressSummary}</p>
+                      {Array.isArray(aiResult.urgentPriorities) && aiResult.urgentPriorities.length > 0 && (
+                        <div>
+                          <strong>Ưu tiên cần làm:</strong>
+                          <ul className="list-disc pl-4 space-y-0.5 mt-1">
+                            {aiResult.urgentPriorities.map((item: string, idx: number) => (
+                              <li key={idx}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      <p><strong>Khuyến nghị vận hành:</strong> {aiResult.aiRecommendation}</p>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

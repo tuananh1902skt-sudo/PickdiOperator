@@ -1,100 +1,81 @@
 import React, { useState } from 'react';
 import {
   Send,
-  Sparkles,
   Kanban,
-  Inbox,
   Clock,
-  RefreshCw,
-  Mail
+  Mail,
+  Users
 } from 'lucide-react';
 import {
   Creator,
   CreatorStatus,
-  Campaign,
-  OutreachEmail,
-  Conversation
+  OutreachEmail
 } from '../../types';
 
 interface OutreachViewProps {
   creators: Creator[];
-  campaigns: Campaign[];
   outreachList: OutreachEmail[];
-  conversations: Conversation[];
   onOpenEmailComposer: (cr: Creator) => void;
-  onSendReply: (convId: string, content: string, isAiGenerated?: boolean) => void;
   onUpdateCreatorStatus: (creatorId: string, status: CreatorStatus) => void;
+  onSelectCreator: (cr: Creator) => void;
+  onOpenBulkOutreach?: (creatorIds: string[], defaultSequenceStage: 'first' | 'reminder_1' | 'reminder_2' | 'reminder_3') => void;
+}
+
+// Stages where the creator has already been contacted at least once — a bulk "send
+// reminder" action only makes sense here, not for New Lead/Researching/Qualified.
+const REMINDER_ELIGIBLE_STATUSES: Creator['status'][] = ['Contacted', 'Interested', 'Negotiating'];
+const STALE_CONTACT_DAYS = 3;
+
+function daysSinceContact(lastContactAt?: string): number | undefined {
+  if (!lastContactAt) return undefined;
+  return Math.floor((Date.now() - new Date(lastContactAt).getTime()) / 86400000);
+}
+
+// Each stage owns a distinct hue so a column, its header, and its badges are
+// instantly recognizable across the board without reading the label.
+interface StageStyle {
+  label: string;
+  status: Creator['status'];
+  border: string;
+  headerBg: string;
+  headerText: string;
+  badgeBg: string;
+  badgeText: string;
+  dropBg: string;
+  dot: string;
 }
 
 export const OutreachView: React.FC<OutreachViewProps> = ({
   creators,
-  campaigns,
   outreachList,
-  conversations,
   onOpenEmailComposer,
-  onSendReply,
-  onUpdateCreatorStatus
+  onUpdateCreatorStatus,
+  onSelectCreator,
+  onOpenBulkOutreach
 }) => {
-  const [activeTab, setActiveTab] = useState<'kanban' | 'inbox' | 'history'>('kanban');
-  const [selectedConvId, setSelectedConvId] = useState<string>(conversations[0]?.id || '');
-  const [replyInput, setReplyInput] = useState('');
-  const [aiReplyLoading, setAiReplyLoading] = useState(false);
-  const [aiSuggestion, setAiSuggestion] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<'kanban' | 'history'>('kanban');
+  const [draggedCreatorId, setDraggedCreatorId] = useState<string | null>(null);
+  const [dragOverStatus, setDragOverStatus] = useState<CreatorStatus | null>(null);
 
   // Covers every non-archived CreatorStatus so a creator never silently disappears
   // from the pipeline just because their status isn't one of the "main" stages.
-  const pipelineStages: { label: string; status: Creator['status']; color: string }[] = [
-    { label: 'New Lead', status: 'New Lead', color: 'border-slate-300' },
-    { label: 'Researching', status: 'Researching', color: 'border-slate-400' },
-    { label: 'Qualified', status: 'Qualified', color: 'border-blue-400' },
-    { label: 'Contacted', status: 'Contacted', color: 'border-indigo-400' },
-    { label: 'Interested', status: 'Interested', color: 'border-sky-400' },
-    { label: 'Negotiating', status: 'Negotiating', color: 'border-amber-400' },
-    { label: 'Approved', status: 'Approved', color: 'border-emerald-400' },
-    { label: 'Sample Sent', status: 'Sample Sent', color: 'border-purple-400' },
-    { label: 'Draft Submitted', status: 'Draft Submitted', color: 'border-amber-500' },
-    { label: 'Revision Requested', status: 'Revision Requested', color: 'border-rose-400' },
-    { label: 'Approved Draft', status: 'Approved Draft', color: 'border-emerald-500' },
-    { label: 'Posted', status: 'Posted', color: 'border-teal-500' },
-    { label: 'Completed', status: 'Completed', color: 'border-emerald-600' }
+  const pipelineStages: StageStyle[] = [
+    { label: 'New Lead', status: 'New Lead', border: 'border-slate-300 dark:border-slate-700', headerBg: 'bg-slate-100 dark:bg-slate-800', headerText: 'text-slate-700 dark:text-slate-300', badgeBg: 'bg-slate-200 dark:bg-slate-700', badgeText: 'text-slate-700 dark:text-slate-200', dropBg: 'bg-slate-50/80 dark:bg-slate-900/40', dot: 'bg-slate-400' },
+    { label: 'Researching', status: 'Researching', border: 'border-cyan-300 dark:border-cyan-800', headerBg: 'bg-cyan-100 dark:bg-cyan-950/60', headerText: 'text-cyan-700 dark:text-cyan-300', badgeBg: 'bg-cyan-200 dark:bg-cyan-900', badgeText: 'text-cyan-800 dark:text-cyan-200', dropBg: 'bg-cyan-50/80 dark:bg-cyan-950/30', dot: 'bg-cyan-400' },
+    { label: 'Qualified', status: 'Qualified', border: 'border-blue-300 dark:border-blue-800', headerBg: 'bg-blue-100 dark:bg-blue-950/60', headerText: 'text-blue-700 dark:text-blue-300', badgeBg: 'bg-blue-200 dark:bg-blue-900', badgeText: 'text-blue-800 dark:text-blue-200', dropBg: 'bg-blue-50/80 dark:bg-blue-950/30', dot: 'bg-blue-400' },
+    { label: 'Contacted', status: 'Contacted', border: 'border-indigo-300 dark:border-indigo-800', headerBg: 'bg-indigo-100 dark:bg-indigo-950/60', headerText: 'text-indigo-700 dark:text-indigo-300', badgeBg: 'bg-indigo-200 dark:bg-indigo-900', badgeText: 'text-indigo-800 dark:text-indigo-200', dropBg: 'bg-indigo-50/80 dark:bg-indigo-950/30', dot: 'bg-indigo-400' },
+    { label: 'Interested', status: 'Interested', border: 'border-sky-300 dark:border-sky-800', headerBg: 'bg-sky-100 dark:bg-sky-950/60', headerText: 'text-sky-700 dark:text-sky-300', badgeBg: 'bg-sky-200 dark:bg-sky-900', badgeText: 'text-sky-800 dark:text-sky-200', dropBg: 'bg-sky-50/80 dark:bg-sky-950/30', dot: 'bg-sky-400' },
+    { label: 'Negotiating', status: 'Negotiating', border: 'border-amber-300 dark:border-amber-800', headerBg: 'bg-amber-100 dark:bg-amber-950/60', headerText: 'text-amber-700 dark:text-amber-300', badgeBg: 'bg-amber-200 dark:bg-amber-900', badgeText: 'text-amber-800 dark:text-amber-200', dropBg: 'bg-amber-50/80 dark:bg-amber-950/30', dot: 'bg-amber-400' },
+    { label: 'Approved', status: 'Approved', border: 'border-emerald-300 dark:border-emerald-800', headerBg: 'bg-emerald-100 dark:bg-emerald-950/60', headerText: 'text-emerald-700 dark:text-emerald-300', badgeBg: 'bg-emerald-200 dark:bg-emerald-900', badgeText: 'text-emerald-800 dark:text-emerald-200', dropBg: 'bg-emerald-50/80 dark:bg-emerald-950/30', dot: 'bg-emerald-400' },
+    { label: 'Sample Sent', status: 'Sample Sent', border: 'border-purple-300 dark:border-purple-800', headerBg: 'bg-purple-100 dark:bg-purple-950/60', headerText: 'text-purple-700 dark:text-purple-300', badgeBg: 'bg-purple-200 dark:bg-purple-900', badgeText: 'text-purple-800 dark:text-purple-200', dropBg: 'bg-purple-50/80 dark:bg-purple-950/30', dot: 'bg-purple-400' },
+    { label: 'Draft Submitted', status: 'Draft Submitted', border: 'border-orange-300 dark:border-orange-800', headerBg: 'bg-orange-100 dark:bg-orange-950/60', headerText: 'text-orange-700 dark:text-orange-300', badgeBg: 'bg-orange-200 dark:bg-orange-900', badgeText: 'text-orange-800 dark:text-orange-200', dropBg: 'bg-orange-50/80 dark:bg-orange-950/30', dot: 'bg-orange-400' },
+    { label: 'Revision Requested', status: 'Revision Requested', border: 'border-rose-300 dark:border-rose-800', headerBg: 'bg-rose-100 dark:bg-rose-950/60', headerText: 'text-rose-700 dark:text-rose-300', badgeBg: 'bg-rose-200 dark:bg-rose-900', badgeText: 'text-rose-800 dark:text-rose-200', dropBg: 'bg-rose-50/80 dark:bg-rose-950/30', dot: 'bg-rose-400' },
+    { label: 'Approved Draft', status: 'Approved Draft', border: 'border-lime-300 dark:border-lime-800', headerBg: 'bg-lime-100 dark:bg-lime-950/60', headerText: 'text-lime-700 dark:text-lime-300', badgeBg: 'bg-lime-200 dark:bg-lime-900', badgeText: 'text-lime-800 dark:text-lime-200', dropBg: 'bg-lime-50/80 dark:bg-lime-950/30', dot: 'bg-lime-400' },
+    { label: 'Posted', status: 'Posted', border: 'border-teal-300 dark:border-teal-800', headerBg: 'bg-teal-100 dark:bg-teal-950/60', headerText: 'text-teal-700 dark:text-teal-300', badgeBg: 'bg-teal-200 dark:bg-teal-900', badgeText: 'text-teal-800 dark:text-teal-200', dropBg: 'bg-teal-50/80 dark:bg-teal-950/30', dot: 'bg-teal-400' },
+    { label: 'Completed', status: 'Completed', border: 'border-green-300 dark:border-green-800', headerBg: 'bg-green-100 dark:bg-green-950/60', headerText: 'text-green-700 dark:text-green-300', badgeBg: 'bg-green-200 dark:bg-green-900', badgeText: 'text-green-800 dark:text-green-200', dropBg: 'bg-green-50/80 dark:bg-green-950/30', dot: 'bg-green-400' }
   ];
 
-  const currentConv = conversations.find(c => c.id === selectedConvId) || conversations[0];
-  const currentCreator = creators.find(c => c.id === currentConv?.creatorId);
-  const currentCampaign = campaigns.find(c => c.id === currentConv?.campaignId);
-
-  const handleGenerateAiReply = async () => {
-    if (!currentConv || !currentCreator) return;
-    setAiReplyLoading(true);
-    try {
-      const res = await fetch('/api/ai/reply', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          conversation: currentConv,
-          creator: currentCreator,
-          campaign: currentCampaign
-        })
-      });
-      const json = await res.json();
-      if (json.success && json.data) {
-        setAiSuggestion(json.data);
-        setReplyInput(json.data.suggestedReply || '');
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setAiReplyLoading(false);
-    }
-  };
-
-  const handleSendReplySubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!replyInput.trim() || !selectedConvId) return;
-    onSendReply(selectedConvId, replyInput, !!aiSuggestion);
-    setReplyInput('');
-    setAiSuggestion(null);
-  };
+  const stageStyleByStatus = new Map(pipelineStages.map(s => [s.status, s]));
 
   return (
     <div className="space-y-4 pb-12 animate-in fade-in duration-200">
@@ -110,37 +91,29 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
           </p>
         </div>
 
-        {/* View Switcher Tabs */}
-        <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300">
-          <button
-            onClick={() => setActiveTab('kanban')}
-            className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all ${
-              activeTab === 'kanban' ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' : ''
-            }`}
-          >
-            <Kanban className="w-4 h-4" />
-            Pipeline Kanban
-          </button>
+        {/* Right Action Controls & View Switcher Tabs */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300">
+            <button
+              onClick={() => setActiveTab('kanban')}
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all ${
+                activeTab === 'kanban' ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' : ''
+              }`}
+            >
+              <Kanban className="w-4 h-4" />
+              Pipeline Kanban
+            </button>
 
-          <button
-            onClick={() => setActiveTab('inbox')}
-            className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all ${
-              activeTab === 'inbox' ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' : ''
-            }`}
-          >
-            <Inbox className="w-4 h-4" />
-            Conversation Inbox
-          </button>
-
-          <button
-            onClick={() => setActiveTab('history')}
-            className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all ${
-              activeTab === 'history' ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' : ''
-            }`}
-          >
-            <Clock className="w-4 h-4" />
-            Sent History ({outreachList.length})
-          </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all ${
+                activeTab === 'history' ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' : ''
+              }`}
+            >
+              <Clock className="w-4 h-4" />
+              Sent History ({outreachList.length})
+            </button>
+          </div>
         </div>
       </div>
 
@@ -149,33 +122,84 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
         <div className="flex gap-4 overflow-x-auto pb-4">
           {pipelineStages.map(stage => {
             const stageCreators = creators.filter(c => c.status === stage.status);
+            const staleCreatorIds = REMINDER_ELIGIBLE_STATUSES.includes(stage.status)
+              ? stageCreators.filter(c => {
+                  const since = daysSinceContact(c.lastContactAt);
+                  return since !== undefined && since >= STALE_CONTACT_DAYS && !c.doNotContact;
+                }).map(c => c.id)
+              : [];
+
+            const isDragOver = dragOverStatus === stage.status;
 
             return (
               <div
                 key={stage.status}
-                className="w-72 shrink-0 bg-slate-100/70 dark:bg-slate-900/60 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[75vh]"
+                onDragOver={e => {
+                  e.preventDefault();
+                  if (draggedCreatorId) setDragOverStatus(stage.status);
+                }}
+                onDragLeave={() => setDragOverStatus(prev => (prev === stage.status ? null : prev))}
+                onDrop={e => {
+                  e.preventDefault();
+                  const creatorId = e.dataTransfer.getData('text/plain') || draggedCreatorId;
+                  if (creatorId) onUpdateCreatorStatus(creatorId, stage.status);
+                  setDraggedCreatorId(null);
+                  setDragOverStatus(null);
+                }}
+                className={`w-72 shrink-0 ${stage.dropBg} p-3 rounded-2xl border flex flex-col max-h-[75vh] transition-colors ${
+                  isDragOver
+                    ? 'border-indigo-400 dark:border-indigo-500 ring-2 ring-indigo-200 dark:ring-indigo-900/60'
+                    : stage.border
+                }`}
               >
                 {/* Column Header */}
-                <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-200 dark:border-slate-800">
-                  <span className="font-bold text-slate-800 dark:text-slate-200 text-xs">
+                <div className={`flex items-center justify-between px-2.5 py-2 mb-3 rounded-xl ${stage.headerBg}`}>
+                  <span className={`font-bold text-xs flex items-center gap-1.5 ${stage.headerText}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${stage.dot}`} />
                     {stage.label}
                   </span>
-                  <span className="px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${stage.badgeBg} ${stage.badgeText}`}>
                     {stageCreators.length}
                   </span>
                 </div>
+
+                {staleCreatorIds.length > 0 && onOpenBulkOutreach && (
+                  <button
+                    onClick={() => onOpenBulkOutreach(staleCreatorIds, 'reminder_1')}
+                    className="mb-3 -mt-2 w-full text-[10px] font-bold text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg py-1.5 flex items-center justify-center gap-1 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                  >
+                    <Users className="w-3 h-3" />
+                    Nhắc lại hàng loạt ({staleCreatorIds.length})
+                  </button>
+                )}
 
                 {/* Column Cards */}
                 <div className="flex-1 overflow-y-auto space-y-3">
                   {stageCreators.length === 0 ? (
                     <div className="text-center py-8 text-[11px] text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
-                      No creators in this stage
+                      {isDragOver ? 'Drop to move here' : 'No creators in this stage'}
                     </div>
                   ) : (
-                    stageCreators.map(cr => (
+                    stageCreators.map(cr => {
+                      const cardStage = stageStyleByStatus.get(cr.status) ?? stage;
+
+                      return (
                       <div
                         key={cr.id}
-                        className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 shadow-2xs space-y-2.5 hover:border-indigo-300 transition-all group"
+                        draggable
+                        onClick={() => onSelectCreator(cr)}
+                        onDragStart={e => {
+                          e.dataTransfer.setData('text/plain', cr.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                          setDraggedCreatorId(cr.id);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedCreatorId(null);
+                          setDragOverStatus(null);
+                        }}
+                        className={`p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 shadow-2xs space-y-2.5 hover:border-indigo-300 hover:shadow-md transition-all group cursor-pointer active:cursor-grabbing ${
+                          draggedCreatorId === cr.id ? 'opacity-40' : ''
+                        }`}
                       >
                         <div className="flex items-center gap-2.5">
                           <img
@@ -203,7 +227,10 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
                         {/* Move Stage dropdown */}
                         <div className="pt-2 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between">
                           <button
-                            onClick={() => onOpenEmailComposer(cr)}
+                            onClick={e => {
+                              e.stopPropagation();
+                              onOpenEmailComposer(cr);
+                            }}
                             className="text-[11px] text-indigo-600 font-bold hover:underline flex items-center gap-1"
                           >
                             <Mail className="w-3 h-3" /> Outreach
@@ -211,8 +238,9 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
 
                           <select
                             value={cr.status}
+                            onClick={e => e.stopPropagation()}
                             onChange={e => onUpdateCreatorStatus(cr.id, e.target.value as CreatorStatus)}
-                            className="text-[10px] py-1 px-1.5 border border-slate-200 dark:border-slate-700 rounded bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-medium"
+                            className={`text-[10px] py-1 px-1.5 border-0 rounded-full font-bold ${cardStage.badgeBg} ${cardStage.badgeText}`}
                           >
                             {pipelineStages.map(s => (
                               <option key={s.status} value={s.status}>
@@ -222,7 +250,8 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
                           </select>
                         </div>
                       </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -231,141 +260,7 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
         </div>
       )}
 
-      {/* VIEW 2: CONVERSATION INBOX */}
-      {activeTab === 'inbox' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-[75vh] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden bg-white dark:bg-slate-900 shadow-2xs">
-          {/* Left Column: Conversation List */}
-          <div className="lg:col-span-4 border-r border-slate-200 dark:border-slate-800 flex flex-col">
-            <div className="p-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                Active Creator Messages ({conversations.length})
-              </span>
-            </div>
-
-            <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
-              {conversations.map(c => (
-                <div
-                  key={c.id}
-                  onClick={() => {
-                    setSelectedConvId(c.id);
-                    setAiSuggestion(null);
-                  }}
-                  className={`p-3.5 flex items-start gap-3 cursor-pointer transition-colors ${
-                    c.id === selectedConvId
-                      ? 'bg-indigo-50/60 dark:bg-indigo-950/40 border-l-4 border-indigo-600'
-                      : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
-                  }`}
-                >
-                  <img src={c.creatorAvatar} alt={c.creatorName} className="w-9 h-9 rounded-full object-cover shrink-0" />
-                  <div className="flex-1 min-w-0 text-xs">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-bold text-slate-900 dark:text-white truncate">{c.creatorName}</span>
-                      <span className="text-[10px] text-slate-400">
-                        {new Date(c.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                    <p className="text-slate-600 dark:text-slate-300 truncate font-medium">
-                      {c.messages[c.messages.length - 1]?.content || <span className="italic text-slate-400">No messages yet</span>}
-                    </p>
-                    <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">
-                      {c.status}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Center Column: Thread Chat Window */}
-          <div className="lg:col-span-8 flex flex-col h-full bg-slate-50/30 dark:bg-slate-900">
-            {currentConv ? (
-              <>
-                {/* Chat Header */}
-                <div className="p-3.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <img src={currentConv.creatorAvatar} alt={currentConv.creatorName} className="w-8 h-8 rounded-full object-cover" />
-                    <div>
-                      <h4 className="font-bold text-slate-900 dark:text-white text-xs leading-none">
-                        {currentConv.creatorName} ({currentConv.creatorHandle})
-                      </h4>
-                      <span className="text-[10px] text-slate-400">{currentConv.campaignName || 'General Outreach'}</span>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={handleGenerateAiReply}
-                    disabled={aiReplyLoading}
-                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-2xs"
-                  >
-                    {aiReplyLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                    AI Reply Assistant
-                  </button>
-                </div>
-
-                {/* AI Suggestion Banner if present */}
-                {aiSuggestion && (
-                  <div className="m-3 p-3 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-900 rounded-xl text-xs space-y-1">
-                    <div className="font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1">
-                      <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> AI Suggested Strategy: {aiSuggestion.negotiationStrategy}
-                    </div>
-                    <div className="text-slate-700 dark:text-slate-300">
-                      Next Best Action: <strong>{aiSuggestion.suggestedNextAction}</strong>
-                    </div>
-                  </div>
-                )}
-
-                {/* Messages Body */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                  {currentConv.messages.map(m => (
-                    <div
-                      key={m.id}
-                      className={`flex flex-col ${m.senderType === 'USER' ? 'items-end' : 'items-start'}`}
-                    >
-                      <div
-                        className={`max-w-[80%] p-3 rounded-2xl text-xs leading-relaxed ${
-                          m.senderType === 'USER'
-                            ? 'bg-indigo-600 text-white rounded-br-none'
-                            : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-bl-none'
-                        }`}
-                      >
-                        {m.content}
-                      </div>
-                      <span className="text-[10px] text-slate-400 mt-1 px-1">
-                        {m.senderName} • {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Input Area */}
-                <form onSubmit={handleSendReplySubmit} className="p-3 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={replyInput}
-                    onChange={e => setReplyInput(e.target.value)}
-                    placeholder="Write a message reply or use AI suggested reply..."
-                    className="flex-1 py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!replyInput.trim()}
-                    className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    Send Reply
-                  </button>
-                </form>
-              </>
-            ) : (
-              <div className="h-full flex items-center justify-center text-xs text-slate-400">
-                Select a conversation from the left to open chat
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* VIEW 3: SENT HISTORY */}
+      {/* VIEW 2: SENT HISTORY */}
       {activeTab === 'history' && (
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
           <table className="w-full text-left border-collapse text-xs">

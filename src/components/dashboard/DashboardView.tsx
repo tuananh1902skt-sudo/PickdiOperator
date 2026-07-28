@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Send,
   MessageSquare,
@@ -58,6 +58,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenAi,
   onCompleteTask
 }) => {
+  const [prioritySuggestion, setPrioritySuggestion] = useState<{ priorityAction: string; reasoning?: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/ai/priority-suggestion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspaceId: activeWorkspace?.isAgency ? undefined : activeWorkspace?.id })
+    })
+      .then(res => res.json())
+      .then(json => {
+        if (!cancelled && json.success) {
+          setPrioritySuggestion({ priorityAction: json.data.priorityAction, reasoning: json.data.reasoning });
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeWorkspace?.id]);
+
   const todayStr = new Date().toISOString().split('T')[0];
 
   const pipelineFunnel = [
@@ -134,7 +153,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <MessageSquare className="w-4 h-4 text-emerald-500" />
           </div>
           <div className="text-2xl font-bold text-slate-900 dark:text-white">{kpis.todayRepliesReceived}</div>
-          <div className="text-[11px] text-indigo-600 font-semibold mt-1">38.8% Reply Rate</div>
+          <div className="text-[11px] text-indigo-600 font-semibold mt-1">
+            {kpis.todayEmailsSent > 0
+              ? `${((kpis.todayRepliesReceived / kpis.todayEmailsSent) * 100).toFixed(1)}% Reply Rate`
+              : '0% Reply Rate'}
+          </div>
         </div>
 
         <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">
@@ -143,7 +166,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <FileCheck2 className="w-4 h-4 text-amber-500" />
           </div>
           <div className="text-2xl font-bold text-slate-900 dark:text-white">{kpis.pendingReviewsCount}</div>
-          <div className="text-[11px] text-amber-600 font-semibold mt-1">Action Needed</div>
+          <div className="text-[11px] text-amber-600 font-semibold mt-1">
+            {kpis.pendingReviewsCount > 0 ? 'Action Needed' : 'Up to date'}
+          </div>
         </div>
 
         <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">
@@ -163,7 +188,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <Target className="w-4 h-4 text-purple-500" />
           </div>
           <div className="text-2xl font-bold text-slate-900 dark:text-white">{kpis.activeCampaignsCount}</div>
-          <div className="text-[11px] text-purple-600 font-semibold mt-1">Running Q3</div>
+          <div className="text-[11px] text-purple-600 font-semibold mt-1">
+            {kpis.activeCampaignsCount > 0 ? `${kpis.activeCampaignsCount} Active` : 'No active campaigns'}
+          </div>
         </div>
 
         <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">
@@ -172,7 +199,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <TrendingUp className="w-4 h-4 text-emerald-500" />
           </div>
           <div className="text-2xl font-bold text-slate-900 dark:text-white">{kpis.conversionRate}%</div>
-          <div className="text-[11px] text-emerald-600 font-semibold mt-1">+2.4% vs last week</div>
+          <div className="text-[11px] text-emerald-600 font-semibold mt-1">
+            {creators.length > 0
+              ? `${creators.filter(c => ['Approved', 'Completed'].includes(c.status)).length} of ${creators.length} converted`
+              : '0 converted'}
+          </div>
         </div>
       </div>
 
@@ -213,25 +244,48 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             ))}
           </div>
 
-          {/* AI Recommendation Banner */}
-          <div className="p-4 rounded-xl bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/40 dark:to-purple-950/40 border border-indigo-100 dark:border-indigo-900 flex items-start gap-3">
-            <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
-            <div className="flex-1 text-xs">
-              <h4 className="font-bold text-indigo-900 dark:text-indigo-200 mb-0.5">
-                AI Operator Priority Suggestion
-              </h4>
-              <p className="text-indigo-800 dark:text-indigo-300 leading-relaxed">
-                Creator <strong>Trinh Phạm (@trinhpham.beauty)</strong> countered with $700 flat fee for d'Alba Sunscreen.
-                Her commercial score is 94. <strong>Recommendation:</strong> Approve counter-offer or counter with $650 + 15% commission.
-              </p>
+          {/* AI Recommendation Banner — powered by ops.priority_suggester agent, reasons over
+              every open campaign/conversation/review/task instead of a canned string. */}
+          {prioritySuggestion ? (
+            <div className="p-4 rounded-xl bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/40 dark:to-purple-950/40 border border-indigo-100 dark:border-indigo-900 flex items-start gap-3">
+              <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+              <div className="flex-1 text-xs">
+                <h4 className="font-bold text-indigo-900 dark:text-indigo-200 mb-0.5">
+                  AI Operator Priority Suggestion
+                </h4>
+                <p className="text-indigo-800 dark:text-indigo-300 leading-relaxed">
+                  {prioritySuggestion.priorityAction}
+                </p>
+                {prioritySuggestion.reasoning && (
+                  <p className="text-indigo-600/80 dark:text-indigo-400/80 mt-1 italic">{prioritySuggestion.reasoning}</p>
+                )}
+              </div>
+              <button
+                onClick={() => onSelectTab('outreach')}
+                className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg shadow-2xs hover:bg-indigo-700 shrink-0"
+              >
+                Negotiate Now
+              </button>
             </div>
-            <button
-              onClick={() => onSelectTab('outreach')}
-              className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg shadow-2xs hover:bg-indigo-700 shrink-0"
-            >
-              Negotiate Now
-            </button>
-          </div>
+          ) : (
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 flex items-start gap-3">
+              <Sparkles className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
+              <div className="flex-1 text-xs">
+                <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-0.5">
+                  AI Operator Suggestion
+                </h4>
+                <p className="text-slate-500 dark:text-slate-400 leading-relaxed">
+                  {recentReplies.length > 0 ? 'Đang phân tích công việc ưu tiên…' : 'Chưa có trao đổi nào với Creator. Hãy quét Creator bằng extension hoặc thêm Creator mới để bắt đầu chiến dịch outreach.'}
+                </p>
+              </div>
+              <button
+                onClick={onOpenQuickAdd}
+                className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg shadow-2xs hover:bg-indigo-700 shrink-0"
+              >
+                + Thêm Creator
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Today's Tasks Sidebar (1 Col) */}
@@ -349,18 +403,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <div className="space-y-3">
-            {activities.map(a => (
-              <div key={a.id} className="flex items-start gap-3 text-xs">
-                <div className="w-2 h-2 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
-                <div className="flex-1">
-                  <p className="text-slate-800 dark:text-slate-200">
-                    <strong className="font-semibold">{a.actor}</strong> {a.action}{' '}
-                    <span className="text-indigo-600 dark:text-indigo-400 font-medium">{a.target}</span>
-                  </p>
-                  <span className="text-[10px] text-slate-400">{new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            {activities.length === 0 ? (
+              <p className="text-xs text-slate-400 py-4 text-center">Chưa có hoạt động nào được ghi nhận</p>
+            ) : (
+              activities.map(a => (
+                <div key={a.id} className="flex items-start gap-3 text-xs">
+                  <div className="w-2 h-2 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-slate-800 dark:text-slate-200">
+                      <strong className="font-semibold">{a.actor}</strong> {a.action}{' '}
+                      <span className="text-indigo-600 dark:text-indigo-400 font-medium">{a.target}</span>
+                    </p>
+                    <span className="text-[10px] text-slate-400">{new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </div>

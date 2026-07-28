@@ -7,13 +7,14 @@ import {
   Clock
 } from 'lucide-react';
 import { NotificationItem } from '../../types';
+import { ActiveTab } from './Sidebar';
 
 interface NotificationDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   notifications: NotificationItem[];
   onMarkAllRead: () => void;
-  onSelectTab: (tab: any) => void;
+  onSelectTab: (tab: ActiveTab) => void;
 }
 
 export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({

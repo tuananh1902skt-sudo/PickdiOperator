@@ -77,7 +77,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   isOpen,
   onClose,
   onConfirmImport,
-  activeWorkspaceId = 'ws-pickdi'
+  activeWorkspaceId
 }) => {
   const [pastedText, setPastedText] = useState('');
   const [parsedItems, setParsedItems] = useState<any[]>([]);
@@ -96,8 +96,9 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
         setParseError('Không tìm thấy creator hợp lệ trong dữ liệu này.');
       }
     } catch (err: any) {
+      console.error('Parse scraped payload error:', err);
       setParsedItems([]);
-      setParseError('Không đọc được dữ liệu. Kiểm tra lại định dạng JSON/CSV: ' + err.message);
+      setParseError('Không đọc được dữ liệu. Vui lòng kiểm tra lại định dạng JSON/CSV đã dán vào.');
     }
   };
 
@@ -139,7 +140,8 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
         setStatusMsg(`❌ Import thất bại: ${data.message || 'Lỗi không xác định'}`);
       }
     } catch (err: any) {
-      setStatusMsg(`❌ Lỗi kết nối: ${err.message}`);
+      console.error('Batch import creators error:', err);
+      setStatusMsg('❌ Lỗi kết nối tới máy chủ. Vui lòng thử lại.');
     } finally {
       setIsImporting(false);
     }

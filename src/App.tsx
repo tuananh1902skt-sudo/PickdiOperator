@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sidebar } from './components/layout/Sidebar';
+import { Sidebar, ActiveTab } from './components/layout/Sidebar';
 import { Navbar } from './components/layout/Navbar';
 import { AiDrawer } from './components/layout/AiDrawer';
 import { NotificationDrawer } from './components/layout/NotificationDrawer';
@@ -13,6 +13,8 @@ import { ImportWizardModal } from './components/creators/ImportWizardModal';
 
 import { OutreachView } from './components/outreach/OutreachView';
 import { EmailComposerModal } from './components/outreach/EmailComposerModal';
+import { BulkOutreachModal } from './components/outreach/BulkOutreachModal';
+import { InboxView } from './components/inbox/InboxView';
 
 import { CampaignsView } from './components/campaigns/CampaignsView';
 import { CreateCampaignModal } from './components/campaigns/CreateCampaignModal';
@@ -37,7 +39,8 @@ import {
   NotificationItem,
   DashboardKPIs,
   ActivityItem,
-  Workspace
+  Workspace,
+  CreatorCampaignAssignment
 } from './types';
 
 import {
@@ -53,26 +56,16 @@ import {
 } from './data/initialData';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [collapsed, setCollapsed] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
 
   // Workspaces State
   const [workspaces, setWorkspaces] = useState<Workspace[]>(INITIAL_WORKSPACES);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>('ws-pickdi');
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(INITIAL_WORKSPACES[0]?.id || '');
 
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
-  const isAgencyWorkspace = activeWorkspace.isAgency || activeWorkspace.id === 'ws-pickdi';
-
-  // Toggle for Showing / Hiding Mock Data
-  const [showMockData, setShowMockData] = useState<boolean>(() => {
-    const saved = localStorage.getItem('pickdi_show_mockdata');
-    return saved !== null ? JSON.parse(saved) : true;
-  });
-
-  useEffect(() => {
-    localStorage.setItem('pickdi_show_mockdata', JSON.stringify(showMockData));
-  }, [showMockData]);
+  const isAgencyWorkspace = Boolean(activeWorkspace.isAgency);
 
   // Core Data Collections
   const [creators, setCreators] = useState<Creator[]>(INITIAL_CREATORS);
@@ -83,38 +76,55 @@ export function App() {
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
   const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
   const [activities, setActivities] = useState<ActivityItem[]>(INITIAL_ACTIVITIES);
-
-  // Helper to determine if an item is mock data
-  const isItemMock = (item: { isMock?: boolean; id?: string }) => {
-    if (item.isMock === true) return true;
-    if (item.isMock === false) return false;
-    if (item.id && /^(cr-[1-6]|cmp-[1-3]|out-[1-2]|conv-[1-2]|rev-[1-2]|tsk-[1-4]|notif-[1-3]|act-[1-4])$/.test(item.id)) {
-      return true;
-    }
-    return false;
-  };
-
-  // Filter Data by Mock Toggle
-  const displayCreators = showMockData ? creators : creators.filter(c => !isItemMock(c));
-  const displayCampaigns = showMockData ? campaigns : campaigns.filter(c => !isItemMock(c));
-  const displayOutreach = showMockData ? outreachList : outreachList.filter(o => !isItemMock(o));
-  const displayConversations = showMockData ? conversations : conversations.filter(c => !isItemMock(c));
-  const displayReviews = showMockData ? reviews : reviews.filter(r => !isItemMock(r));
-  const displayTasks = showMockData ? tasks : tasks.filter(t => !isItemMock(t));
-  const displayNotifications = showMockData ? notifications : notifications.filter(n => !isItemMock(n));
-  const displayActivities = showMockData ? activities : activities.filter(a => !isItemMock(a));
+  // Quan hệ nhiều-nhiều Creator ↔ Campaign — nguồn sự thật cho việc creator nào đang chạy
+  // campaign nào ở brand nào (xem CreatorCampaignAssignment ở types.ts).
+  const [assignments, setAssignments] = useState<CreatorCampaignAssignment[]>([]);
 
   // Filter Data according to active workspace
   const inActiveWorkspace = (workspaceId?: string) =>
-    isAgencyWorkspace || !workspaceId || workspaceId === activeWorkspaceId || workspaceId === 'ws-pickdi';
+    isAgencyWorkspace || !workspaceId || workspaceId === activeWorkspaceId;
 
-  const workspaceCreators = displayCreators.filter(c => inActiveWorkspace(c.workspaceId));
-  const workspaceCampaigns = displayCampaigns.filter(cmp => inActiveWorkspace(cmp.workspaceId));
-  const workspaceOutreach = displayOutreach.filter(o => inActiveWorkspace(o.workspaceId));
-  const workspaceConversations = displayConversations.filter(c => inActiveWorkspace(c.workspaceId));
-  const workspaceReviews = displayReviews.filter(r => inActiveWorkspace(r.workspaceId));
-  const workspaceTasks = displayTasks.filter(t => inActiveWorkspace(t.workspaceId));
-  const workspaceNotifications = displayNotifications.filter(n => inActiveWorkspace(n.workspaceId));
+  // Creator "thuộc" 1 brand/workspace khi có ít nhất 1 campaign assignment ở workspace đó —
+  // KHÔNG dùng creator.workspaceId để quyết định điều này nữa một khi creator đã có assignment
+  // (field đó giờ chỉ là "home workspace" lúc tạo lead). Ở workspace Agency thấy toàn bộ; ở
+  // 1 brand cụ thể, creator chưa từng làm campaign với brand đó sẽ ẩn hoàn toàn — đúng ranh
+  // giới dữ liệu giữa các brand/client.
+  // Ngoại lệ: creator MỚI import/tạo, chưa từng được gán vào campaign nào ở đâu cả — nếu vẫn
+  // đòi hỏi có assignment thì creator sẽ biến mất khỏi mọi workspace không phải Agency ngay
+  // sau khi import (Import Wizard/scraper chỉ tạo Creator, không tự tạo assignment). Với nhóm
+  // này, tạm dùng creator.workspaceId (home workspace lúc tạo) làm nơi hiển thị mặc định.
+  const creatorBelongsToActiveWorkspace = (creatorId: string) => {
+    if (isAgencyWorkspace) return true;
+    const creatorAssignments = assignments.filter(a => a.creatorId === creatorId);
+    if (creatorAssignments.length > 0) {
+      return creatorAssignments.some(a => a.workspaceId === activeWorkspaceId);
+    }
+    const creator = creators.find(c => c.id === creatorId);
+    return !creator?.workspaceId || creator.workspaceId === activeWorkspaceId;
+  };
+
+  // Trạng thái hiển thị của creator trong workspace đang mở PHẢI lấy từ assignment riêng
+  // của workspace đó (nếu có) — không phải Creator.status chung — vì cùng 1 creator có thể
+  // đang "Contacted" ở brand A nhưng chưa từng liên hệ ở brand B. Workspace Agency xem toàn
+  // bộ creator ở nhiều brand cùng lúc nên không có 1 "trạng thái đang mở" duy nhất để lấy —
+  // giữ nguyên Creator.status chung cho trường hợp đó.
+  const resolveWorkspaceStatus = (creator: Creator): Creator => {
+    if (isAgencyWorkspace) return creator;
+    const scoped = assignments.filter(a => a.creatorId === creator.id && a.workspaceId === activeWorkspaceId);
+    if (scoped.length === 0) return creator;
+    const latest = [...scoped].sort((a, b) => new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime())[0];
+    return creator.status === latest.status ? creator : { ...creator, status: latest.status };
+  };
+
+  const workspaceCreators = creators
+    .filter(c => creatorBelongsToActiveWorkspace(c.id))
+    .map(resolveWorkspaceStatus);
+  const workspaceCampaigns = campaigns.filter(cmp => inActiveWorkspace(cmp.workspaceId));
+  const workspaceOutreach = outreachList.filter(o => inActiveWorkspace(o.workspaceId));
+  const workspaceConversations = conversations.filter(c => inActiveWorkspace(c.workspaceId));
+  const workspaceReviews = reviews.filter(r => inActiveWorkspace(r.workspaceId));
+  const workspaceTasks = tasks.filter(t => inActiveWorkspace(t.workspaceId));
+  const workspaceNotifications = notifications.filter(n => inActiveWorkspace(n.workspaceId));
 
   // Modals & Drawers state
   const [isAiDrawerOpen, setIsAiDrawerOpen] = useState(false);
@@ -128,13 +138,21 @@ export function App() {
   // Selected Detail states
   const [selectedCreatorForEmail, setSelectedCreatorForEmail] = useState<Creator | null>(null);
   const [isEmailComposerOpen, setIsEmailComposerOpen] = useState(false);
+  const [bulkOutreachConfig, setBulkOutreachConfig] = useState<{
+    creatorIds: string[];
+    defaultCampaignId?: string;
+    defaultSequenceStage?: 'first' | 'reminder_1' | 'reminder_2' | 'reminder_3';
+  } | null>(null);
   const [selectedCreatorDetail, setSelectedCreatorDetail] = useState<Creator | null>(null);
   const [preselectCampaignId, setPreselectCampaignId] = useState<string | null>(null);
   const [selectedReviewDetail, setSelectedReviewDetail] = useState<DraftReview | null>(null);
 
   // Fetch state from backend & poll periodically for background script syncs
-  const refreshCreators = async () => {
-    if (document.hidden) return; // Don't poll when tab is hidden to save bandwidth & avoid rate limit
+  const refreshCreators = async (opts: { skipIfHidden?: boolean } = {}) => {
+    // Only the periodic background poll should skip while the tab is hidden (to save
+    // bandwidth/avoid rate limits) — the initial mount load and focus refresh must always
+    // run, otherwise a tab that starts backgrounded never loads any creator data at all.
+    if (opts.skipIfHidden && document.hidden) return;
     try {
       const res = await fetch('/api/creators');
       if (!res.ok) {
@@ -158,16 +176,59 @@ export function App() {
     }
   };
 
+  // Bulk outreach sends run in the background server-side — once a batch finishes, pull
+  // every record it could have touched (creators' lastContactAt, outreach history,
+  // conversations, campaign assignment status) back in rather than trying to patch each
+  // one in from the job's item list.
+  const refreshAfterBulkOutreach = async () => {
+    try {
+      const [resCreators, resOutreach, resConv, resAssignments] = await Promise.all([
+        fetch('/api/creators'),
+        fetch('/api/outreach'),
+        fetch('/api/conversations'),
+        fetch('/api/assignments'),
+      ]);
+      if (resCreators.ok) {
+        const data = await resCreators.json();
+        if (data.success && Array.isArray(data.data)) setCreators(data.data);
+      }
+      if (resOutreach.ok) {
+        const data = await resOutreach.json();
+        if (data.success) setOutreachList(data.data);
+      }
+      if (resConv.ok) {
+        const data = await resConv.json();
+        if (data.success) setConversations(data.data);
+      }
+      if (resAssignments.ok) {
+        const data = await resAssignments.json();
+        if (data.success) setAssignments(data.data);
+      }
+    } catch (err) {
+      console.error('Error refreshing after bulk outreach:', err);
+    }
+  };
+
   useEffect(() => {
     refreshCreators();
+
+    fetch('/api/workspaces')
+      .then(res => res.ok && res.headers.get('content-type')?.includes('application/json') ? res.json() : null)
+      .then(data => { if (data && Array.isArray(data.data) && data.data.length > 0) setWorkspaces(data.data); })
+      .catch(err => console.error(err));
 
     fetch('/api/campaigns')
       .then(res => res.ok && res.headers.get('content-type')?.includes('application/json') ? res.json() : null)
       .then(data => { if (data && data.data) setCampaigns(data.data); })
       .catch(err => console.error(err));
 
+    fetch('/api/assignments')
+      .then(res => res.ok && res.headers.get('content-type')?.includes('application/json') ? res.json() : null)
+      .then(data => { if (data && Array.isArray(data.data)) setAssignments(data.data); })
+      .catch(err => console.error(err));
+
     // Poll every 10 seconds for new scraped creators from extension/userscript
-    const interval = setInterval(refreshCreators, 10000);
+    const interval = setInterval(() => refreshCreators({ skipIfHidden: true }), 10000);
 
     // Also refresh immediately when switching back to this browser tab
     const handleFocus = () => refreshCreators();
@@ -200,15 +261,25 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Calculated Dashboard KPIs
+  const conversionRate = workspaceCreators.length > 0
+    ? Number(((workspaceCreators.filter(c => ['Approved', 'Completed'].includes(c.status)).length / workspaceCreators.length) * 100).toFixed(1))
+    : 0;
+
+  // Calculated Dashboard KPIs — all time-windowed fields are filtered against actual
+  // dates (previously these counted all-time totals/status matches mislabeled as "today"/"this week").
+  const todayStr = new Date().toISOString().split('T')[0];
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
   const kpis: DashboardKPIs = {
-    todayEmailsSent: workspaceOutreach.length,
-    todayRepliesReceived: workspaceConversations.filter(c => c.status === 'Need Reply').length,
+    todayEmailsSent: workspaceOutreach.filter(o => o.sentAt && o.sentAt.startsWith(todayStr)).length,
+    todayRepliesReceived: workspaceConversations.reduce(
+      (count, c) => count + c.messages.filter(m => m.senderType === 'CREATOR' && m.createdAt.startsWith(todayStr)).length,
+      0
+    ),
     pendingReviewsCount: workspaceReviews.filter(r => r.status === 'Pending Review').length,
-    overdueTasksCount: workspaceTasks.filter(t => t.status === 'Pending').length,
+    overdueTasksCount: workspaceTasks.filter(t => t.status !== 'Completed' && t.dueDate < todayStr).length,
     activeCampaignsCount: workspaceCampaigns.filter(c => c.status === 'Running').length,
-    creatorsAddedThisWeek: workspaceCreators.length,
-    conversionRate: 38.8
+    creatorsAddedThisWeek: workspaceCreators.filter(c => c.createdAt && new Date(c.createdAt) >= sevenDaysAgo).length,
+    conversionRate: conversionRate
   };
 
   // HANDLERS
@@ -248,6 +319,11 @@ export function App() {
       activeCampaignCount: 0
     };
     setWorkspaces(prev => [...prev, newWs]);
+    fetch('/api/workspaces', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newWs)
+    }).catch(err => console.error('Error persisting new workspace:', err));
     return newWs.id;
   };
 
@@ -258,6 +334,11 @@ export function App() {
     };
     setWorkspaces(prev => [...prev, newWs]);
     setActiveWorkspaceId(newWs.id);
+    fetch('/api/workspaces', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newWs)
+    }).catch(err => console.error('Error persisting new workspace:', err));
 
     setNotifications(prev => [
       {
@@ -316,25 +397,130 @@ export function App() {
     }
   };
 
-  const handleAssignCreatorToWorkspace = async (creatorId: string, targetWorkspaceId: string) => {
+
+  const handleSendEmail = async (payload: any) => {
     try {
-      const res = await fetch(`/api/creators/${creatorId}`, {
-        method: 'PATCH',
+      const res = await fetch('/api/outreach/send', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspaceId: targetWorkspaceId })
+        body: JSON.stringify({ ...payload, workspaceId: activeWorkspaceId })
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.message || `Request failed with status ${res.status}`);
+        throw new Error(data.message || 'Gửi email outreach thất bại');
       }
-      setCreators(prev => prev.map(c => c.id === creatorId ? { ...c, workspaceId: targetWorkspaceId } : c));
-    } catch (err) {
-      console.error('Error assigning creator to workspace:', err);
+
+      setOutreachList(prev => [data.data, ...prev]);
+      setCreators(prev =>
+        prev.map(c => (c.id === payload.creatorId ? { ...c, lastContactAt: new Date().toISOString() } : c))
+      );
+      // "Contacted" được ghi vào assignment (riêng cho workspace+campaign này), không phải
+      // Creator.status chung — xem server.ts /api/outreach/send.
+      if (data.assignment) {
+        setAssignments(prev => [data.assignment, ...prev.filter((a: CreatorCampaignAssignment) => a.id !== data.assignment.id)]);
+      }
+      if (data.conversation) {
+        setConversations(prev => {
+          const exists = prev.some(c => c.id === data.conversation.id);
+          return exists
+            ? prev.map(c => (c.id === data.conversation.id ? data.conversation : c))
+            : [data.conversation, ...prev];
+        });
+      }
       setNotifications(prev => [
         {
           id: `notif-${Date.now()}`,
-          title: 'Chuyển workspace thất bại',
-          description: 'Không thể lưu thay đổi workspace cho creator này. Vui lòng thử lại.',
+          title: 'Đã gửi Email Outreach ✉️',
+          description: `Đã gửi email đến ${payload.creatorName} (${payload.creatorHandle})`,
+          priority: 'LOW',
+          category: 'Outreach',
+          isRead: false,
+          createdAt: new Date().toISOString()
+        },
+        ...prev
+      ]);
+      return true;
+    } catch (err: any) {
+      console.error('Send email error:', err);
+      alert('Không thể gửi email. Vui lòng kiểm tra kết nối mạng và cấu hình Gmail rồi thử lại.');
+      return false;
+    }
+  };
+
+  const handleSendReply = async (convId: string, content: string, isAiGenerated?: boolean) => {
+    try {
+      const res = await fetch(`/api/conversations/${convId}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, isAiGenerated })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Gửi reply thất bại');
+      }
+
+      setConversations(prev =>
+        prev.map(c => (c.id === convId ? data.data : c))
+      );
+      return true;
+    } catch (err: any) {
+      console.error('Send reply error:', err);
+      alert('Không thể gửi phản hồi. Vui lòng thử lại sau.');
+      return false;
+    }
+  };
+
+  const handleCheckInbox = async () => {
+    try {
+      const res = await fetch('/api/inbox/check', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const [resConv, resOut] = await Promise.all([
+          fetch('/api/conversations'),
+          fetch('/api/outreach')
+        ]);
+        if (resConv.ok) {
+          const convData = await resConv.json();
+          if (convData.success) setConversations(convData.data);
+        }
+        if (resOut.ok) {
+          const outData = await resOut.json();
+          if (outData.success) setOutreachList(outData.data);
+        }
+      }
+      return data;
+    } catch (err: any) {
+      console.error('Check inbox error:', err);
+      return { success: false, message: 'Không thể kết nối tới máy chủ. Vui lòng thử lại.' };
+    }
+  };
+
+  const handleCreateCampaign = async (campData: any) => {
+    // Ở view Agency (nhiều brand), campaign mới gắn vào đúng workspace theo tên Brand đã nhập,
+    // tự tạo workspace nếu brand đó chưa tồn tại. Nếu đang ở trong 1 workspace brand cụ thể thì
+    // giữ nguyên context đó (không tạo workspace khác dựa theo field Brand).
+    const workspaceId = isAgencyWorkspace && campData.brand
+      ? resolveOrCreateWorkspaceForBrand(campData.brand)
+      : activeWorkspaceId;
+
+    try {
+      const res = await fetch('/api/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...campData, workspaceId })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.data) {
+        throw new Error(data.message || 'Failed to save campaign');
+      }
+      setCampaigns(prev => [data.data as Campaign, ...prev]);
+    } catch (err) {
+      console.error('Error creating campaign:', err);
+      setNotifications(prev => [
+        {
+          id: `notif-${Date.now()}`,
+          title: 'Tạo campaign thất bại',
+          description: `Không thể lưu campaign "${campData.name}". Vui lòng kiểm tra kết nối và thử lại.`,
           priority: 'HIGH',
           category: 'System',
           isRead: false,
@@ -343,74 +529,6 @@ export function App() {
         ...prev
       ]);
     }
-  };
-
-  const handleSendEmail = (payload: any) => {
-    const newOutreach: OutreachEmail = {
-      id: `out-${Date.now()}`,
-      creatorId: payload.creatorId,
-      creatorName: payload.creatorName,
-      creatorHandle: payload.creatorHandle,
-      campaignId: payload.campaignId,
-      campaignName: payload.campaignName,
-      subject: payload.subject,
-      body: payload.body,
-      status: 'Sent',
-      sentAt: new Date().toISOString(),
-      followUpCount: 0
-    };
-
-    setOutreachList(prev => [newOutreach, ...prev]);
-
-    // Update creator status to Contacted
-    setCreators(prev =>
-      prev.map(c => (c.id === payload.creatorId ? { ...c, status: 'Contacted' } : c))
-    );
-  };
-
-  const handleSendReply = (convId: string, content: string, isAiGenerated?: boolean) => {
-    setConversations(prev =>
-      prev.map(c => {
-        if (c.id === convId) {
-          const newMsg = {
-            id: `msg-${Date.now()}`,
-            senderName: 'Anh Tuan (Operator)',
-            senderType: 'USER' as const,
-            content,
-            createdAt: new Date().toISOString(),
-            isAiGenerated
-          };
-          return {
-            ...c,
-            status: 'Waiting Reply' as const,
-            lastMessageAt: new Date().toISOString(),
-            messages: [...c.messages, newMsg]
-          };
-        }
-        return c;
-      })
-    );
-  };
-
-  const handleCreateCampaign = (campData: any) => {
-    // Ở view Agency (nhiều brand), campaign mới gắn vào đúng workspace theo tên Brand đã nhập,
-    // tự tạo workspace nếu brand đó chưa tồn tại. Nếu đang ở trong 1 workspace brand cụ thể thì
-    // giữ nguyên context đó (không tạo workspace khác dựa theo field Brand).
-    const workspaceId = isAgencyWorkspace && campData.brand
-      ? resolveOrCreateWorkspaceForBrand(campData.brand)
-      : activeWorkspaceId;
-
-    const newCamp: Campaign = {
-      currency: 'USD',
-      targetCategories: ['Beauty'],
-      ...campData,
-      id: `cmp-${Date.now()}`,
-      workspaceId,
-      spent: 0,
-      creatorIds: [],
-      createdAt: new Date().toISOString()
-    };
-    setCampaigns(prev => [newCamp, ...prev]);
   };
 
   const handleCreateTask = (taskData: any) => {
@@ -437,34 +555,95 @@ export function App() {
     setTasks(prev => prev.filter(t => t.id !== taskId));
   };
 
-  const handleArchiveCreator = (creatorId: string) => {
-    setCreators(prev =>
-      prev.map(c => (c.id === creatorId ? { ...c, status: 'Archived' } : c))
-    );
+  // Cả archive và đổi trạng thái pipeline (kéo-thả kanban) đều phải ghi vào đúng assignment
+  // của workspace đang mở — xem POST /api/creators/:id/workspace-status ở server.ts — để
+  // hành động ở workspace này không ảnh hưởng tới cách creator hiện ra ở workspace khác.
+  const updateCreatorWorkspaceStatus = async (creatorId: string, status: CreatorStatus) => {
+    try {
+      const res = await fetch(`/api/creators/${creatorId}/workspace-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId: activeWorkspaceId, status })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Không thể cập nhật trạng thái');
+      }
+      if (data.data.assignment) {
+        const updated = data.data.assignment as CreatorCampaignAssignment;
+        setAssignments(prev => prev.map(a => (a.id === updated.id ? updated : a)));
+      } else if (data.data.creator) {
+        const updated = data.data.creator as Creator;
+        setCreators(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+      }
+    } catch (err) {
+      console.error('Error updating creator workspace status:', err);
+      setNotifications(prev => [
+        {
+          id: `notif-${Date.now()}`,
+          title: 'Cập nhật trạng thái thất bại',
+          description: 'Không thể lưu thay đổi này. Vui lòng thử lại.',
+          priority: 'HIGH',
+          category: 'System',
+          isRead: false,
+          createdAt: new Date().toISOString()
+        },
+        ...prev
+      ]);
+    }
   };
 
-  const handleUpdateCreatorStatus = (creatorId: string, status: CreatorStatus) => {
-    setCreators(prev =>
-      prev.map(c => (c.id === creatorId ? { ...c, status } : c))
-    );
+  const handleArchiveCreator = (creatorId: string) => updateCreatorWorkspaceStatus(creatorId, 'Archived');
+
+  const handleUpdateCreatorStatus = (creatorId: string, status: CreatorStatus) =>
+    updateCreatorWorkspaceStatus(creatorId, status);
+
+  // Gán 1 creator vào 1 campaign — KHÔNG ghi đè assignment khác, 1 creator có thể chạy nhiều
+  // campaign ở nhiều brand cùng lúc. Xem CreatorCampaignAssignment ở types.ts.
+  const handleAssignCampaignToCreator = async (creatorId: string, campaignId: string) => {
+    try {
+      const res = await fetch('/api/assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creatorId, campaignId })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Không thể gán creator vào campaign này.');
+      }
+      setAssignments(prev => [data.data.assignment, ...prev.filter(a => a.id !== data.data.assignment.id)]);
+      setCampaigns(prev => prev.map(c => (c.id === data.data.campaign.id ? data.data.campaign : c)));
+    } catch (err) {
+      console.error('Error assigning creator to campaign:', err);
+      setNotifications(prev => [
+        {
+          id: `notif-${Date.now()}`,
+          title: 'Gán campaign thất bại',
+          description: 'Không thể lưu assignment này. Vui lòng thử lại.',
+          priority: 'HIGH',
+          category: 'System',
+          isRead: false,
+          createdAt: new Date().toISOString()
+        },
+        ...prev
+      ]);
+    }
   };
 
-  const handleAssignCampaignToCreator = (creatorId: string, campaignId: string) => {
-    const campaign = campaigns.find(c => c.id === campaignId);
-    setCreators(prev =>
-      prev.map(c =>
-        c.id === creatorId
-          ? { ...c, campaignId, campaignName: campaign?.name }
-          : c
-      )
-    );
-    setCampaigns(prev =>
-      prev.map(cmp =>
-        cmp.id === campaignId
-          ? { ...cmp, creatorIds: Array.from(new Set([...cmp.creatorIds, creatorId])) }
-          : cmp
-      )
-    );
+  const handleUnassignCreatorCampaign = async (assignmentId: string) => {
+    const prevAssignments = assignments;
+    setAssignments(prev => prev.filter(a => a.id !== assignmentId));
+    try {
+      const res = await fetch(`/api/assignments/${assignmentId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Không thể gỡ creator khỏi campaign này.');
+      }
+      setCampaigns(prev => prev.map(c => (c.id === data.data.id ? data.data : c)));
+    } catch (err) {
+      console.error('Error unassigning creator from campaign:', err);
+      setAssignments(prevAssignments);
+    }
   };
 
   // Chấm điểm creator CHO 1 campaign cụ thể (Niche/Audience Fit khớp đúng campaign đó) —
@@ -518,12 +697,13 @@ export function App() {
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans flex antialiased">
       {/* Sidebar Navigation */}
       <Sidebar
-        activeTab={activeTab as any}
-        setActiveTab={setActiveTab as any}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
         collapsed={collapsed}
         setCollapsed={setCollapsed}
         unreadNotifsCount={workspaceNotifications.filter(n => !n.isRead).length}
         creatorsCount={workspaceCreators.length}
+        unreadInboxCount={workspaceConversations.filter(c => c.unread).length}
         openAiDrawer={() => setIsAiDrawerOpen(true)}
         openNotifDrawer={() => setIsNotificationDrawerOpen(true)}
       />
@@ -533,7 +713,6 @@ export function App() {
         {/* Top Navbar */}
         <Navbar
           openCommandPalette={() => setIsCommandPaletteOpen(true)}
-          openQuickAdd={() => setIsQuickAddModalOpen(true)}
           openAiDrawer={() => setIsAiDrawerOpen(true)}
           openNotifDrawer={() => setIsNotificationDrawerOpen(true)}
           unreadNotifsCount={workspaceNotifications.filter(n => !n.isRead).length}
@@ -543,8 +722,6 @@ export function App() {
           workspaces={workspaces}
           onSelectWorkspace={id => setActiveWorkspaceId(id)}
           onOpenSettings={() => setActiveTab('settings')}
-          showMockData={showMockData}
-          setShowMockData={setShowMockData}
         />
 
         {/* View Body */}
@@ -553,7 +730,7 @@ export function App() {
             <DashboardView
               kpis={kpis}
               tasks={workspaceTasks.filter(t => t.status === 'Pending')}
-              activities={displayActivities}
+              activities={activities}
               recentReplies={workspaceConversations}
               creators={workspaceCreators}
               activeWorkspace={activeWorkspace}
@@ -572,12 +749,10 @@ export function App() {
           {activeTab === 'creators' && (
             <CreatorListView
               creators={workspaceCreators}
-              allCreators={displayCreators}
-              campaigns={workspaceCampaigns}
-              activeWorkspace={activeWorkspace}
+              campaigns={isAgencyWorkspace ? campaigns : workspaceCampaigns}
+              assignments={assignments}
               workspaces={workspaces}
-              showMockData={showMockData}
-              setShowMockData={setShowMockData}
+              activeWorkspace={activeWorkspace}
               onSelectWorkspace={id => setActiveWorkspaceId(id)}
               onOpenSettings={() => setActiveTab('settings')}
               onSelectCreator={setSelectedCreatorDetail}
@@ -590,22 +765,35 @@ export function App() {
               onArchiveCreator={handleArchiveCreator}
               onRunAiScore={() => setIsAiDrawerOpen(true)}
               onAssignCampaign={handleAssignCampaignToCreator}
-              onAssignToWorkspace={handleAssignCreatorToWorkspace}
+              onUnassignCampaign={handleUnassignCreatorCampaign}
+              onOpenBulkOutreach={creatorIds => setBulkOutreachConfig({ creatorIds })}
             />
           )}
 
           {activeTab === 'outreach' && (
             <OutreachView
               creators={workspaceCreators}
-              campaigns={workspaceCampaigns}
               outreachList={workspaceOutreach}
-              conversations={workspaceConversations}
               onOpenEmailComposer={cr => {
                 setSelectedCreatorForEmail(cr);
                 setIsEmailComposerOpen(true);
               }}
-              onSendReply={handleSendReply}
               onUpdateCreatorStatus={handleUpdateCreatorStatus}
+              onSelectCreator={setSelectedCreatorDetail}
+              onOpenBulkOutreach={(creatorIds, defaultSequenceStage) =>
+                setBulkOutreachConfig({ creatorIds, defaultSequenceStage })
+              }
+            />
+          )}
+
+          {activeTab === 'inbox' && (
+            <InboxView
+              creators={workspaceCreators}
+              campaigns={workspaceCampaigns}
+              conversations={workspaceConversations}
+              workspaces={workspaces}
+              onSendReply={handleSendReply}
+              onCheckInbox={handleCheckInbox}
             />
           )}
 
@@ -613,6 +801,7 @@ export function App() {
             <CampaignsView
               campaigns={workspaceCampaigns}
               creators={workspaceCreators}
+              assignments={assignments}
               activeWorkspace={activeWorkspace}
               workspaces={workspaces}
               onSelectWorkspace={id => setActiveWorkspaceId(id)}
@@ -621,6 +810,7 @@ export function App() {
               onSelectCreator={setSelectedCreatorDetail}
               onScoreCreator={handleScoreCreatorForCampaign}
               preselectCampaignId={preselectCampaignId}
+              onOpenBulkOutreach={(creatorIds, campaignId) => setBulkOutreachConfig({ creatorIds, defaultCampaignId: campaignId })}
             />
           )}
 
@@ -653,8 +843,6 @@ export function App() {
             <SettingsView
               activeWorkspace={activeWorkspace}
               workspaces={workspaces}
-              showMockData={showMockData}
-              setShowMockData={setShowMockData}
               onSelectWorkspace={id => setActiveWorkspaceId(id)}
               onAddWorkspace={handleAddWorkspace}
             />
@@ -668,6 +856,9 @@ export function App() {
         onClose={() => setIsAiDrawerOpen(false)}
         creators={workspaceCreators}
         campaigns={workspaceCampaigns}
+        conversations={workspaceConversations}
+        reviews={workspaceReviews}
+        activeWorkspace={activeWorkspace}
       />
 
       <NotificationDrawer
@@ -730,12 +921,27 @@ export function App() {
         isOpen={isEmailComposerOpen}
         onClose={() => setIsEmailComposerOpen(false)}
         creator={selectedCreatorForEmail}
-        campaigns={campaigns}
+        campaigns={isAgencyWorkspace ? campaigns : workspaceCampaigns}
         onSendEmail={handleSendEmail}
+      />
+
+      <BulkOutreachModal
+        isOpen={!!bulkOutreachConfig}
+        onClose={() => setBulkOutreachConfig(null)}
+        creatorIds={bulkOutreachConfig?.creatorIds || []}
+        creators={isAgencyWorkspace ? creators : workspaceCreators}
+        campaigns={isAgencyWorkspace ? campaigns : workspaceCampaigns}
+        workspaceId={activeWorkspaceId}
+        defaultCampaignId={bulkOutreachConfig?.defaultCampaignId}
+        defaultSequenceStage={bulkOutreachConfig?.defaultSequenceStage}
+        onCompleted={refreshAfterBulkOutreach}
       />
 
       <CreatorDetailDrawer
         creator={selectedCreatorDetail}
+        campaigns={campaigns}
+        workspaces={workspaces}
+        assignments={assignments}
         onClose={() => setSelectedCreatorDetail(null)}
         onOpenEmailComposer={cr => {
           setSelectedCreatorForEmail(cr);
@@ -744,6 +950,8 @@ export function App() {
         onArchiveCreator={handleArchiveCreator}
         onAddNote={handleAddCreatorNote}
         onRunAiResearch={() => setIsAiDrawerOpen(true)}
+        onAssignCampaign={handleAssignCampaignToCreator}
+        onUnassignCampaign={handleUnassignCreatorCampaign}
       />
 
       <ReviewDetailModal

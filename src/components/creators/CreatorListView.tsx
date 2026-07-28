@@ -7,22 +7,22 @@ import {
   Sparkles,
   ExternalLink,
   Mail,
+  Send,
   Archive,
   ChevronLeft,
   ChevronRight,
   Zap
 } from 'lucide-react';
-import { Creator, Campaign, Workspace } from '../../types';
+import { Creator, Campaign, Workspace, CreatorCampaignAssignment } from '../../types';
 import { WorkspaceBanner } from '../layout/WorkspaceBanner';
 
 interface CreatorListViewProps {
   creators: Creator[];
-  allCreators?: Creator[];
   campaigns: Campaign[];
+  assignments?: CreatorCampaignAssignment[];
   activeWorkspace?: Workspace;
   workspaces?: Workspace[];
   onSelectWorkspace?: (id: string) => void;
-  onAssignToWorkspace?: (creatorId: string, workspaceId: string) => void;
   onOpenSettings?: () => void;
   onSelectCreator: (cr: Creator) => void;
   onOpenQuickAdd: () => void;
@@ -31,18 +31,17 @@ interface CreatorListViewProps {
   onArchiveCreator: (id: string) => void;
   onRunAiScore: (cr: Creator) => void;
   onAssignCampaign: (crId: string, cmpId: string) => void;
-  showMockData?: boolean;
-  setShowMockData?: (val: boolean) => void;
+  onUnassignCampaign?: (assignmentId: string) => void;
+  onOpenBulkOutreach?: (creatorIds: string[]) => void;
 }
 
 export const CreatorListView: React.FC<CreatorListViewProps> = ({
   creators,
-  allCreators = [],
   campaigns,
+  assignments = [],
   activeWorkspace,
   workspaces = [],
   onSelectWorkspace,
-  onAssignToWorkspace,
   onOpenSettings,
   onSelectCreator,
   onOpenQuickAdd,
@@ -51,16 +50,13 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   onArchiveCreator,
   onRunAiScore,
   onAssignCampaign,
-  showMockData = true,
-  setShowMockData
+  onUnassignCampaign,
+  onOpenBulkOutreach
 }) => {
-  // Tab Mode: 'workspace' (current workspace creators) vs 'global' (all agency creators)
-  const [viewScope, setViewScope] = useState<'workspace' | 'global'>('workspace');
-
   // Ở view Agency (PICKDI, tổng hợp nhiều brand) chưa gắn campaign cụ thể nên hiển thị Overall
   // score (comprehensiveScore riêng của TikTok One) để so sánh nhanh cả kho creator. Khi chuyển
   // sang 1 workspace brand cụ thể, đổi lại thành Brand Fit (điểm nền tự tính, xem src/scoring.ts).
-  const isAgencyView = !activeWorkspace || activeWorkspace.isAgency || activeWorkspace.id === 'ws-pickdi';
+  const isAgencyView = !activeWorkspace || Boolean(activeWorkspace.isAgency);
   const scoreColumnLabel = isAgencyView ? 'Overall Score' : 'Brand Fit';
   const getScoreValue = (cr: Creator) => (isAgencyView ? cr.scores?.overall : cr.brandFitScore);
 
@@ -74,8 +70,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   // Bulk Selection
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  // Choose source list depending on scope
-  const sourceCreators = viewScope === 'workspace' ? creators : (allCreators.length > 0 ? allCreators : creators);
+  const sourceCreators = creators;
 
   // Filtering logic
   const filteredCreators = sourceCreators.filter(c => {
@@ -186,37 +181,10 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
               <Users className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
               Creator CRM Database
             </h1>
-
-            {/* Scope Tabs */}
-            <div className="flex items-center p-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 ml-2">
-              <button
-                onClick={() => setViewScope('workspace')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                  viewScope === 'workspace'
-                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
-              >
-                {activeWorkspace ? activeWorkspace.code : 'Current Workspace'} ({creators.length})
-              </button>
-
-              <button
-                onClick={() => setViewScope('global')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                  viewScope === 'global'
-                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
-              >
-                Master Agency Database ({allCreators.length || creators.length})
-              </button>
-            </div>
           </div>
 
           <p className="text-xs text-slate-500">
-            {viewScope === 'workspace'
-              ? `Showing creators affiliated with ${activeWorkspace?.name || 'this workspace'}`
-              : 'Showing all creator leads across the entire agency network pool'}
+            {`Showing creators affiliated with ${activeWorkspace?.name || 'this workspace'}`}
           </p>
         </div>
 
@@ -246,43 +214,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
           </button>
         </div>
       </div>
-
-      {/* Mock Data Banner Info */}
-      {showMockData ? (
-        <div className="px-4 py-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-xl text-xs text-amber-900 dark:text-amber-200 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="flex h-2 w-2 rounded-full bg-amber-500 animate-ping shrink-0" />
-            <span>
-              <strong>Đang bật Dữ liệu Mẫu (Mock Data):</strong> Hệ thống hiển thị các profile creator mẫu để demo. Bạn có thể bấm nút <strong>Mock Data</strong> trên Navbar để ẩn/hiện.
-            </span>
-          </div>
-          {setShowMockData && (
-            <button
-              onClick={() => setShowMockData(false)}
-              className="text-amber-700 dark:text-amber-300 underline font-semibold hover:text-amber-900 shrink-0 text-xs"
-            >
-              Ẩn dữ liệu mẫu
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="px-4 py-2.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-xl text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="flex h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
-            <span>
-              <strong>Đã ẩn Dữ liệu Mẫu:</strong> Danh sách dưới đây chỉ chứa các Creator thực do Bạn đã cào qua Tampermonkey Userscript hoặc Import CSV.
-            </span>
-          </div>
-          {setShowMockData && (
-            <button
-              onClick={() => setShowMockData(true)}
-              className="text-emerald-700 dark:text-emerald-300 underline font-semibold hover:text-emerald-900 shrink-0 text-xs"
-            >
-              Bật lại dữ liệu mẫu
-            </button>
-          )}
-        </div>
-      )}
 
       {/* Filter Bar */}
       <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs space-y-3">
@@ -347,21 +278,14 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
               {selectedIds.length} creators selected
             </span>
             <div className="flex items-center gap-2">
-              {onAssignToWorkspace && (
-                <select
-                  onChange={e => {
-                    if (e.target.value) {
-                      selectedIds.forEach(id => onAssignToWorkspace(id, e.target.value));
-                      setSelectedIds([]);
-                    }
-                  }}
-                  className="px-2.5 py-1 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-semibold rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              {onOpenBulkOutreach && (
+                <button
+                  onClick={() => onOpenBulkOutreach(selectedIds)}
+                  className="px-2.5 py-1 bg-indigo-600 text-white font-semibold rounded-lg flex items-center gap-1 hover:bg-indigo-700"
                 >
-                  <option value="">Assign to Brand Workspace...</option>
-                  {workspaces.map(ws => (
-                    <option key={ws.id} value={ws.id}>→ {ws.name} ({ws.code})</option>
-                  ))}
-                </select>
+                  <Send className="w-3.5 h-3.5" />
+                  Gửi Hàng Loạt
+                </button>
               )}
 
               <button
@@ -411,8 +335,8 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                 <th className="py-3 px-4 text-right">Avg Views</th>
                 <th className="py-3 px-4 text-center">ER %</th>
                 <th className="py-3 px-4 text-center">{scoreColumnLabel}</th>
-                <th className="py-3 px-4">Brand / Workspace</th>
-                <th className="py-3 px-4">Campaign</th>
+                <th className="py-3 px-4">Brands</th>
+                <th className="py-3 px-4">Campaigns</th>
                 <th className="py-3 px-4">Status</th>
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
@@ -524,48 +448,81 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                         })()}
                       </td>
 
-                      {/* Brand / Workspace */}
+                      {/* Brands — suy ra tự động từ các campaign creator này đang chạy, không còn
+                          gán thủ công 1 brand duy nhất (1 creator có thể chạy nhiều brand cùng lúc) */}
                       <td className="py-3.5 px-4">
-                        <select
-                          value={cr.workspaceId || 'ws-pickdi'}
-                          onChange={e => {
-                            if (onAssignToWorkspace) onAssignToWorkspace(cr.id, e.target.value);
-                          }}
-                          className="text-[11px] font-semibold px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        >
-                          {workspaces.map(ws => (
-                            <option key={ws.id} value={ws.id}>
-                              {ws.name} ({ws.code})
-                            </option>
-                          ))}
-                        </select>
+                        {(() => {
+                          const brandIds = Array.from(
+                            new Set(assignments.filter(a => a.creatorId === cr.id).map(a => a.workspaceId).filter(Boolean))
+                          ) as string[];
+                          const brandWs = brandIds.map(id => workspaces.find(w => w.id === id)).filter(Boolean) as Workspace[];
+                          return brandWs.length === 0 ? (
+                            <span className="text-slate-400 text-[11px] italic">Chưa gán brand nào</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1 max-w-[160px]">
+                              {brandWs.map(ws => (
+                                <span
+                                  key={ws.id}
+                                  className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                                >
+                                  {ws.code}
+                                </span>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </td>
 
-                      {/* Campaign */}
+                      {/* Campaign(s) — 1 creator có thể chạy nhiều campaign cùng lúc */}
                       <td className="py-3.5 px-4">
-                        {cr.campaignName ? (
-                          <span className="px-2 py-1 text-[11px] font-semibold rounded bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 truncate max-w-[140px] block">
-                            {cr.campaignName}
-                          </span>
-                        ) : (
-                          <select
-                            onChange={e => {
-                              if (e.target.value) onAssignCampaign(cr.id, e.target.value);
-                            }}
-                            className="text-[11px] p-1 border rounded bg-slate-50 dark:bg-slate-800 text-slate-500"
-                          >
-                            <option value="">+ Assign Campaign</option>
-                            {campaigns.map(cmp => (
-                              <option key={cmp.id} value={cmp.id}>{cmp.name}</option>
-                            ))}
-                          </select>
-                        )}
+                        {(() => {
+                          const crAssignments = assignments.filter(a => a.creatorId === cr.id);
+                          const assignedCampaignIds = new Set(crAssignments.map(a => a.campaignId));
+                          const availableCampaigns = campaigns.filter(cmp => !assignedCampaignIds.has(cmp.id));
+
+                          return (
+                            <div className="flex flex-col gap-1 max-w-[160px]">
+                              {crAssignments.map(a => (
+                                <span
+                                  key={a.id}
+                                  className="px-2 py-1 text-[11px] font-semibold rounded bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 truncate flex items-center justify-between gap-1"
+                                  title={a.campaignName}
+                                >
+                                  <span className="truncate">{a.campaignName}</span>
+                                  {onUnassignCampaign && (
+                                    <button
+                                      onClick={() => onUnassignCampaign(a.id)}
+                                      className="text-purple-400 hover:text-rose-600 shrink-0"
+                                      title="Gỡ khỏi campaign này"
+                                    >
+                                      ×
+                                    </button>
+                                  )}
+                                </span>
+                              ))}
+                              {availableCampaigns.length > 0 && (
+                                <select
+                                  value=""
+                                  onChange={e => {
+                                    if (e.target.value) onAssignCampaign(cr.id, e.target.value);
+                                  }}
+                                  className="text-[11px] p-1 border rounded bg-slate-50 dark:bg-slate-800 text-slate-500"
+                                >
+                                  <option value="">+ Assign Campaign</option>
+                                  {availableCampaigns.map(cmp => (
+                                    <option key={cmp.id} value={cmp.id}>{cmp.name}</option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
 
                       {/* Status */}
-                      <td className="py-3.5 px-4">
+                      <td className="py-3.5 px-4 whitespace-nowrap">
                         <span
-                          className={`px-2.5 py-1 text-[11px] font-bold rounded-full border ${
+                          className={`px-2.5 py-1 text-[11px] font-bold rounded-full border whitespace-nowrap ${
                             cr.status === 'Approved' || cr.status === 'Completed'
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                               : cr.status === 'Draft Submitted' || cr.status === 'Negotiating'
