@@ -1,0 +1,635 @@
+// Hàm chuẩn hoá dùng chung giữa popup.js (chạy trong popup, world ISOLATED) và background.js
+// (service worker) — cần tách riêng vì background.js không có DOM/popup context nhưng vẫn phải
+// tự gọi normalizeTcmProfileDetail() khi xử lý hàng đợi "auto lấy chi tiết" (session 8/9).
+// Nạp bằng <script src="shared.js"> (popup.html, trước popup.js) và importScripts('shared.js')
+// (background.js) — cả 2 cách đều add function vào cùng 1 global scope, không dùng module.
+
+function parseMoney(v) {
+  if (v === null || v === undefined) return undefined;
+  if (typeof v === 'number') return v;
+  const n = parseFloat(String(v).replace(/[^0-9.]/g, ''));
+  return isNaN(n) ? undefined : n;
+}
+
+// Field tiền tệ thật của marketplace/profile (xác nhận qua live recon DevTools, không đoán) có
+// 2 shape khác nhau tuỳ field: (1) {value,symbol,format} cho 1 số đơn (vd gpm, med_gmv_revenue,
+// avg_revenue_per_buyer) — dùng .value; (2) {minimal,maximum,symbol,...} cho field range (vd
+// ec_video_gpm, ec_live_gpm) — lấy trung bình 2 đầu. Field CHƯA có data thật trả về dạng
+// {is_authorized,status} (không có value/minimal/maximum) -> trả undefined thay vì đoán bừa.
+function extractMoneyLikeValue(v) {
+  if (v === null || v === undefined || typeof v !== 'object') return v;
+  if (v.value !== undefined) return v.value;
+  if (v.minimal !== undefined || v.maximum !== undefined) {
+    const lo = Number(v.minimal), hi = Number(v.maximum);
+    if (Number.isFinite(lo) && Number.isFinite(hi)) return (lo + hi) / 2;
+    if (Number.isFinite(lo)) return lo;
+    if (Number.isFinite(hi)) return hi;
+  }
+  return undefined;
+}
+
+// Number(x) trên field không phải số (vd TCM trả "--"/loading placeholder khi tab chưa load
+// xong) ra NaN — NaN lọt qua mọi check `!= null` phía trên rồi bị JSON.stringify() khi POST
+// biến thành `null` nằm im trong DB, làm UI tưởng có data thật (object tồn tại) nhưng gọi
+// .toFixed()/hiển thị số trên giá trị null thì crash/hiện "null". Luôn dùng hàm này thay vì
+// Number() trần cho mọi field số lấy từ TCM raw profile.
+function toNum(v) {
+  if (v === null || v === undefined) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+// Field TCM chưa xác nhận đầy đủ có LUÔN là string thuần hay đôi khi vẫn còn bọc dạng
+// {value,...}/object khác không (bug thật đã gặp: main_industry lưu thành chuỗi JSON rác
+// '{"is_authorized":true,"status":0}', handle của marketplace/profile từng là object khiến
+// String(handle) tạo ra "[object Object]" — 1 handle rác nhưng vẫn "truthy" nên lọt qua mọi
+// check rồi bị lưu thẳng vào CRM). KHÔNG bao giờ String(v) ép kiểu mù — chỉ nhận khi field đã
+// đúng là string sẵn, còn lại coi như chưa biết cách đọc và bỏ qua (rồi log ra để đối chiếu).
+function asString(v) {
+  return (typeof v === 'string' && v.trim()) ? v.trim() : undefined;
+}
+
+const DEMO_LABELS = { male: 'Male', female: 'Female' };
+
+// follower_genders_v2/follower_ages_v2 không phải lúc nào cũng cộng đúng 100% (còn 1 phần
+// "unknown" TCM không trả ra key riêng, vd 1 creator thật: male 0.7032 + female 0.2481 =
+// 0.9513, thiếu ~4.87%) — nhưng donut Gender/Age trên UI thật TCM tự chuẩn hoá lại theo tổng
+// chỉ các key ĐÃ trả (0.7032/0.9513=73.92%, khớp CHÍNH XÁC số UI hiển thị, xác nhận qua live
+// recon). Nếu lấy % thô không chuẩn hoá, số lưu vào CRM sẽ lệch với số user nhìn thấy trên TCM.
+function normalizePct(entries) {
+  const sum = entries.reduce((s, e) => s + (Number(e.value) || 0), 0);
+  if (!(sum > 0)) return entries.map((e) => ({ key: e.key, pct: 0 }));
+  return entries.map((e) => ({ key: e.key, pct: Math.round(((Number(e.value) || 0) / sum) * 100) }));
+}
+
+// Bio creator viết email theo rất nhiều kiểu khác nhau để né spam-bot: email thuần
+// ("contact me: name@gmail.com"), hoặc né dạng chữ ("name at gmail dot com", "name (at) gmail
+// (dot) com", "name[at]gmail[dot]com"). Thử regex email chuẩn trước; nếu không khớp, de-obfuscate
+// " at "/"(at)"/"[at]" -> "@" và " dot "/"(dot)"/"[dot]" -> "." (chỉ match \b...\b để không dính
+// nhầm "at" nằm giữa từ khác, vd "Latina", "chat") rồi thử lại 1 lần.
+const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+function extractEmailFromBio(bio) {
+  if (typeof bio !== 'string' || !bio.trim()) return undefined;
+  const direct = bio.match(EMAIL_RE);
+  if (direct) return direct[0].replace(/[.,;:!?]+$/, '');
+  const deobfuscated = bio
+    .replace(/\s*[\(\[]?\s*\bat\b\s*[\)\]]?\s*/gi, '@')
+    .replace(/\s*[\(\[]?\s*\bdot\b\s*[\)\]]?\s*/gi, '.');
+  const fallback = deobfuscated.match(EMAIL_RE);
+  return fallback ? fallback[0].replace(/[.,;:!?]+$/, '') : undefined;
+}
+
+// profile.handle từng bị bắt gặp KHÔNG phải string thuần (nguyên nhân bug thật: 1 creator bị
+// lưu với handle="[object Object]" — String(obj) không throw nên lọt qua check "có giá trị" cũ,
+// ra 1 chuỗi rác nhưng vẫn "truthy"). Dò thêm vài path lồng nhau khả dĩ trước khi bỏ cuộc, và
+// KHÔNG BAO GIỜ String()-ép 1 object/array thành handle.
+function extractHandle(profile) {
+  const direct = asString(profile.handle);
+  if (direct) return direct;
+  if (profile.handle && typeof profile.handle === 'object') {
+    const nested = asString(profile.handle.value) || asString(profile.handle.handle) || asString(profile.handle.uniqueId);
+    if (nested) return nested;
+  }
+  return asString(profile.unique_id) || asString(profile.uniqueId);
+}
+
+// Chuẩn hoá creator_profile (đã deep-merge từ nhiều lần gọi marketplace/profile, hoặc raw 1 lần
+// nếu đọc thẳng từ tab vừa mở) thành payload enrich gửi lên /api/creators/batch-import.
+function normalizeTcmProfileDetail(profile) {
+  const rawHandle = extractHandle(profile);
+  const handle = rawHandle ? rawHandle.replace(/^@/, '') : undefined;
+  if (!handle) return null;
+
+  const out = { handle };
+
+  const bio = asString(profile.bio);
+  if (bio) {
+    out.bio = bio;
+    const email = extractEmailFromBio(bio);
+    if (email) out.email = email;
+  }
+
+  if (Array.isArray(profile.industry_groups) && profile.industry_groups.length > 0) {
+    const sorted = [...profile.industry_groups].sort((a, b) => (b.value || 0) - (a.value || 0));
+    out.category = asString(sorted[0].name);
+    // niche = tất cả tag ngành hàng TCM trả về (không chỉ cái #1) — trước đây không field nào
+    // trong toàn bộ pipeline ghi vào Creator.niche nên nó luôn trống ở CRM dù industry_groups
+    // đã có sẵn data.
+    out.niche = sorted.map((g) => asString(g.name)).filter(Boolean);
+    const beauty = profile.industry_groups.find((g) => /beauty|personal care/i.test(g.name || ''));
+    if (beauty) out.beautyCategoryRatio = Math.round((beauty.value || 0) * 100);
+  }
+
+  const demographics = {};
+  if (Array.isArray(profile.follower_genders_v2) && profile.follower_genders_v2.length > 0) {
+    const genderPct = normalizePct(profile.follower_genders_v2);
+    genderPct.forEach((g) => {
+      if (g.key === 'male') demographics.genderMale = g.pct;
+      if (g.key === 'female') demographics.genderFemale = g.pct;
+    });
+    const topGenderEntry = [...genderPct].sort((a, b) => b.pct - a.pct)[0];
+    if (topGenderEntry) demographics.topGender = DEMO_LABELS[topGenderEntry.key] || topGenderEntry.key;
+  }
+  if (Array.isArray(profile.follower_ages_v2) && profile.follower_ages_v2.length > 0) {
+    const agePct = normalizePct(profile.follower_ages_v2);
+    demographics.ageDistribution = agePct.map((a) => ({ name: a.key, value: a.pct }));
+    const topAge = [...agePct].sort((a, b) => b.pct - a.pct)[0];
+    demographics.topAgeGroup = topAge.key;
+  }
+  if (Array.isArray(profile.follower_state_location) && profile.follower_state_location.length > 0) {
+    // "country" ở đây thực ra là BANG Mỹ, không phải quốc gia — TCM chỉ trả top 5 theo bang.
+    demographics.countryDistribution = profile.follower_state_location.map((s) => ({ name: s.key, value: Number(s.value) || 0 }));
+    demographics.topCountry = profile.follower_state_location[0].key;
+  }
+  if (Object.keys(demographics).length > 0) out.demographics = demographics;
+
+  const gpm = parseMoney(extractMoneyLikeValue(profile.gpm));
+  if (gpm !== undefined) out.gpm = gpm;
+
+  // med_gmv_revenue là GMV TRUNG VỊ 30 ngày (không phải tổng tích luỹ) — field GMV tích luỹ
+  // hiển thị ở list view TCM chưa xác nhận tên JSON thô, dùng tạm field này cho gmv30d.
+  const gmv30d = parseMoney(extractMoneyLikeValue(profile.med_gmv_revenue));
+  if (gmv30d !== undefined) out.gmv30d = gmv30d;
+
+  if (profile.video_publish_cnt_30d != null) out.postingFrequency30d = toNum(profile.video_publish_cnt_30d);
+
+  const unitsSold = toNum(profile.units_sold);
+  if (gmv30d !== undefined || unitsSold !== undefined) {
+    out.hasAffiliateGmv = (gmv30d || 0) > 0 || (unitsSold || 0) > 0;
+  }
+
+  if (toNum(profile.pps_score) !== undefined) {
+    out.pps = { score: toNum(profile.pps_score) };
+  }
+
+  // TCM hiển thị 4 mục "Posts with samples / Post frequency / Sales generation / Content
+  // quality" trên UI thật, nhưng field JSON thô trả về tên khác (fulfillment/diligence/
+  // sales_ability/content_quality) — map theo ngữ nghĩa gần nhất, KHÔNG xác nhận khớp
+  // 1:1 tuyệt đối với đúng thứ tự UI. content_quality khớp trực tiếp, 3 mục còn lại là suy
+  // luận hợp lý nhất hiện có (fulfillment=nộp đủ sample đã nhận, diligence=đều đặn đăng bài,
+  // sales_ability=khả năng bán hàng).
+  const sampleBreakdown = [];
+  const pushSample = (key, label, scoreField, rankField) => {
+    const score = profile[scoreField];
+    const rank = profile[rankField];
+    if (score == null && rank == null) return;
+    sampleBreakdown.push({
+      key,
+      label,
+      score: toNum(score),
+      percentileText: typeof rank === 'string' ? rank : undefined,
+    });
+  };
+  pushSample('postsWithSamples', 'Posts with samples', 'sample_credit_fulfillment_score', 'sample_credit_fulfillment_rank');
+  pushSample('postFrequency', 'Post frequency', 'sample_credit_diligence_score', 'sample_credit_diligence_rank');
+  pushSample('salesGeneration', 'Sales generation', 'sample_credit_sales_ability_score', 'sample_credit_sales_ability_rank');
+  pushSample('contentQuality', 'Content quality', 'sample_credit_content_quality_score', 'sample_credit_content_quality_rank');
+  if (sampleBreakdown.length > 0 || profile.sample_credit_total_score != null) {
+    out.sampleScore = {
+      total: toNum(profile.sample_credit_total_score),
+      breakdown: sampleBreakdown,
+    };
+  }
+
+  const salesMetrics = {};
+  if (gmv30d !== undefined) salesMetrics.gmv = gmv30d;
+  if (unitsSold !== undefined) salesMetrics.itemsSold = unitsSold;
+  if (gpm !== undefined) salesMetrics.gpm = gpm;
+  const gmvPerCustomer = parseMoney(extractMoneyLikeValue(profile.avg_revenue_per_buyer));
+  if (gmvPerCustomer !== undefined) salesMetrics.gmvPerCustomer = gmvPerCustomer;
+  if (Array.isArray(profile.content_groups) && profile.content_groups.length > 0) {
+    const channelSplit = {};
+    profile.content_groups.forEach((g) => {
+      if (g.key === 'video_gmv') channelSplit.video = Math.round((g.value || 0) * 100);
+      if (g.key === 'live_gmv') channelSplit.live = Math.round((g.value || 0) * 100);
+    });
+    if (channelSplit.video !== undefined || channelSplit.live !== undefined) salesMetrics.channelSplit = channelSplit;
+  }
+  if (Array.isArray(profile.industry_groups) && profile.industry_groups.length > 0) {
+    salesMetrics.categorySplit = profile.industry_groups.map((g) => ({ name: asString(g.name) || g.key, value: Math.round((g.value || 0) * 100) }));
+  }
+  if (Object.keys(salesMetrics).length > 0) out.salesMetrics = salesMetrics;
+
+  const collabMetrics = {};
+  const commissionRateRaw = toNum(profile.med_commission_rate);
+  const avgCommissionRatePct = commissionRateRaw !== undefined ? commissionRateRaw / 100 : undefined;
+  if (avgCommissionRatePct !== undefined) collabMetrics.avgCommissionRatePct = avgCommissionRatePct;
+  if (toNum(profile.collaborated_brands_num) !== undefined) collabMetrics.brandCollabCount = toNum(profile.collaborated_brands_num);
+  if (Array.isArray(profile.partnered_brand) && profile.partnered_brand.length > 0) {
+    collabMetrics.brandPartners = profile.partnered_brand
+      .filter((b) => b && b.name)
+      .map((b) => ({ id: String(b.id ?? b.name), name: asString(b.name) || String(b.name) }));
+  }
+  if (Object.keys(collabMetrics).length > 0) out.collabMetrics = collabMetrics;
+
+  // video_gpm/live_gpm KHÔNG tồn tại trong response thật — tên field thật là ec_video_gpm/
+  // ec_live_gpm, dạng range {minimal,maximum} chứ không phải 1 số đơn (xác nhận qua live recon
+  // DevTools, session 7). video_engagement/live_engagement (chia 100) khớp CHÍNH XÁC với %
+  // hiển thị trên UI thật ("Avg. video engagement rate 0.8%" = video_engagement 80/100).
+  const videoGpm = parseMoney(extractMoneyLikeValue(profile.ec_video_gpm));
+  const videoEngagementRatePct = toNum(profile.video_engagement) !== undefined ? toNum(profile.video_engagement) / 100 : undefined;
+  if (videoGpm !== undefined || profile.video_publish_cnt_30d != null || videoEngagementRatePct !== undefined) {
+    out.videoMetrics = {
+      gpm: videoGpm,
+      videosCount: toNum(profile.video_publish_cnt_30d),
+      engagementRatePct: videoEngagementRatePct,
+    };
+  }
+
+  const liveGpm = parseMoney(extractMoneyLikeValue(profile.ec_live_gpm));
+  const liveEngagementRatePct = toNum(profile.live_engagement) !== undefined ? toNum(profile.live_engagement) / 100 : undefined;
+  if (liveGpm !== undefined || profile.live_streaming_cnt_30d != null || liveEngagementRatePct !== undefined) {
+    out.liveMetrics = {
+      gpm: liveGpm,
+      engagementRatePct: liveEngagementRatePct,
+      streamsCount: toNum(profile.live_streaming_cnt_30d),
+    };
+  }
+
+  // Creator.engagementRate (field ER top-level dùng ở list/scoring toàn app) trước đây KHÔNG
+  // bao giờ được set ở đây — chỉ videoMetrics/liveMetrics.engagementRatePct có giá trị, nên ER
+  // luôn trống trên CRM dù TCM hiển thị "Engagement rate" thật ngay trên UI list/detail.
+  if (videoEngagementRatePct !== undefined) out.engagementRate = videoEngagementRatePct;
+  else if (liveEngagementRatePct !== undefined) out.engagementRate = liveEngagementRatePct;
+
+  // Tên field con của top_video_data ở TCM CHƯA xác nhận khớp 1:1 với TikTok One — dò nhiều
+  // tên khả dĩ thay vì đoán cứng 1 path duy nhất.
+  const videoList = profile.top_video_data || profile.ec_top_video_data;
+  if (Array.isArray(videoList) && videoList.length > 0) {
+    out.recentVideos = videoList.slice(0, 10).map((v, i) => ({
+      id: String(v.itemID || v.item_id || v.id || i),
+      title: v.title || '',
+      views: Number(v.views ?? v.play_cnt ?? v.playCount ?? 0),
+      thumb: v.cover || v.coverUrl || v.thumb || '',
+      date: (v.createTime || v.create_time) ? new Date(Number(v.createTime || v.create_time) * 1000).toISOString().slice(0, 10) : undefined,
+      isBranded: !!(v.isSponsoredVideo ?? v.is_sponsored ?? v.isBranded),
+      videoUrl: (v.itemID || v.item_id) ? `https://www.tiktok.com/@${handle}/video/${v.itemID || v.item_id}` : undefined,
+    }));
+  }
+
+  return out;
+}
+
+// ================== Helper dùng chung cho các flow chạy trong background.js ==================
+// Chuyển từ popup.js sang đây (session 10) để background.js có thể tự đọc tab + tự POST webapp
+// mà KHÔNG cần popup còn mở — trước đây các nút bấm gọi fetch() thẳng trong popup.js, nên nếu
+// user chuyển tab (Chrome tự đóng popup) đúng lúc đang fetch, request bị huỷ giữa chừng, không
+// có gì được lưu lại. Các hàm "HÀM CHẠY BÊN TRONG TAB" dưới đây được chrome.scripting.executeScript
+// serialize bằng toString() rồi eval lại trong page context — TUYỆT ĐỐI không được closure biến
+// ngoài, bất kể được gọi từ popup.js hay background.js.
+
+function extractAvatarUrl(avatarField) {
+  if (!avatarField) return undefined;
+  if (typeof avatarField === 'string') return avatarField;
+  if (Array.isArray(avatarField.url_list) && avatarField.url_list.length > 0) return avatarField.url_list[0];
+  if (typeof avatarField.url === 'string') return avatarField.url;
+  if (typeof avatarField.uri === 'string') return avatarField.uri;
+  return undefined;
+}
+
+function matchesClientFilters(flat, filters) {
+  const followers = flat.follower_cnt != null ? Number(flat.follower_cnt) : undefined;
+  if (filters.follower_min && (followers === undefined || followers < filters.follower_min)) return false;
+  if (filters.follower_max && (followers === undefined || followers > filters.follower_max)) return false;
+  if (filters.query_keyword) {
+    const kw = filters.query_keyword.toLowerCase();
+    const haystack = `${flat.handle || ''} ${flat.nickname || ''} ${flat.main_industry || ''}`.toLowerCase();
+    if (!haystack.includes(kw)) return false;
+  }
+  return true;
+}
+
+// marketplace/find (list) đã có sẵn pps_score/med_gmv_revenue/units_sold/ec_video_gpm/
+// ec_live_gpm/video_engagement CHO MỌI creator trong danh sách (xác nhận qua live recon
+// DevTools, session 8) — map thẳng vào đây để nút "Import creator đã bắt được" tự có luôn PPS/
+// Sales(partial)/Video-Live GPM mà KHÔNG cần mở trang chi tiết từng creator.
+function normalizeCreator(flat) {
+  const rawHandle = asString(flat.handle);
+  const handle = rawHandle ? rawHandle.replace(/^@/, '') : undefined;
+  const followers = flat.follower_cnt != null ? Number(flat.follower_cnt) : undefined;
+  const avgViews = flat.ec_video_avg_view_cnt != null ? Number(flat.ec_video_avg_view_cnt) : undefined;
+  const gpmRaw = flat.ec_video_gpm != null ? flat.ec_video_gpm : flat.ec_live_gpm;
+
+  const out = {
+    handle,
+    displayName: asString(flat.nickname) || handle,
+    avatar: extractAvatarUrl(flat.avatar),
+    country: asString(flat.selection_region),
+    followers,
+    avgViews,
+    category: asString(flat.main_industry),
+    gpm: parseMoney(extractMoneyLikeValue(gpmRaw)),
+    tcmCreatorOecuid: asString(flat.creator_oecuid) || (typeof flat.creator_oecuid === 'number' ? String(flat.creator_oecuid) : undefined),
+  };
+
+  if (toNum(flat.pps_score) !== undefined) out.pps = { score: toNum(flat.pps_score) };
+
+  const gmv30d = parseMoney(extractMoneyLikeValue(flat.med_gmv_revenue));
+  const unitsSold = toNum(flat.units_sold);
+  if (gmv30d !== undefined) out.gmv30d = gmv30d;
+  if (gmv30d !== undefined || unitsSold !== undefined) {
+    out.salesMetrics = { gmv: gmv30d, itemsSold: unitsSold, gpm: out.gpm };
+    out.hasAffiliateGmv = (gmv30d || 0) > 0 || (unitsSold || 0) > 0;
+  }
+
+  const videoGpm = parseMoney(extractMoneyLikeValue(flat.ec_video_gpm));
+  const videoEngagementRatePct = toNum(flat.video_engagement) !== undefined ? toNum(flat.video_engagement) / 100 : undefined;
+  if (videoGpm !== undefined || videoEngagementRatePct !== undefined) {
+    out.videoMetrics = { gpm: videoGpm, engagementRatePct: videoEngagementRatePct };
+  }
+  // Creator.engagementRate top-level — TCM đã hiện sẵn "Engagement rate" ngay ở list view
+  // (field thô video_engagement), nhưng trước đây chỉ videoMetrics.engagementRatePct được set
+  // nên ER ở CRM (list/scoring) luôn trống dù list-import đã bắt được data này.
+  if (videoEngagementRatePct !== undefined) out.engagementRate = videoEngagementRatePct;
+
+  const liveGpm = parseMoney(extractMoneyLikeValue(flat.ec_live_gpm));
+  if (liveGpm !== undefined) out.liveMetrics = { gpm: liveGpm };
+
+  return out;
+}
+
+// HÀM CHẠY BÊN TRONG TAB TCM ĐANG MỞ — interceptor.js đã unwrap sẵn field {value,...} trước khi
+// lưu vào window.__pickdi_tcm_list nên chỉ cần đọc thẳng ra.
+function readTcmCapturedList() {
+  const store = window.__pickdi_tcm_list || {};
+  return { list: Object.values(store) };
+}
+
+// HÀM CHẠY BÊN TRONG TAB TCM ĐANG MỞ — chỉ trả raw profile, việc chuẩn hoá field làm ở ngoài
+// trang (normalizeTcmProfileDetail) để tái dùng helper chung.
+function readTcmLastProfile() {
+  const id = window.__pickdi_tcm_last_profile_id;
+  if (!id) {
+    return { error: 'Chưa bắt được data creator nào — hãy mở chi tiết 1 creator trên TCM, đợi vài giây cho các tab Sales/Video/Audience tự load, rồi bấm lại nút này.' };
+  }
+  const store = window.__pickdi_tcm_profiles || {};
+  const profile = store[id];
+  if (!profile) return { error: 'Không tìm thấy data đã bắt cho creator này.' };
+  return { profile };
+}
+
+// HÀM CHẠY BÊN TRONG TAB TCM ĐANG MỞ — tự bấm hộ các nút tab thật trên trang (TCM ký mọi
+// request bằng msToken/X-Bogus/X-Gnarly tính bởi JS của chính trang lúc user thao tác thật,
+// không thể tự fetch() giả lập — hàm này chỉ tự động hoá việc click, không né bước ký request).
+async function autoScanAndReadTcmProfile() {
+  const TAB_LABELS = [
+    { label: 'PPS', checkField: 'pps_score' },
+    { label: 'Sample score', checkField: 'sample_credit_total_score' },
+    { label: 'Sales', checkField: 'med_gmv_revenue' },
+    { label: 'Collaboration metrics', checkField: 'collaborated_brands_num' },
+    { label: 'Video', checkField: 'video_publish_cnt_30d' },
+    { label: 'LIVE', checkField: 'live_streaming_cnt_30d' },
+    { label: 'Followers', checkField: 'follower_genders_v2' },
+    { label: 'Trends', checkField: null },
+    { label: 'Example videos', checkField: 'top_video_data' },
+  ];
+  const MAX_WAIT_MS = 4000;
+  const POLL_INTERVAL_MS = 200;
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function normalizeText(s) {
+    return (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  function looksClickable(el) {
+    if (!el) return false;
+    if (el.tagName === 'BUTTON' || el.tagName === 'A') return true;
+    if (el.getAttribute && (el.getAttribute('role') === 'tab' || el.getAttribute('role') === 'button')) return true;
+    try {
+      return window.getComputedStyle(el).cursor === 'pointer';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function pickClickableAncestor(el) {
+    let node = el;
+    for (let depth = 0; depth < 4 && node; depth++) {
+      if (looksClickable(node)) return node;
+      node = node.parentElement;
+    }
+    return el;
+  }
+
+  function findTabElement(label) {
+    const all = document.querySelectorAll('body *');
+    const exact = [];
+    const loose = [];
+    const wantLoose = normalizeText(label);
+    for (const el of all) {
+      const text = (el.textContent || '').trim();
+      if (text === label) exact.push(el);
+      else if (normalizeText(text).indexOf(wantLoose) === 0 && text.length <= label.length + 12) loose.push(el);
+    }
+    const candidates = exact.length > 0 ? exact : loose;
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length);
+    for (const el of candidates) {
+      const clickable = pickClickableAncestor(el);
+      if (looksClickable(clickable)) return clickable;
+    }
+    return candidates[0];
+  }
+
+  function fireClick(el) {
+    try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
+    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
+      try {
+        el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      } catch (e) {}
+    });
+    try { el.click(); } catch (e) {}
+  }
+
+  function currentProfile() {
+    const id = window.__pickdi_tcm_last_profile_id;
+    if (!id) return undefined;
+    return (window.__pickdi_tcm_profiles || {})[id];
+  }
+
+  async function waitForField(checkField) {
+    if (!checkField) { await sleep(700); return false; }
+    const start = Date.now();
+    while (Date.now() - start < MAX_WAIT_MS) {
+      const profile = currentProfile();
+      if (profile && profile[checkField] !== undefined) return true;
+      await sleep(POLL_INTERVAL_MS);
+    }
+    return false;
+  }
+
+  const clicked = [];
+  const notFound = [];
+  const confirmed = [];
+  const clickedButNoData = [];
+
+  for (const tab of TAB_LABELS) {
+    let el = findTabElement(tab.label);
+    if (!el) {
+      window.scrollTo(0, 0);
+      await sleep(150);
+      el = findTabElement(tab.label);
+    }
+    if (!el) {
+      notFound.push(tab.label);
+      continue;
+    }
+    fireClick(el);
+    clicked.push(tab.label);
+    const gotField = await waitForField(tab.checkField);
+    if (tab.checkField) {
+      if (gotField) confirmed.push(tab.label);
+      else clickedButNoData.push(tab.label);
+    }
+  }
+
+  const id = window.__pickdi_tcm_last_profile_id;
+  if (!id) {
+    return {
+      error: 'Không xác định được creator đang xem sau khi auto quét — hãy chắc trang chi tiết 1 creator đã mở và ít nhất 1 tab đã load được trước khi bấm.',
+      clicked, notFound, confirmed, clickedButNoData,
+    };
+  }
+  const profile = (window.__pickdi_tcm_profiles || {})[id];
+  if (!profile) return { error: 'Không tìm thấy data đã bắt cho creator này.', clicked, notFound, confirmed, clickedButNoData };
+  return { profile, clicked, notFound, confirmed, clickedButNoData };
+}
+
+// Mỗi field group dưới đây chỉ xuất hiện khi user đã tự click qua đúng tab con tương ứng trên
+// TCM (mỗi tab gọi API marketplace/profile riêng, chỉ trả field của tab đó) — liệt kê rõ nhóm
+// nào bắt được / còn thiếu để user biết ngay là do chưa xem hết tab hay do field TCM chưa xác
+// nhận tên JSON.
+const DETAIL_TAB_GROUPS = [
+  { key: 'pps', label: 'PPS' },
+  { key: 'sampleScore', label: 'Sample score' },
+  { key: 'salesMetrics', label: 'Sales' },
+  { key: 'collabMetrics', label: 'Collaboration metrics' },
+  { key: 'videoMetrics', label: 'Video' },
+  { key: 'liveMetrics', label: 'LIVE' },
+  { key: 'demographics', label: 'Followers' },
+  { key: 'recentVideos', label: 'Example videos' },
+];
+
+function summarizeCapturedGroups(detail) {
+  const got = DETAIL_TAB_GROUPS.filter((g) => detail[g.key] != null).map((g) => g.label);
+  const missing = DETAIL_TAB_GROUPS.filter((g) => detail[g.key] == null).map((g) => g.label);
+  let msg = `Đã bắt: ${got.length > 0 ? got.join(', ') : '(không nhóm nào)'}.`;
+  if (missing.length > 0) {
+    msg += ` Còn thiếu: ${missing.join(', ')} — nếu chưa click qua các tab đó trên TCM thì hãy click qua rồi bấm lại nút này.`;
+  }
+  return msg;
+}
+
+// HÀM CHẠY TRỰC TIẾP TRÊN TRANG tiktok.com/@handle — đọc window.__pickdi_items do
+// interceptor.js chặn từ API item_list thật ra số liệu engagement chính xác, không đoán.
+function scrapeTikTokEngagementPage() {
+  const currentUrl = window.location.href;
+  if (!currentUrl.includes('tiktok.com/@')) {
+    return { error: 'Trang hiện tại không phải profile TikTok (tiktok.com/@handle).' };
+  }
+  const handle = window.location.pathname.replace('/', '').split('?')[0];
+  const MAX_VIDEOS = 50;
+
+  function toNum(x) {
+    if (x == null) return 0;
+    if (typeof x === 'number') return x;
+    const n = parseInt(String(x).replace(/[^\d]/g, ''), 10);
+    return isNaN(n) ? 0 : n;
+  }
+
+  function getVideosFromNetworkCapture(h) {
+    const store = window.__pickdi_items || {};
+    const raw = Object.values(store);
+    const videos = raw.map((o) => {
+      const s = o.stats || o.statsV2 || {};
+      let authorHandle = '';
+      if (o.author) authorHandle = (typeof o.author === 'string') ? o.author : (o.author.uniqueId || o.author.id || '');
+      return {
+        createTime: toNum(o.createTime),
+        views: toNum(s.playCount),
+        likes: toNum(s.diggCount),
+        comments: toNum(s.commentCount),
+        shares: toNum(s.shareCount),
+        author: String(authorHandle).toLowerCase(),
+      };
+    });
+    const hh = h.replace('@', '').toLowerCase();
+    const filtered = videos.filter((v) => !v.author || v.author === hh);
+    const result = filtered.length > 0 ? filtered : videos;
+    result.sort((a, b) => b.createTime - a.createTime);
+    return result;
+  }
+
+  const followersEl = document.querySelector('[data-e2e="followers-count"]');
+  const followersNum = toNum(followersEl ? followersEl.innerText.trim() : '0');
+
+  const avatarEl = document.querySelector('[data-e2e="user-avatar"] img');
+  const avatarUrl = avatarEl ? avatarEl.src : null;
+
+  const bioEl = document.querySelector('h2[data-e2e="user-bio"]');
+  const bio = bioEl ? bioEl.innerText : '';
+  const emailMatch = bio.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  const email = emailMatch ? emailMatch[0] : null;
+
+  let instagram = null;
+  const igLinkMatch = bio.match(/instagram\.com\/([a-zA-Z0-9._]+)/i);
+  const igMentionMatch = bio.match(/(?:ig|insta)\s*[:@]\s*@?([a-zA-Z0-9._]+)/i);
+  if (igLinkMatch) instagram = igLinkMatch[1];
+  else if (igMentionMatch) instagram = igMentionMatch[1];
+
+  let videos = getVideosFromNetworkCapture(handle);
+  const hasFullStats = videos.length > 0;
+  if (!hasFullStats) {
+    return { error: 'Không bắt được data video (window.__pickdi_items rỗng) — hãy tải lại trang này rồi thử lại.' };
+  }
+  videos = videos.slice(0, MAX_VIDEOS);
+  const n = videos.length;
+
+  const sum = videos.reduce((a, v) => ({
+    views: a.views + v.views, likes: a.likes + v.likes, comments: a.comments + v.comments, shares: a.shares + v.shares,
+  }), { views: 0, likes: 0, comments: 0, shares: 0 });
+
+  const avgViews = n ? Math.round(sum.views / n) : 0;
+  const avgLikes = n ? Math.round(sum.likes / n) : 0;
+  const avgComments = n ? Math.round(sum.comments / n) : 0;
+  const avgShares = n ? Math.round(sum.shares / n) : 0;
+
+  const viewsList = videos.map((v) => v.views).filter((v) => v > 0);
+  const maxViews = viewsList.length ? Math.max(...viewsList) : 0;
+  const minViews = viewsList.length ? Math.min(...viewsList) : 0;
+  const maxMinRatio = minViews > 0 ? maxViews / minViews : null;
+
+  const times = videos.map((v) => v.createTime).filter((t) => t > 0);
+  let postingFrequency = null;
+  let lastVideoDate = '';
+  if (times.length >= 2) {
+    const spanDays = (Math.max(...times) - Math.min(...times)) / 86400;
+    postingFrequency = spanDays > 0 ? (times.length / (spanDays / 7)) : null;
+  }
+  if (times.length >= 1) lastVideoDate = new Date(Math.max(...times) * 1000).toISOString().slice(0, 10);
+
+  const totalEngagement = sum.likes + sum.comments + sum.shares;
+  const erByView = sum.views ? (totalEngagement / sum.views * 100) : null;
+  const erByFollower = followersNum ? (totalEngagement / n / followersNum * 100) : null;
+
+  return {
+    handle,
+    avatarUrl,
+    bio: bio || null,
+    email,
+    instagram,
+    engagement: {
+      videosAnalyzed: n,
+      avgViews, maxViews, minViews,
+      maxMinRatio: maxMinRatio != null ? Number(maxMinRatio.toFixed(1)) : null,
+      avgLikes, avgComments, avgShares,
+      erView: erByView != null ? Number(erByView.toFixed(2)) : null,
+      erFollower: erByFollower != null ? Number(erByFollower.toFixed(2)) : null,
+      postingFrequency: postingFrequency != null ? Number(postingFrequency.toFixed(1)) : null,
+      lastVideoDate,
+    },
+  };
+}

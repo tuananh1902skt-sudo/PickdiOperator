@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Pickdi TikTok One Scraper",
-  "version": "1.0.0",
-  "description": "Cào creator thật từ TikTok One / TikTok và đẩy vào Pickdi Operator CRM.",
+  "name": "Pickdi TCM Creator Scraper",
+  "version": "3.5.0",
+  "description": "Cào creator thật từ TikTok Shop Affiliate Center (Creator Marketplace) và tiktok.com, đẩy vào Pickdi Operator CRM.",
   "permissions": [
     "activeTab",
     "scripting",
@@ -10,7 +10,7 @@
     "tabs"
   ],
   "host_permissions": [
-    "https://ads.tiktok.com/*",
+    "https://affiliate-us.tiktok.com/*",
     "https://www.tiktok.com/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
@@ -24,7 +24,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.tiktok.com/*", "https://ads.tiktok.com/*"],
+      "matches": ["https://www.tiktok.com/*", "https://affiliate-us.tiktok.com/*"],
       "js": ["interceptor.js"],
       "run_at": "document_start",
       "world": "MAIN"

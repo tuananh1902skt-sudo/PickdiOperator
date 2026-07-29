@@ -156,7 +156,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
 
         <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-          <span className="text-[10px] font-bold text-slate-400 uppercase">Avg Brand Fit Score</span>
+          <span className="text-[10px] font-bold text-slate-400 uppercase">Avg d'Alba Fit Score</span>
           <p className="text-2xl font-bold text-emerald-600 mt-1">{scoredCreators.length > 0 ? avgBrandFitScore.toFixed(1) : '—'}</p>
           <span className="text-slate-400 text-[11px]">Across {scoredCreators.length} scored creators</span>
         </div>

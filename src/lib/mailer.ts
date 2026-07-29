@@ -9,20 +9,24 @@ export async function sendEmail(opts: {
 }): Promise<{ messageId: string }> {
   const config = await getEmailConfig();
 
-  if (!config.gmailUser || !config.appPassword) {
-    throw new Error('Gmail chưa được cấu hình — vào Settings > Email để thiết lập');
+  if (!config.email || !config.password || !config.smtpHost || !config.smtpPort) {
+    throw new Error('Email chưa được cấu hình đủ — vào Settings > Email để thiết lập');
   }
 
+  const secure = config.smtpSecure !== undefined ? config.smtpSecure : config.smtpPort === 465;
+
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: config.smtpHost,
+    port: config.smtpPort,
+    secure,
     auth: {
-      user: config.gmailUser,
-      pass: config.appPassword,
+      user: config.email,
+      pass: config.password,
     },
   });
 
   const mailOptions: nodemailer.SendMailOptions = {
-    from: config.gmailUser,
+    from: config.email,
     to: opts.to,
     subject: opts.subject,
     text: opts.text,

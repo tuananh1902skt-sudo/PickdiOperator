@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
+import * as XLSX from 'xlsx';
 import {
   X,
   CheckCircle2,
-  Copy,
   Zap,
-  Download,
   RefreshCw,
-  ClipboardPaste
+  FileSpreadsheet,
+  UploadCloud
 } from 'lucide-react';
 
 interface ImportWizardModalProps {
@@ -16,61 +16,172 @@ interface ImportWizardModalProps {
   activeWorkspaceId?: string;
 }
 
-// Normalize a raw scraped record (from the TikTok One userscript, JSON, or CSV) into the
-// shape /api/creators/batch-import expects. Missing fields are left undefined — never
-// invent a placeholder number/email that would look like real scraped data.
-function normalizeScrapedItem(item: any) {
-  return {
-    handle: item.handle || item.unique_id || item.username || undefined,
-    displayName: item.displayName || item.nickname || item.name || undefined,
-    avatar: item.avatar || item.avatar_thumb || item.head_url || undefined,
-    tiktokOneId: item.tiktokOneId || item.creator_id || item.creator_o_id || item.star_id || item.user_id || undefined,
-    followers: item.followers ?? item.follower_cnt ?? undefined,
-    avgViews: item.avgViews ?? item.avg_video_views ?? undefined,
-    engagementRate: item.engagementRate ?? item.engagement ?? undefined,
-    gmv30d: item.gmv30d ?? item.e_commerce_gmv ?? undefined,
-    category: item.category || undefined,
-    country: item.country || item.region || undefined,
-    email: item.email || item.contact_email || undefined,
-    recentVideos: item.recentVideos || undefined,
-    demographics: item.demographics || undefined,
-    scores: item.scores || undefined
-  };
+// Field CRM mà 1 cột trong file Kalodata/CSV bất kỳ có thể được gán vào. Cột nào Juan không map
+// (để "-- Bỏ qua --") thì bị bỏ qua hẳn, không tự bịa giá trị cho field đó.
+const FILE_TARGET_FIELDS: { key: string; label: string; required?: boolean }[] = [
+  { key: 'handle', label: 'Handle TikTok (bắt buộc)', required: true },
+  { key: 'displayName', label: 'Tên hiển thị' },
+  { key: 'followers', label: 'Followers' },
+  { key: 'avgViews', label: 'Avg. Views' },
+  { key: 'engagementRate', label: 'Engagement Rate (%)' },
+  { key: 'gmv30d', label: 'GMV / Doanh thu' },
+  { key: 'category', label: 'Ngành hàng (Category)' },
+  { key: 'country', label: 'Quốc gia' },
+  { key: 'email', label: 'Email' },
+  { key: 'phone', label: 'Số điện thoại' },
+  { key: 'profileUrl', label: 'Link hồ sơ TikTok' }
+];
+
+// Gợi ý map mặc định lần đầu (chỉ dùng khi chưa có map lưu trong localStorage), match theo tên cột
+// gần giống — Juan vẫn có thể sửa lại tay, không phải map cứng vị trí cột.
+const HEADER_GUESS: Record<string, string> = {
+  handle: 'handle',
+  creator_handle: 'handle',
+  username: 'handle',
+  nickname: 'displayName',
+  displayname: 'displayName',
+  name: 'displayName',
+  followers: 'followers',
+  'avg. views': 'avgViews',
+  avgviews: 'avgViews',
+  views: 'avgViews',
+  'engagement rate': 'engagementRate',
+  engagementrate: 'engagementRate',
+  'revenue(₫)': 'gmv30d',
+  revenue: 'gmv30d',
+  gmv: 'gmv30d',
+  'gmv 30d': 'gmv30d',
+  category: 'category',
+  industry: 'category',
+  country: 'country',
+  region: 'country',
+  email: 'email',
+  phone: 'phone',
+  whatsapp: 'phone',
+  tiktokurl: 'profileUrl',
+  'tiktok url': 'profileUrl',
+  profileurl: 'profileUrl'
+};
+
+const COLUMN_MAP_STORAGE_KEY = 'pickdi_import_column_map_v1';
+
+function loadSavedColumnMap(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(COLUMN_MAP_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
 }
 
-function parseScrapedPayload(text: string): any[] {
-  const trimmed = text.trim();
-  if (!trimmed) return [];
-
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    const parsed = JSON.parse(trimmed);
-    const rawList =
-      parsed?.creators ||
-      parsed?.data?.creator_list ||
-      parsed?.data?.creators ||
-      parsed?.creator_list ||
-      (Array.isArray(parsed) ? parsed : []);
-    return Array.isArray(rawList) ? rawList.map(normalizeScrapedItem).filter(c => c.handle) : [];
+function guessColumnMap(headers: string[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const h of headers) {
+    const guess = HEADER_GUESS[h.trim().toLowerCase()];
+    if (guess && !Object.values(map).includes(h)) {
+      map[guess] = h;
+    }
   }
+  return map;
+}
 
-  // Fallback: CSV rows (handle, displayName, followers, email)
-  return trimmed
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
-      const parts = line.split(',').map(p => p.trim());
-      const handle = parts[0]?.replace(/^@/, '');
-      if (!handle) return null;
-      const followersNum = parts[2] ? Number(parts[2]) : NaN;
-      return {
-        handle,
-        displayName: parts[1] || undefined,
-        followers: Number.isFinite(followersNum) ? followersNum : undefined,
-        email: parts[3] || undefined
-      };
-    })
-    .filter((c): c is NonNullable<typeof c> => c !== null);
+// Chuyển 1 ô số dạng chuỗi Excel/CSV (có thể có dấu %, dấu phẩy ngăn cách hàng nghìn) thành number.
+// Trả về undefined nếu không parse được — không bịa số 0.
+function parseLooseNumber(raw: any): number | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : undefined;
+  const cleaned = String(raw).replace(/[%,₫$\s]/g, '');
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : undefined;
+}
+
+const NUMERIC_TARGET_FIELDS = new Set(['followers', 'avgViews', 'engagementRate', 'gmv30d']);
+
+function buildRowObject(headers: string[], row: any[], columnMap: Record<string, string>) {
+  const obj: Record<string, any> = {};
+  for (const field of FILE_TARGET_FIELDS) {
+    const sourceHeader = columnMap[field.key];
+    if (!sourceHeader) continue;
+    const colIdx = headers.indexOf(sourceHeader);
+    if (colIdx === -1) continue;
+    const rawValue = row[colIdx];
+    if (rawValue === undefined || rawValue === null || rawValue === '') continue;
+    obj[field.key] = NUMERIC_TARGET_FIELDS.has(field.key) ? parseLooseNumber(rawValue) : String(rawValue).trim();
+  }
+  return obj;
+}
+
+// Preset cột cố định cho export "Creator List" thật của Kalodata (sheet LIST_CREATOR, vd file
+// Kalodata_Creator_<timestamp>_<region>.xlsx) — map cứng theo đúng tên cột Kalodata xuất ra,
+// không đoán tên khác và không cho user tự chọn cột (khác với tab Generic CSV bên dưới).
+// Kalodata "Creator List" KHÔNG export GPM/beauty ratio/demographics (tuổi, giới tính) — các
+// field đó trên Creator vẫn tồn tại để điền tay hoặc từ nguồn khác, import Kalodata không đụng tới.
+const KALODATA_HEADER_MAP: Record<string, string> = {
+  handle: 'handle',
+  nickname: 'displayName',
+  followers: 'followers',
+  'revenue($)': 'gmv30d',
+  'engagement rate': 'engagementRate',
+  views: 'viewsTotal',
+  videonum: 'videoNum',
+  tiktokurl: 'profileUrl',
+  email: 'email'
+};
+
+const KALODATA_PREVIEW_FIELDS: { key: string; label: string }[] = [
+  { key: 'handle', label: 'Handle' },
+  { key: 'displayName', label: 'Tên hiển thị' },
+  { key: 'followers', label: 'Followers' },
+  { key: 'gmv30d', label: 'Revenue (30d)' },
+  { key: 'engagementRate', label: 'Engagement Rate' },
+  { key: 'avgViews', label: 'Avg. Views/video' },
+  { key: 'profileUrl', label: 'Link TikTok' }
+];
+
+// Cột nào trong file khớp preset Kalodata, dùng để hiện cảnh báo thiếu cột trước khi import.
+function matchedKalodataHeaders(headers: string[]): Record<string, string> {
+  const matched: Record<string, string> = {};
+  for (const h of headers) {
+    const targetKey = KALODATA_HEADER_MAP[h.trim().toLowerCase()];
+    if (targetKey && !matched[targetKey]) matched[targetKey] = h;
+  }
+  return matched;
+}
+
+function buildKalodataRowObject(headers: string[], row: any[]) {
+  const raw: Record<string, any> = {};
+  headers.forEach((h, idx) => {
+    const targetKey = KALODATA_HEADER_MAP[h.trim().toLowerCase()];
+    if (!targetKey) return;
+    const rawValue = row[idx];
+    if (rawValue === undefined || rawValue === null || rawValue === '') return;
+    if (targetKey === 'handle' || targetKey === 'email' || targetKey === 'displayName' || targetKey === 'profileUrl') {
+      raw[targetKey] = String(rawValue).trim();
+    } else {
+      raw[targetKey] = parseLooseNumber(rawValue);
+    }
+  });
+
+  // Kalodata "Views" là tổng view trong Date Range, không phải avg/video — chia cho VideoNum
+  // để ra avg views/video thật, không bịa nếu thiếu 1 trong 2 số hoặc VideoNum = 0.
+  const avgViews =
+    typeof raw.viewsTotal === 'number' && typeof raw.videoNum === 'number' && raw.videoNum > 0
+      ? Math.round(raw.viewsTotal / raw.videoNum)
+      : undefined;
+
+  return {
+    handle: raw.handle,
+    displayName: raw.displayName,
+    email: raw.email,
+    followers: raw.followers,
+    gmv30d: raw.gmv30d,
+    engagementRate: raw.engagementRate,
+    avgViews,
+    profileUrl: raw.profileUrl,
+    // Không bịa true — chỉ true khi thật sự có Revenue > 0 từ Kalodata.
+    hasAffiliateGmv: typeof raw.gmv30d === 'number' && raw.gmv30d > 0,
+    metricsSource: 'kalodata'
+  };
 }
 
 export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
@@ -79,71 +190,126 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   onConfirmImport,
   activeWorkspaceId
 }) => {
-  const [pastedText, setPastedText] = useState('');
-  const [parsedItems, setParsedItems] = useState<any[]>([]);
-  const [parseError, setParseError] = useState<string | null>(null);
-  const [isImporting, setIsImporting] = useState(false);
-  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  // --- File import (CSV/Excel Kalodata) state ---
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importMode, setImportMode] = useState<'kalodata' | 'generic'>('kalodata');
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [fileHeaders, setFileHeaders] = useState<string[]>([]);
+  const [fileRows, setFileRows] = useState<any[][]>([]);
+  const [columnMap, setColumnMap] = useState<Record<string, string>>({});
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [fileImporting, setFileImporting] = useState(false);
+  const [fileStatusMsg, setFileStatusMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const runParse = (text: string) => {
-    setParseError(null);
-    try {
-      const items = parseScrapedPayload(text);
-      setParsedItems(items);
-      if (items.length === 0) {
-        setParseError('Không tìm thấy creator hợp lệ trong dữ liệu này.');
-      }
-    } catch (err: any) {
-      console.error('Parse scraped payload error:', err);
-      setParsedItems([]);
-      setParseError('Không đọc được dữ liệu. Vui lòng kiểm tra lại định dạng JSON/CSV đã dán vào.');
-    }
-  };
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file later
+    if (!file) return;
 
-  const handlePasteFromClipboard = async () => {
+    setFileError(null);
+    setFileStatusMsg(null);
     try {
-      const text = await navigator.clipboard.readText();
-      if (!text || !text.trim()) {
-        setParseError('Bộ nhớ tạm đang trống. Hãy copy dữ liệu JSON/CSV muốn nhập trước.');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheetName = wb.SheetNames[0];
+      if (!sheetName) throw new Error('File không có sheet nào');
+      const ws = wb.Sheets[sheetName];
+      const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
+      if (rows.length === 0) throw new Error('File trống');
+
+      const headers = (rows[0] || []).map(h => String(h ?? '').trim()).filter(Boolean);
+      const dataRows = rows.slice(1).filter(r => r.some(cell => cell !== '' && cell !== null && cell !== undefined));
+
+      if (headers.length === 0 || dataRows.length === 0) {
+        setFileError('Không đọc được dòng tiêu đề hoặc file không có dữ liệu.');
+        setFileHeaders([]);
+        setFileRows([]);
         return;
       }
-      setPastedText(text);
-      runParse(text);
-    } catch (err) {
-      setParseError('Trình duyệt chặn đọc Clipboard tự động. Hãy dán (Ctrl+V) dữ liệu vào ô bên dưới rồi bấm "Xử lý dữ liệu".');
+
+      // Ưu tiên map đã lưu từ lần trước (nếu cột đó vẫn còn tồn tại trong file mới), field nào
+      // chưa có trong map lưu thì thử gợi ý theo tên cột gần giống, còn lại để trống cho Juan tự chọn.
+      const saved = loadSavedColumnMap();
+      const guessed = guessColumnMap(headers);
+      const merged: Record<string, string> = { ...guessed };
+      for (const field of FILE_TARGET_FIELDS) {
+        const savedHeader = saved[field.key];
+        if (savedHeader && headers.includes(savedHeader)) {
+          merged[field.key] = savedHeader;
+        }
+      }
+
+      setFileName(file.name);
+      setFileHeaders(headers);
+      setFileRows(dataRows);
+      setColumnMap(merged);
+    } catch (err: any) {
+      console.error('Parse import file error:', err);
+      setFileError('Không đọc được file này. Kiểm tra lại định dạng CSV/Excel (.csv, .xlsx, .xls).');
+      setFileHeaders([]);
+      setFileRows([]);
     }
   };
 
-  const handleConfirmImport = async () => {
-    if (parsedItems.length === 0) return;
-    setIsImporting(true);
-    setStatusMsg(null);
+  const handleColumnMapChange = (fieldKey: string, headerValue: string) => {
+    setColumnMap(prev => {
+      const next = { ...prev };
+      if (headerValue) {
+        next[fieldKey] = headerValue;
+      } else {
+        delete next[fieldKey];
+      }
+      return next;
+    });
+  };
+
+  const kalodataFoundHeaders = matchedKalodataHeaders(fileHeaders);
+
+  const mappedFileItems = (
+    importMode === 'kalodata'
+      ? fileRows.map(row => buildKalodataRowObject(fileHeaders, row))
+      : fileRows.map(row => buildRowObject(fileHeaders, row, columnMap))
+  )
+    .map(item => (item.handle ? { ...item, handle: String(item.handle).replace(/^@/, '').trim() } : item))
+    .filter(item => item.handle);
+
+  const filePreviewRows = mappedFileItems.slice(0, 5);
+  const fileSkippedCount = fileRows.length - mappedFileItems.length;
+
+  const handleFileImport = async () => {
+    if (mappedFileItems.length === 0) return;
+    setFileImporting(true);
+    setFileStatusMsg(null);
     try {
       const res = await fetch('/api/creators/batch-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           workspaceId: activeWorkspaceId,
-          source: 'TikTok One Extension',
-          creators: parsedItems
+          source: `File Import${fileName ? ` (${fileName})` : ''}`,
+          metricsSource: importMode === 'kalodata' ? 'kalodata' : undefined,
+          creators: mappedFileItems
         })
       });
       const data = await res.json();
       if (data.success) {
-        onConfirmImport(parsedItems);
-        setStatusMsg(`✅ Đã nhập ${data.importedCount} creator mới (${data.updatedCount} cập nhật) vào workspace ${activeWorkspaceId}.`);
-        setParsedItems([]);
-        setPastedText('');
+        // Lưu map cột chỉ sau khi import thành công — tránh lưu 1 map dở dang chưa test.
+        localStorage.setItem(COLUMN_MAP_STORAGE_KEY, JSON.stringify(columnMap));
+        onConfirmImport(mappedFileItems);
+        setFileStatusMsg(`✅ Đã nhập ${data.importedCount} creator mới (${data.updatedCount} cập nhật) vào workspace ${activeWorkspaceId}. Đã bỏ qua ${fileSkippedCount} dòng thiếu handle.`);
+        setFileName(null);
+        setFileHeaders([]);
+        setFileRows([]);
       } else {
-        setStatusMsg(`❌ Import thất bại: ${data.message || 'Lỗi không xác định'}`);
+        setFileStatusMsg(`❌ Import thất bại: ${data.message || 'Lỗi không xác định'}`);
       }
     } catch (err: any) {
-      console.error('Batch import creators error:', err);
-      setStatusMsg('❌ Lỗi kết nối tới máy chủ. Vui lòng thử lại.');
+      console.error('Batch import from file error:', err);
+      setFileStatusMsg('❌ Lỗi kết nối tới máy chủ. Vui lòng thử lại.');
     } finally {
-      setIsImporting(false);
+      setFileImporting(false);
     }
   };
 
@@ -161,10 +327,10 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-slate-900 dark:text-white text-base">
-                TikTok One Bulk Scraper
+                Import Creator (File CSV/Excel)
               </h3>
               <p className="text-xs text-slate-500">
-                Cào hàng loạt creator từ TikTok One / Creator Marketplace vào workspace {activeWorkspaceId}
+                Nhập creator hàng loạt từ file Kalodata/TCM/CSV vào workspace {activeWorkspaceId}
               </p>
             </div>
           </div>
@@ -175,120 +341,235 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto space-y-5 text-xs flex-1">
-          <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 to-indigo-950 text-white space-y-3 shadow-md border border-indigo-900/50">
-            <div className="flex items-center gap-2">
-              <Zap className="w-5 h-5 text-amber-400 shrink-0" />
-              <h4 className="font-bold text-sm text-white">Pickdi TikTok One Scraper (Chrome Extension)</h4>
-            </div>
-            <p className="text-slate-300 text-xs leading-relaxed">
-              Extension thật gọi trực tiếp API tìm creator của TikTok One và đọc số liệu engagement thật từ TikTok — không đoán DOM, không bịa số khi thiếu field.
-            </p>
-
-            <div className="flex items-center gap-3 pt-1">
-              <a
-                href="/api/extension/download"
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl flex items-center gap-2 shadow-sm transition-all text-xs"
-              >
-                <Download className="w-4 h-4" />
-                Download Extension (.zip)
-              </a>
-            </div>
+          {/* Import mode tabs */}
+          <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80 w-fit">
+            <button
+              type="button"
+              onClick={() => setImportMode('kalodata')}
+              className={`px-3.5 py-1.5 rounded-lg font-bold text-[11px] transition-colors ${
+                importMode === 'kalodata'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              Kalodata
+            </button>
+            <button
+              type="button"
+              onClick={() => setImportMode('generic')}
+              className={`px-3.5 py-1.5 rounded-lg font-bold text-[11px] transition-colors ${
+                importMode === 'generic'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              Generic CSV
+            </button>
           </div>
 
-          {/* Step Guide */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 space-y-1">
-              <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs">
-                <span className="w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] flex items-center justify-center">1</span>
-                Tải & giải nén
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Bấm Download rồi giải nén file .zip ra một thư mục.
-              </p>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 space-y-1">
-              <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs">
-                <span className="w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] flex items-center justify-center">2</span>
-                Load unpacked
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Vào <code>chrome://extensions</code> → bật Developer mode → Load unpacked → chọn thư mục vừa giải nén.
-              </p>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 space-y-1">
-              <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs">
-                <span className="w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-bold text-[10px] flex items-center justify-center">3</span>
-                Mở popup & cào
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Nhập Webapp URL trong popup, dùng 3 nút: Tìm creator (TikTok One), Lấy chi tiết trang, Lấy engagement.
-              </p>
-            </div>
-          </div>
-
-          {/* Sync buffer into CRM */}
           <div className="p-4 rounded-xl border border-dashed border-indigo-300 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-3">
             <div className="flex items-center gap-2">
-              <ClipboardPaste className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-              <span className="font-bold text-slate-900 dark:text-white text-xs">Nhập thủ công (nếu cần)</span>
+              <FileSpreadsheet className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <span className="font-bold text-slate-900 dark:text-white text-xs">
+                {importMode === 'kalodata' ? 'Import file export từ Kalodata' : 'Import file CSV/Excel bất kỳ'}
+              </span>
             </div>
             <p className="text-slate-600 dark:text-slate-400 text-[11px]">
-              Extension gửi thẳng data qua nút "Tìm creator" trong popup. Nếu bạn có sẵn JSON/CSV muốn dán thủ công, dùng ô bên dưới.
+              {importMode === 'kalodata' ? (
+                <>
+                  Chọn file "Creator List" export nguyên bản từ Kalodata (vd Kalodata_Creator_...xlsx, sheet
+                  LIST_CREATOR) — app tự nhận diện cột theo tên cột chuẩn của Kalodata (Handle, Nickname,
+                  Followers, Revenue($), Engagement Rate, Views, VideoNum, TikTokUrl). Kalodata không export
+                  GPM/beauty ratio/demographics nên các field đó phải điền tay sau. Cột nào file không có sẽ
+                  bị bỏ qua, không tự bịa số.
+                </>
+              ) : (
+                <>
+                  Chọn file CSV/Excel bất kỳ (sheet không đúng chuẩn Kalodata) — app sẽ đọc dòng tiêu đề, bạn tự
+                  chọn mỗi cột trong file khớp với field nào của CRM. Cột không map bị bỏ qua, không tự bịa số.
+                </>
+              )}
             </p>
 
-            <button
-              onClick={handlePasteFromClipboard}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-all text-xs"
-            >
-              <Copy className="w-4 h-4" />
-              Dán từ Clipboard
-            </button>
-
-            <textarea
-              rows={4}
-              value={pastedText}
-              onChange={e => setPastedText(e.target.value)}
-              placeholder="Hoặc dán thủ công (Ctrl+V) dữ liệu JSON/CSV tại đây..."
-              className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono text-[11px]"
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              onChange={handleFileSelected}
+              className="hidden"
             />
             <button
               type="button"
-              onClick={() => runParse(pastedText)}
-              className="px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl shadow-xs flex items-center gap-1.5 text-xs"
+              onClick={() => fileInputRef.current?.click()}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-all text-xs"
             >
-              <RefreshCw className="w-4 h-4" /> Xử lý dữ liệu
+              <UploadCloud className="w-4 h-4" />
+              Chọn file CSV/Excel
             </button>
+            {fileName && (
+              <span className="ml-2 text-[11px] text-slate-500">
+                Đã chọn: <strong className="text-slate-700 dark:text-slate-300">{fileName}</strong> ({fileRows.length} dòng dữ liệu)
+              </span>
+            )}
 
-            {parseError && (
+            {fileError && (
               <div className="p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-[11px] text-rose-700 dark:text-rose-300">
-                {parseError}
-              </div>
-            )}
-
-            {parsedItems.length > 0 && (
-              <div className="space-y-2">
-                <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-700 dark:text-slate-300">
-                  Đã đọc được <strong>{parsedItems.length}</strong> creator. Các field không có trong dữ liệu gốc sẽ hiển thị &ldquo;Chưa có dữ liệu&rdquo; trong hồ sơ, không tự bịa số.
-                </div>
-                <button
-                  onClick={handleConfirmImport}
-                  disabled={isImporting}
-                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-xs flex items-center gap-1.5 text-xs disabled:opacity-50"
-                >
-                  {isImporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  {isImporting ? 'Đang nhập...' : `Xác nhận nhập ${parsedItems.length} creator`}
-                </button>
-              </div>
-            )}
-
-            {statusMsg && (
-              <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] font-medium font-mono text-slate-800 dark:text-slate-200">
-                {statusMsg}
+                {fileError}
               </div>
             )}
           </div>
+
+          {fileHeaders.length > 0 && importMode === 'kalodata' && (
+            <>
+              {/* Detected columns (read-only, không cho map tay như Generic CSV) */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                <div className="font-bold text-slate-900 dark:text-white text-xs">Cột đã nhận diện trong file</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {KALODATA_PREVIEW_FIELDS.map(field => (
+                    <div key={field.key} className="flex items-center gap-2">
+                      <span className="w-32 shrink-0 text-[11px] font-medium text-slate-500">{field.label}</span>
+                      {kalodataFoundHeaders[field.key] ? (
+                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-mono">
+                          {kalodataFoundHeaders[field.key]}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-slate-400 italic">không có trong file</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {!kalodataFoundHeaders.handle && (
+                  <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-[11px] text-amber-700 dark:text-amber-300">
+                    File này không có cột "handle" — không thể nhận diện creator. Kiểm tra lại đúng file export
+                    Kalodata, hoặc dùng tab "Generic CSV" để tự map cột.
+                  </div>
+                )}
+              </div>
+
+              {/* Preview */}
+              {kalodataFoundHeaders.handle && (
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                  <div className="font-bold text-slate-900 dark:text-white text-xs">
+                    Xem trước ({filePreviewRows.length}/{mappedFileItems.length} dòng hợp lệ hiển thị, tổng {fileRows.length} dòng trong file)
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[10.5px] border-collapse">
+                      <thead>
+                        <tr className="text-left text-slate-500">
+                          {KALODATA_PREVIEW_FIELDS.filter(f => kalodataFoundHeaders[f.key]).map(f => (
+                            <th key={f.key} className="py-1 pr-3 font-semibold border-b border-slate-200 dark:border-slate-800">{f.label}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filePreviewRows.map((row, i) => (
+                          <tr key={i} className="border-b border-slate-100 dark:border-slate-800/60">
+                            {KALODATA_PREVIEW_FIELDS.filter(f => kalodataFoundHeaders[f.key]).map(f => (
+                              <td key={f.key} className="py-1 pr-3 text-slate-700 dark:text-slate-300">{String(row[f.key] ?? '')}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {fileSkippedCount > 0 && (
+                    <div className="text-[11px] text-slate-500">
+                      Sẽ bỏ qua {fileSkippedCount} dòng không đọc được handle.
+                    </div>
+                  )}
+                  <button
+                    onClick={handleFileImport}
+                    disabled={fileImporting || mappedFileItems.length === 0}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-xs flex items-center gap-1.5 text-xs disabled:opacity-50"
+                  >
+                    {fileImporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    {fileImporting ? 'Đang nhập...' : `Xác nhận nhập ${mappedFileItems.length} creator`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {fileHeaders.length > 0 && importMode === 'generic' && (
+            <>
+              {/* Column mapping */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                <div className="font-bold text-slate-900 dark:text-white text-xs">Map cột file → field CRM</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {FILE_TARGET_FIELDS.map(field => (
+                    <div key={field.key} className="flex items-center gap-2">
+                      <label className={`w-40 shrink-0 text-[11px] font-medium ${field.required ? 'text-slate-800 dark:text-slate-200' : 'text-slate-500'}`}>
+                        {field.label}
+                      </label>
+                      <select
+                        value={columnMap[field.key] || ''}
+                        onChange={e => handleColumnMapChange(field.key, e.target.value)}
+                        className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-[11px]"
+                      >
+                        <option value="">-- Bỏ qua --</option>
+                        {fileHeaders.map(h => (
+                          <option key={h} value={h}>{h}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+                {!columnMap.handle && (
+                  <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-[11px] text-amber-700 dark:text-amber-300">
+                    Cần map cột cho "Handle TikTok" trước khi nhập — đây là field bắt buộc để nhận diện creator.
+                  </div>
+                )}
+              </div>
+
+              {/* Preview */}
+              {columnMap.handle && (
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                  <div className="font-bold text-slate-900 dark:text-white text-xs">
+                    Xem trước ({filePreviewRows.length}/{mappedFileItems.length} dòng hợp lệ hiển thị, tổng {fileRows.length} dòng trong file)
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[10.5px] border-collapse">
+                      <thead>
+                        <tr className="text-left text-slate-500">
+                          {FILE_TARGET_FIELDS.filter(f => columnMap[f.key]).map(f => (
+                            <th key={f.key} className="py-1 pr-3 font-semibold border-b border-slate-200 dark:border-slate-800">{f.label}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filePreviewRows.map((row, i) => (
+                          <tr key={i} className="border-b border-slate-100 dark:border-slate-800/60">
+                            {FILE_TARGET_FIELDS.filter(f => columnMap[f.key]).map(f => (
+                              <td key={f.key} className="py-1 pr-3 text-slate-700 dark:text-slate-300">{String(row[f.key] ?? '')}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {fileSkippedCount > 0 && (
+                    <div className="text-[11px] text-slate-500">
+                      Sẽ bỏ qua {fileSkippedCount} dòng không đọc được handle.
+                    </div>
+                  )}
+                  <button
+                    onClick={handleFileImport}
+                    disabled={fileImporting || mappedFileItems.length === 0}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-xs flex items-center gap-1.5 text-xs disabled:opacity-50"
+                  >
+                    {fileImporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    {fileImporting ? 'Đang nhập...' : `Xác nhận nhập ${mappedFileItems.length} creator`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {fileStatusMsg && (
+            <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] font-medium font-mono text-slate-800 dark:text-slate-200">
+              {fileStatusMsg}
+            </div>
+          )}
         </div>
 
         {/* Modal Footer */}

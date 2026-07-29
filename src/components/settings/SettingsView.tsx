@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Settings, User, Sparkles, Building2, Plus, Check, Mail, Save, KeyRound } from 'lucide-react';
-import { Workspace } from '../../types';
+import { Settings, User, Sparkles, Building2, Plus, Check, Mail, Save, KeyRound, Target } from 'lucide-react';
+import { Workspace, WorkspaceScoringCriteria, CreatorGmvTier } from '../../types';
 import { WorkspaceBanner } from '../layout/WorkspaceBanner';
 import { AgentPromptStudio } from './AgentPromptStudio';
 import { AiProviderSettings } from './AiProviderSettings';
@@ -8,11 +8,12 @@ import { OutreachTemplateSettings } from './OutreachTemplateSettings';
 
 const SECTIONS = [
   { id: 'workspaces', label: 'Brand Workspaces', icon: Building2 },
+  { id: 'scoring-criteria', label: 'Sourcing Scoring Criteria', icon: Target },
   { id: 'ai-copilot', label: 'AI Copilot', icon: Sparkles },
   { id: 'ai-providers', label: 'AI Providers', icon: Sparkles },
   { id: 'agent-studio', label: 'Agent Prompt Studio', icon: Sparkles },
   { id: 'profile', label: 'Operator Profile', icon: User },
-  { id: 'email', label: 'Gmail Outreach Sync', icon: Mail },
+  { id: 'email', label: 'Email Outreach Sync', icon: Mail },
   { id: 'outreach-templates', label: 'Outreach Templates', icon: Mail },
 ] as const;
 
@@ -21,13 +22,15 @@ interface SettingsViewProps {
   workspaces?: Workspace[];
   onSelectWorkspace?: (id: string) => void;
   onAddWorkspace?: (ws: Omit<Workspace, 'id'>) => void;
+  onUpdateScoringCriteria?: (workspaceId: string, criteria: WorkspaceScoringCriteria) => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   activeWorkspace,
   workspaces = [],
   onSelectWorkspace,
-  onAddWorkspace
+  onAddWorkspace,
+  onUpdateScoringCriteria
 }) => {
   const defaultSignature =
     "Best regards,\nAnh Tuan | Affiliate Operator\n" + (activeWorkspace?.name || "d'Alba Official Store Vietnam");
@@ -48,27 +51,88 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     () => localStorage.getItem('pickdi_auto_draft') !== 'false'
   );
 
-  // Gmail SMTP/IMAP configuration state
-  const [gmailUser, setGmailUser] = useState('');
-  const [appPassword, setAppPassword] = useState('');
+  // Sourcing Scoring Criteria — ngưỡng d'Alba trong scoring.ts (GMV Performance/Audience
+  // Profile Fit/Reach Consistency) đọc từ Workspace.scoringCriteria, sửa được ở đây thay vì
+  // hardcode trong code vì tiêu chí sourcing thay đổi theo brand/thời gian.
+  const [gmvTierTarget, setGmvTierTarget] = useState<CreatorGmvTier | ''>('');
+  const [gpmFloor, setGpmFloor] = useState('');
+  const [gpmIdeal, setGpmIdeal] = useState('');
+  const [genderFemaleFloor, setGenderFemaleFloor] = useState('');
+  const [genderFemaleIdeal, setGenderFemaleIdeal] = useState('');
+  const [beautyCategoryRatioFloor, setBeautyCategoryRatioFloor] = useState('');
+  const [beautyCategoryRatioIdeal, setBeautyCategoryRatioIdeal] = useState('');
+  const [avgViewsFloor, setAvgViewsFloor] = useState('');
+  const [avgViewsIdeal, setAvgViewsIdeal] = useState('');
+  const [preferredAgeGroup, setPreferredAgeGroup] = useState('');
+  const [highFollowerNoAffiliateThreshold, setHighFollowerNoAffiliateThreshold] = useState('');
+  const [scoringCriteriaSaveMessage, setScoringCriteriaSaveMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const c = activeWorkspace?.scoringCriteria;
+    setGmvTierTarget((c?.gmvTierTarget as CreatorGmvTier) || '');
+    setGpmFloor(c?.gpmFloor != null ? String(c.gpmFloor) : '');
+    setGpmIdeal(c?.gpmIdeal != null ? String(c.gpmIdeal) : '');
+    setGenderFemaleFloor(c?.genderFemaleFloor != null ? String(c.genderFemaleFloor) : '');
+    setGenderFemaleIdeal(c?.genderFemaleIdeal != null ? String(c.genderFemaleIdeal) : '');
+    setBeautyCategoryRatioFloor(c?.beautyCategoryRatioFloor != null ? String(c.beautyCategoryRatioFloor) : '');
+    setBeautyCategoryRatioIdeal(c?.beautyCategoryRatioIdeal != null ? String(c.beautyCategoryRatioIdeal) : '');
+    setAvgViewsFloor(c?.avgViewsFloor != null ? String(c.avgViewsFloor) : '');
+    setAvgViewsIdeal(c?.avgViewsIdeal != null ? String(c.avgViewsIdeal) : '');
+    setPreferredAgeGroup(c?.preferredAgeGroup || '');
+    setHighFollowerNoAffiliateThreshold(c?.highFollowerNoAffiliateThreshold != null ? String(c.highFollowerNoAffiliateThreshold) : '');
+    setScoringCriteriaSaveMessage(null);
+  }, [activeWorkspace?.id]);
+
+  const handleSaveScoringCriteria = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeWorkspace || !onUpdateScoringCriteria) return;
+    const toNum = (v: string) => (v.trim() === '' ? undefined : Number(v));
+    const criteria: WorkspaceScoringCriteria = {
+      gmvTierTarget: gmvTierTarget || undefined,
+      gpmFloor: toNum(gpmFloor),
+      gpmIdeal: toNum(gpmIdeal),
+      genderFemaleFloor: toNum(genderFemaleFloor),
+      genderFemaleIdeal: toNum(genderFemaleIdeal),
+      beautyCategoryRatioFloor: toNum(beautyCategoryRatioFloor),
+      beautyCategoryRatioIdeal: toNum(beautyCategoryRatioIdeal),
+      avgViewsFloor: toNum(avgViewsFloor),
+      avgViewsIdeal: toNum(avgViewsIdeal),
+      preferredAgeGroup: preferredAgeGroup.trim() || undefined,
+      highFollowerNoAffiliateThreshold: toNum(highFollowerNoAffiliateThreshold),
+    };
+    onUpdateScoringCriteria(activeWorkspace.id, criteria);
+    setScoringCriteriaSaveMessage('Đã lưu tiêu chí chấm điểm cho workspace này.');
+  };
+
+  // Email SMTP/IMAP configuration state (works with Gmail, Naver Works Mail, or any IMAP/SMTP provider)
+  const [emailAddress, setEmailAddress] = useState('');
+  const [emailPassword, setEmailPassword] = useState('');
+  const [imapHost, setImapHost] = useState('');
+  const [imapPort, setImapPort] = useState('');
+  const [smtpHost, setSmtpHost] = useState('');
+  const [smtpPort, setSmtpPort] = useState('');
   const [emailBrand, setEmailBrand] = useState('');
   const [emailProduct, setEmailProduct] = useState('');
-  const [hasAppPassword, setHasAppPassword] = useState(false);
+  const [hasPassword, setHasPassword] = useState(false);
   const [emailConfigLoading, setEmailConfigLoading] = useState(false);
   const [emailConfigSaving, setEmailConfigSaving] = useState(false);
   const [emailSaveMessage, setEmailSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Load Gmail email config on mount
+  // Load email config on mount
   useEffect(() => {
     setEmailConfigLoading(true);
     fetch('/api/settings/email')
       .then(res => res.json())
       .then(data => {
         if (data.success && data.data) {
-          setGmailUser(data.data.gmailUser || '');
+          setEmailAddress(data.data.email || '');
+          setImapHost(data.data.imapHost || '');
+          setImapPort(data.data.imapPort ? String(data.data.imapPort) : '');
+          setSmtpHost(data.data.smtpHost || '');
+          setSmtpPort(data.data.smtpPort ? String(data.data.smtpPort) : '');
           setEmailBrand(data.data.brand || '');
           setEmailProduct(data.data.product || '');
-          setHasAppPassword(Boolean(data.data.hasAppPassword));
+          setHasPassword(Boolean(data.data.hasPassword));
         }
       })
       .catch(err => console.error('Failed to load email config:', err))
@@ -84,17 +148,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          gmailUser,
-          appPassword: appPassword.trim() || undefined,
+          email: emailAddress,
+          password: emailPassword.trim() || undefined,
+          imapHost: imapHost.trim(),
+          imapPort: imapPort.trim(),
+          smtpHost: smtpHost.trim(),
+          smtpPort: smtpPort.trim(),
           brand: emailBrand,
           product: emailProduct
         })
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setHasAppPassword(Boolean(data.data.hasAppPassword));
-        setAppPassword('');
-        setEmailSaveMessage({ type: 'success', text: 'Đã lưu cấu hình Gmail Outreach thành công!' });
+        setHasPassword(Boolean(data.data.hasPassword));
+        setEmailPassword('');
+        setEmailSaveMessage({ type: 'success', text: 'Đã lưu cấu hình Email Outreach thành công!' });
       } else {
         setEmailSaveMessage({ type: 'error', text: data.message || 'Lưu thất bại' });
       }
@@ -404,6 +472,176 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         )}
       </div>
 
+      {/* Sourcing Scoring Criteria — ngưỡng dùng bởi src/scoring.ts (GMV Performance/Audience
+          Profile Fit/Reach Consistency) cho workspace đang chọn ở trên. */}
+      <div
+        id="scoring-criteria"
+        ref={el => { sectionRefs.current['scoring-criteria'] = el; }}
+        className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-4 text-xs scroll-mt-6"
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+            <Target className="w-4 h-4 text-indigo-600" />
+            Sourcing Scoring Criteria — {activeWorkspace?.name || 'chọn workspace'}
+          </h3>
+        </div>
+        <p className="text-slate-500">
+          Ngưỡng dùng để chấm điểm GMV Performance / Audience Profile Fit / Reach Consistency cho creator
+          trong workspace này. Bỏ trống field nào thì nhóm/tiêu chí đó bị loại khỏi điểm (theo nguyên tắc
+          thiếu dữ liệu chung), không tự gán điểm trung tính giả.
+        </p>
+
+        <form onSubmit={handleSaveScoringCriteria} className="space-y-4">
+          <div>
+            <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-2">GMV Performance</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">GMV Tier mục tiêu</label>
+                <select
+                  value={gmvTierTarget}
+                  onChange={e => setGmvTierTarget(e.target.value as CreatorGmvTier | '')}
+                  className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                >
+                  <option value="">—</option>
+                  <option value="L1">L1</option>
+                  <option value="L2">L2</option>
+                  <option value="L3">L3</option>
+                  <option value="L4">L4</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">GPM Floor (USD/1000 views)</label>
+                <input
+                  type="number"
+                  value={gpmFloor}
+                  onChange={e => setGpmFloor(e.target.value)}
+                  className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">GPM Ideal (USD/1000 views)</label>
+                <input
+                  type="number"
+                  value={gpmIdeal}
+                  onChange={e => setGpmIdeal(e.target.value)}
+                  className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-2">Audience Profile Fit</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">% Nữ — Floor</label>
+                <input
+                  type="number"
+                  value={genderFemaleFloor}
+                  onChange={e => setGenderFemaleFloor(e.target.value)}
+                  className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">% Nữ — Ideal</label>
+                <input
+                  type="number"
+                  value={genderFemaleIdeal}
+                  onChange={e => setGenderFemaleIdeal(e.target.value)}
+                  className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">% Beauty/Personal Care — Floor</label>
+                <input
+                  type="number"
+                  value={beautyCategoryRatioFloor}
+                  onChange={e => setBeautyCategoryRatioFloor(e.target.value)}
+                  className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">% Beauty/Personal Care — Ideal</label>
+                <input
+                  type="number"
+                  value={beautyCategoryRatioIdeal}
+                  onChange={e => setBeautyCategoryRatioIdeal(e.target.value)}
+                  className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">Nhóm tuổi ưu tiên (bonus, vd 35-44)</label>
+                <input
+                  type="text"
+                  placeholder="35-44"
+                  value={preferredAgeGroup}
+                  onChange={e => setPreferredAgeGroup(e.target.value)}
+                  className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-2">Reach Consistency</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">Avg Views — Floor</label>
+                <input
+                  type="number"
+                  value={avgViewsFloor}
+                  onChange={e => setAvgViewsFloor(e.target.value)}
+                  className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">Avg Views — Ideal</label>
+                <input
+                  type="number"
+                  value={avgViewsIdeal}
+                  onChange={e => setAvgViewsIdeal(e.target.value)}
+                  className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-2">Eligibility Gate (Risk Flag)</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                  Follower cao nhưng chưa có GMV affiliate — ngưỡng follower
+                </label>
+                <input
+                  type="number"
+                  value={highFollowerNoAffiliateThreshold}
+                  onChange={e => setHighFollowerNoAffiliateThreshold(e.target.value)}
+                  className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+            </div>
+          </div>
+
+          {scoringCriteriaSaveMessage && (
+            <div className="p-2.5 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-900">
+              {scoringCriteriaSaveMessage}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end pt-1">
+            <button
+              type="submit"
+              disabled={!activeWorkspace}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-xs flex items-center gap-1.5 text-xs"
+            >
+              <Save className="w-3.5 h-3.5" />
+              Lưu tiêu chí chấm điểm
+            </button>
+          </div>
+        </form>
+      </div>
+
       {/* Settings Section 1: AI & Gemini Status */}
       <div
         id="ai-copilot"
@@ -524,31 +762,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-slate-900 dark:text-white text-sm flex items-center gap-2">
             <Mail className="w-4 h-4 text-indigo-600" />
-            Gmail Outreach 2-way Sync (SMTP / IMAP)
+            Email Outreach 2-way Sync (SMTP / IMAP)
           </h3>
-          {hasAppPassword ? (
+          {hasPassword ? (
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 flex items-center gap-1">
-              <Check className="w-3 h-3" /> Gmail Connected
+              <Check className="w-3 h-3" /> Email Connected
             </span>
           ) : (
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-              Chưa cấu hình App Password
+              Chưa cấu hình mật khẩu
             </span>
           )}
         </div>
 
         <p className="text-slate-500 text-xs">
-          Cấu hình Gmail App Password để tự động gửi email outreach thực tế và đồng bộ tin nhắn creator phản hồi qua IMAP.
+          Cấu hình hộp thư dùng cho outreach (Naver Works Mail, Gmail, hoặc bất kỳ nhà cung cấp nào hỗ trợ
+          IMAP/SMTP) để tự động gửi email và đồng bộ tin nhắn creator phản hồi.
         </p>
 
         {/* Security Guide Callout */}
         <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-xl text-[11px] text-amber-900 dark:text-amber-200 space-y-1">
           <div className="font-bold flex items-center gap-1.5">
             <KeyRound className="w-3.5 h-3.5 text-amber-600" />
-            Hướng dẫn tạo Google App Password:
+            Lấy thông tin IMAP/SMTP:
           </div>
           <p>
-            Cần bật 2FA trên Google Account rồi tạo App Password tại{' '}
+            Với Naver Works Mail: đăng nhập → Mail → Cài đặt → mục "POP3/IMAP" → bật IMAP/SMTP, trang đó
+            sẽ hiện đúng host/port cần điền bên dưới. Với Gmail: bật 2FA rồi tạo App Password tại{' '}
             <a
               href="https://myaccount.google.com/apppasswords"
               target="_blank"
@@ -557,7 +797,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             >
               myaccount.google.com/apppasswords
             </a>{' '}
-            — không dùng mật khẩu Gmail thông thường.
+            (host: imap.gmail.com / smtp.gmail.com).
           </p>
         </div>
 
@@ -565,27 +805,83 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Địa chỉ Gmail *
+                Địa chỉ email *
               </label>
               <input
                 type="email"
                 required
-                placeholder="your.brand@gmail.com"
-                value={gmailUser}
-                onChange={e => setGmailUser(e.target.value)}
+                placeholder="creator.dalba@worksmobile.com"
+                value={emailAddress}
+                onChange={e => setEmailAddress(e.target.value)}
                 className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
               />
             </div>
 
             <div>
               <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Gmail App Password {hasAppPassword ? '(Đã lưu - để trống nếu không đổi)' : '*'}
+                Mật khẩu {hasPassword ? '(Đã lưu - để trống nếu không đổi)' : '*'}
               </label>
               <input
                 type="password"
-                placeholder={hasAppPassword ? '•••••••••••••••• (Đã lưu)' : 'xxxx xxxx xxxx xxxx'}
-                value={appPassword}
-                onChange={e => setAppPassword(e.target.value)}
+                placeholder={hasPassword ? '•••••••••••••••• (Đã lưu)' : 'Mật khẩu hoặc App Password'}
+                value={emailPassword}
+                onChange={e => setEmailPassword(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                IMAP Host *
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="imap.worksmobile.com"
+                value={imapHost}
+                onChange={e => setImapHost(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                IMAP Port *
+              </label>
+              <input
+                type="number"
+                required
+                placeholder="993"
+                value={imapPort}
+                onChange={e => setImapPort(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                SMTP Host *
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="smtp.worksmobile.com"
+                value={smtpHost}
+                onChange={e => setSmtpHost(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                SMTP Port *
+              </label>
+              <input
+                type="number"
+                required
+                placeholder="465"
+                value={smtpPort}
+                onChange={e => setSmtpPort(e.target.value)}
                 className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
               />
             </div>
@@ -632,11 +928,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="flex items-center justify-end pt-2">
             <button
               type="submit"
-              disabled={emailConfigSaving || !gmailUser.trim()}
+              disabled={emailConfigSaving || !emailAddress.trim()}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-xs flex items-center gap-1.5 text-xs"
             >
               <Save className="w-3.5 h-3.5" />
-              {emailConfigSaving ? 'Đang lưu...' : 'Lưu cấu hình Gmail'}
+              {emailConfigSaving ? 'Đang lưu...' : 'Lưu cấu hình Email'}
             </button>
           </div>
         </form>

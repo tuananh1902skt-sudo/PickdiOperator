@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { FileCheck2, Play, ExternalLink } from 'lucide-react';
-import { DraftReview } from '../../types';
+import { FileCheck2, Play, ExternalLink, Rocket, CheckCircle2 } from 'lucide-react';
+import { DraftReview, PostedVideo } from '../../types';
 
 interface ReviewsViewProps {
   reviews: DraftReview[];
+  postedVideos: PostedVideo[];
   onSelectReview: (review: DraftReview) => void;
+  onMarkAsPosted: (review: DraftReview) => void;
 }
 
-export const ReviewsView: React.FC<ReviewsViewProps> = ({ reviews, onSelectReview }) => {
+export const ReviewsView: React.FC<ReviewsViewProps> = ({ reviews, postedVideos, onSelectReview, onMarkAsPosted }) => {
   const [statusFilter, setStatusFilter] = useState('ALL');
 
   const filteredReviews = reviews.filter(r => {
@@ -104,6 +106,28 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({ reviews, onSelectRevie
                   Audit <ExternalLink className="w-3 h-3" />
                 </span>
               </div>
+
+              {r.status === 'Approved' && (
+                <div onClick={e => e.stopPropagation()}>
+                  {postedVideos.some(pv => pv.reviewId === r.id) ? (
+                    <button
+                      onClick={() => onMarkAsPosted(r)}
+                      className="w-full flex items-center justify-center gap-1.5 text-[11px] font-bold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 px-2.5 py-1.5 rounded-xl transition-colors"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Đã đăng — sửa doanh thu/ROI
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => onMarkAsPosted(r)}
+                      className="w-full flex items-center justify-center gap-1.5 text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1.5 rounded-xl transition-colors"
+                    >
+                      <Rocket className="w-3.5 h-3.5" />
+                      Đánh dấu đã đăng
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           ))
         )}

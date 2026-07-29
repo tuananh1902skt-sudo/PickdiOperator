@@ -11,7 +11,9 @@ import {
   CheckCircle2,
   Clock,
   ChevronRight,
-  Plus
+  Plus,
+  Users,
+  Video
 } from 'lucide-react';
 import {
   DashboardKPIs,
@@ -23,12 +25,20 @@ import {
 } from '../../types';
 import { WorkspaceBanner } from '../layout/WorkspaceBanner';
 
+// Mục tiêu KPI cá nhân theo quy trình d'Alba — chỉ Juan dùng nên để cố định ở đây,
+// sửa trực tiếp khi d'Alba đổi mục tiêu, không cần màn hình cài đặt riêng.
+const DAILY_CREATOR_LISTUP_TARGET = 200;
+const MONTHLY_VIDEO_POSTED_TARGET_MIN = 300;
+const MONTHLY_VIDEO_POSTED_TARGET_MAX = 500;
+
 interface DashboardViewProps {
   kpis: DashboardKPIs;
   tasks: Task[];
   activities: ActivityItem[];
   recentReplies: Conversation[];
   creators: Creator[];
+  creatorsAddedToday: number;
+  videosPostedThisMonth: number;
   activeWorkspace?: Workspace;
   workspaces?: Workspace[];
   onSelectWorkspace?: (id: string) => void;
@@ -47,6 +57,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   activities,
   recentReplies,
   creators,
+  creatorsAddedToday,
+  videosPostedThisMonth,
   activeWorkspace,
   workspaces = [],
   onSelectWorkspace,
@@ -203,6 +215,44 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {creators.length > 0
               ? `${creators.filter(c => ['Approved', 'Completed'].includes(c.status)).length} of ${creators.length} converted`
               : '0 converted'}
+          </div>
+        </div>
+      </div>
+
+      {/* Personal KPI Targets: List-up hôm nay + Video lên sóng tháng này */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">
+          <div className="flex items-center justify-between text-slate-500 text-xs font-medium mb-2">
+            <span>List-up hôm nay</span>
+            <Users className="w-4 h-4 text-indigo-500" />
+          </div>
+          <div className="text-2xl font-bold text-slate-900 dark:text-white">
+            {creatorsAddedToday} <span className="text-sm font-medium text-slate-400">/ {DAILY_CREATOR_LISTUP_TARGET}</span>
+          </div>
+          <div className="mt-2 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+            <div
+              className="h-full bg-indigo-500 rounded-full"
+              style={{ width: `${Math.min(100, (creatorsAddedToday / DAILY_CREATOR_LISTUP_TARGET) * 100)}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs">
+          <div className="flex items-center justify-between text-slate-500 text-xs font-medium mb-2">
+            <span>Video lên sóng tháng này</span>
+            <Video className="w-4 h-4 text-emerald-500" />
+          </div>
+          <div className="text-2xl font-bold text-slate-900 dark:text-white">
+            {videosPostedThisMonth}{' '}
+            <span className="text-sm font-medium text-slate-400">
+              / {MONTHLY_VIDEO_POSTED_TARGET_MIN}-{MONTHLY_VIDEO_POSTED_TARGET_MAX}
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 rounded-full"
+              style={{ width: `${Math.min(100, (videosPostedThisMonth / MONTHLY_VIDEO_POSTED_TARGET_MIN) * 100)}%` }}
+            />
           </div>
         </div>
       </div>

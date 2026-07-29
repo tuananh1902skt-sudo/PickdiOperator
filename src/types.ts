@@ -21,6 +21,27 @@ export type TaskStatus = 'Pending' | 'Completed';
 
 export type NotificationPriority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
+// Ngưỡng chấm điểm sourcing riêng của workspace (vd tiêu chí d'Alba trong file d'Alba
+// Onboarding.xlsx, sheet Workflow!D22). Đây là cấu hình do operator tự nhập/sửa trong
+// Settings — KHÔNG hardcode trong scoring.ts — vì mỗi brand có tiêu chí GMV/audience khác
+// nhau và các mốc này thay đổi theo thời gian. Thiếu field nào thì scoring.ts loại field đó
+// khỏi nhóm tương ứng (theo đúng nguyên tắc thiếu-dữ-liệu chung của scoreCreator()).
+export interface WorkspaceScoringCriteria {
+  gmvTierTarget?: CreatorGmvTier;
+  gpmFloor?: number;
+  gpmIdeal?: number;
+  genderFemaleFloor?: number; // % 0-100
+  genderFemaleIdeal?: number; // % 0-100
+  beautyCategoryRatioFloor?: number; // % 0-100
+  beautyCategoryRatioIdeal?: number; // % 0-100
+  avgViewsFloor?: number;
+  avgViewsIdeal?: number;
+  preferredAgeGroup?: string; // vd "35-44" — chỉ cộng điểm thưởng, không phải ngưỡng loại
+  // Followers từ mức này trở lên mà chưa từng có affiliate GMV bị coi là rủi ro sourcing
+  // (nổi tiếng nhưng chưa chứng minh được bán hàng affiliate) — thêm vào computeRiskFlags().
+  highFollowerNoAffiliateThreshold?: number;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -35,6 +56,7 @@ export interface Workspace {
   creatorCount?: number;
   activeCampaignCount?: number;
   isMock?: boolean;
+  scoringCriteria?: WorkspaceScoringCriteria;
 }
 
 export interface CreatorVideo {
@@ -57,11 +79,60 @@ export interface CreatorDemographics {
   countryDistribution?: { name: string; value: number }[];
 }
 
-export interface CreatorScores {
-  overall?: number;
-  broadcasting?: number;
-  diligence?: number;
-  commercial?: number;
+// Field riêng cho layout Creator detail thật của TikTok Shop Affiliate Center (TCM) — mỗi
+// nhóm ứng với 1 tab con thật trên trang (PPS/Sample score/Sales/Collaboration metrics/
+// Video/LIVE), lấy từ response marketplace/profile đã confirm field name (xem memory
+// tcm-scraper-endpoints). Field nào TCM chưa xác nhận tên JSON thật (vd avg video/LIVE
+// engagement rate riêng, products count, est post rate, time-series Trends) thì KHÔNG có
+// trong các interface này — UI phải tự hiển thị "Chưa có dữ liệu" khi field undefined,
+// không suy diễn/tính hộ từ field khác.
+export interface CreatorSampleScoreBreakdownItem {
+  key: 'postsWithSamples' | 'postFrequency' | 'salesGeneration' | 'contentQuality';
+  label: string;
+  score?: number; // 0-100
+  percentileText?: string; // vd "Higher than 72% creators" — TCM trả sẵn dạng rank, không tự tính percentile
+}
+
+export interface CreatorSampleScore {
+  total?: number; // 0-100
+  tier?: string; // vd "Excellent"
+  breakdown: CreatorSampleScoreBreakdownItem[];
+}
+
+export interface CreatorPps {
+  score?: number; // 0-5.0
+  tier?: string; // vd "Medium"
+}
+
+// content_groups: video_gmv/live_gmv (fraction) — % doanh thu theo kênh, KHÔNG phải %
+// video/live count.
+export interface CreatorSalesMetrics {
+  gmv?: number; // med_gmv_revenue (median 30d GMV, USD)
+  itemsSold?: number; // units_sold
+  gpm?: number; // gpm.value
+  gmvPerCustomer?: number; // avg_revenue_per_buyer
+  channelSplit?: { video?: number; live?: number }; // % 0-100, từ content_groups
+  // % GMV theo ngành hàng (donut "GMV by product category" thật) — nguồn thật cho
+  // beautyCategoryRatio, lấy nguyên mảng industry_groups thay vì chỉ suy ra 1 số Beauty.
+  categorySplit?: { name: string; value: number }[]; // % 0-100
+}
+
+export interface CreatorCollabMetrics {
+  avgCommissionRatePct?: number; // med_commission_rate/100
+  brandCollabCount?: number; // collaborated_brands_num
+  brandPartners?: { id: string; name: string }[]; // partnered_brand[]
+}
+
+export interface CreatorVideoMetrics {
+  gpm?: number; // ec_video_gpm (range {minimal,maximum} — không phải video_gpm như đoán trước, field đó không tồn tại)
+  videosCount?: number; // video_publish_cnt_30d
+  engagementRatePct?: number; // video_engagement/100 — xác nhận thật qua live recon (Session 6/7)
+}
+
+export interface CreatorLiveMetrics {
+  gpm?: number; // ec_live_gpm (range {minimal,maximum} — không phải live_gpm như đoán trước, field đó không tồn tại)
+  streamsCount?: number; // live_streaming_cnt_30d
+  engagementRatePct?: number; // live_engagement/100 — xác nhận thật qua live recon (Session 6/7)
 }
 
 export interface Creator {
@@ -80,7 +151,6 @@ export interface Creator {
   language?: string;
   bio: string;
   profileUrl: string;
-  tiktokOneId?: string;
   followers?: number;
   avgViews?: number;
   engagementRate?: number; // e.g. 4.2%
@@ -110,30 +180,31 @@ export interface Creator {
   lastVideoDate?: string;
   erFollower?: number;
   medianViews?: number | string;
-  medianViewsBenchmark?: string;
-  sixSecondViewRate?: string;
-  sixSecondViewRateBenchmark?: string;
-  engagementRateBenchmark?: string;
-  industryTag?: string;
-  videoContentTag?: string;
-  brandedVideosCount?: number;
-  industryCoveredCount?: number;
   recentVideos?: CreatorVideo[];
   demographics?: CreatorDemographics;
-  scores?: CreatorScores;
+  // Tiêu chí sourcing thật của d'Alba (file d'Alba Onboarding.xlsx, sheet Sourcing List_Bo) —
+  // điền từ import Kalodata, KHÔNG tự suy diễn từ field khác.
+  gmvTier?: CreatorGmvTier;
+  gpm?: number;
+  beautyCategoryRatio?: number; // % 0-100
+  hasAffiliateGmv?: boolean;
+  metricsSource?: 'kalodata' | 'tcm' | 'manual';
+  metricsSyncedAt?: string;
+  // Chi tiết theo đúng layout tab thật của TCM creator detail — chỉ có khi metricsSource
+  // là 'tcm' và extension đã cào được (xem tcm-scraper-endpoints memory). KHÔNG áp dụng cho
+  // creator nhập từ Kalodata/manual.
+  pps?: CreatorPps;
+  sampleScore?: CreatorSampleScore;
+  salesMetrics?: CreatorSalesMetrics;
+  collabMetrics?: CreatorCollabMetrics;
+  videoMetrics?: CreatorVideoMetrics;
+  liveMetrics?: CreatorLiveMetrics;
   isMock?: boolean;
-  // Dữ liệu thô lấy từ network-intercept MGetCreatorsCard (TikTok One) — giữ nguyên
-  // shape gốc của TikTok, không chuẩn hoá lại, nên để any thay vì định nghĩa lại toàn bộ.
-  audienceDemographicsFull?: any;
-  followerHistory?: any[];
-  topVideos?: any[];
-  recentVideosFull?: any[];
-  brandPartners?: string[];
   // Kết quả scoreCreator() (server/scoring.ts) — lưu lại để hiển thị breakdown chi tiết
   // trong UI thay vì chỉ có brandFitScore tổng.
   // brandFitScore/scoreBreakdown = điểm NỀN (baseline), tự động tính lại sau mỗi lần
-  // scrape/update-detail, KHÔNG gắn với campaign nào — chỉ dùng Content/Follower/Ops
-  // (3 nhóm không cần biết campaign) để có 1 con số tham khảo khi lướt cả kho creator.
+  // import/enrich, KHÔNG gắn với campaign nào — chỉ dùng các nhóm không cần biết campaign
+  // để có 1 con số tham khảo khi lướt cả kho creator.
   scoreBreakdown?: CreatorScoreBreakdown;
   // Điểm CHO TỪNG CAMPAIGN cụ thể — 1 creator dùng lại được cho nhiều campaign/brand khác
   // nhau, mỗi campaign có Niche Fit/Audience Fit riêng nên không thể dùng chung 1 con số.
@@ -191,6 +262,16 @@ export interface Campaign {
 // filter theo workspace không cần join), và status là trạng thái RIÊNG của lần hợp tác này —
 // không dùng chung Creator.status vì cùng 1 creator có thể đang "Negotiating" ở brand A nhưng
 // đã "Posted" ở brand B.
+export type CreatorGmvTier = 'L1' | 'L2' | 'L3' | 'L4';
+
+export type CreatorQualification = 'Qualified' | 'Not Qualified' | 'Not Reviewed';
+
+export type CastingStage =
+  | 'Awaiting Confirmation'
+  | 'Awaiting dAlba Signature'
+  | 'Signed'
+  | 'Confirmed';
+
 export interface CreatorCampaignAssignment {
   id: string;
   creatorId: string;
@@ -201,6 +282,17 @@ export interface CreatorCampaignAssignment {
   assignedAt: string;
   ratePaid?: number;
   notes?: string;
+  // Sourcing List fields (khớp file d'Alba Onboarding.xlsx) — giá/hợp đồng khác nhau theo
+  // từng cặp creator × sản phẩm nên lưu ở đây, không lưu trên Creator dùng chung.
+  gmvTier?: CreatorGmvTier;
+  qualification?: CreatorQualification;
+  originalPrice?: number;
+  negotiatedPrice?: number;
+  pricePerVideo?: number;
+  commissionPercent?: number;
+  contractedVideoCount?: number;
+  contractUrl?: string;
+  castingStage?: CastingStage;
 }
 
 export interface CampaignTargetAudience {
@@ -299,12 +391,11 @@ export interface ContentReview {
   dueAt: string;
   submittedAt: string;
   checklist?: {
-    productVisible: boolean;
-    brandMentioned: boolean;
-    ctaPresent: boolean;
-    linkCorrect: boolean;
-    compliance: boolean;
-    hookQualityScore: number; // 0-100
+    productNameCorrect?: boolean; // Tên sản phẩm nhắc đúng
+    ingredientsBenefitsCorrect?: boolean; // Thành phần/công dụng nói đúng
+    durationValid?: boolean; // Độ dài video hợp lý (30-90 giây)
+    hookIn3Seconds?: boolean; // Có hook trong 3 giây đầu
+    matchesBrief?: boolean; // Đúng theo brief đã gửi
   };
   feedbackNote?: string;
   feedback?: string;
@@ -313,6 +404,32 @@ export interface ContentReview {
 }
 
 export type DraftReview = ContentReview;
+
+// Bảng "Uploaded" trong file d'Alba Onboarding.xlsx — 1 dòng cho mỗi video đã đăng chính
+// thức (sau khi ContentReview được Approve). doanh thu/số đơn/chi ads có thể chưa biết lúc
+// mới đánh dấu đã đăng, chỉ điền link + ngày, rồi cập nhật số liệu sau khi có báo cáo thật.
+export interface PostedVideo {
+  id: string;
+  workspaceId?: string;
+  reviewId?: string; // ContentReview gốc đã Approve, nếu tạo từ nút "Đánh dấu đã đăng"
+  creatorId: string;
+  creatorName: string;
+  creatorHandle: string;
+  campaignId: string;
+  campaignName: string;
+  round?: string; // đợt (round) casting
+  pricePerVideo?: number;
+  paid?: boolean; // Paid / Non-Paid
+  postedAt: string;
+  videoUrl: string;
+  videoId?: string;
+  adCode?: string; // Spark Ads code
+  roi?: number;
+  totalRevenue?: number;
+  totalOrders?: number;
+  totalAdSpend?: number;
+  isMock?: boolean;
+}
 
 export interface Task {
   id: string;

@@ -14,7 +14,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ShieldCheck,
-  Bot
+  Bot,
+  FileSpreadsheet
 } from 'lucide-react';
 
 export type ActiveTab =
@@ -26,6 +27,7 @@ export type ActiveTab =
   | 'reviews'
   | 'tasks'
   | 'reports'
+  | 'export'
   | 'ai'
   | 'notifications'
   | 'settings';
@@ -62,6 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'reviews' as ActiveTab, label: 'Content Reviews', icon: FileCheck2 },
     { id: 'tasks' as ActiveTab, label: 'Tasks', icon: CheckSquare },
     { id: 'reports' as ActiveTab, label: 'Reports & Analytics', icon: BarChart3 },
+    { id: 'export' as ActiveTab, label: 'Xuất Google Sheet', icon: FileSpreadsheet },
     { id: 'ai' as ActiveTab, label: 'AI Assistant', icon: Sparkles, badge: 'PRO' },
     { id: 'notifications' as ActiveTab, label: 'Notifications', icon: Bell, count: unreadNotifsCount },
     { id: 'settings' as ActiveTab, label: 'Settings', icon: Settings },

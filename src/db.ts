@@ -13,6 +13,7 @@ import {
   UnmatchedInboundEmail,
   CreatorCampaignAssignment,
   BulkOutreachJob,
+  PostedVideo,
 } from './types';
 
 let instance: SupabaseClient | null = null;
@@ -74,6 +75,7 @@ export function rowToWorkspace(row: any): Workspace {
     creatorCount: row.creatorCount != null ? Number(row.creatorCount) : undefined,
     activeCampaignCount: row.activeCampaignCount != null ? Number(row.activeCampaignCount) : undefined,
     isMock: row.isMock != null ? Boolean(row.isMock) : undefined,
+    scoringCriteria: row.scoringCriteria || undefined,
   };
 }
 
@@ -90,7 +92,6 @@ export function rowToCreator(row: any): Creator {
     language: row.language || undefined,
     bio: row.bio || '',
     profileUrl: row.profileUrl,
-    tiktokOneId: row.tiktokOneId || undefined,
     followers: row.followers != null ? Number(row.followers) : undefined,
     avgViews: row.avgViews != null ? Number(row.avgViews) : undefined,
     engagementRate: row.engagementRate != null ? Number(row.engagementRate) : undefined,
@@ -117,25 +118,23 @@ export function rowToCreator(row: any): Creator {
     lastVideoDate: row.lastVideoDate || undefined,
     erFollower: row.erFollower != null ? Number(row.erFollower) : undefined,
     medianViews: row.medianViews || undefined,
-    medianViewsBenchmark: row.medianViewsBenchmark || undefined,
-    sixSecondViewRate: row.sixSecondViewRate || undefined,
-    sixSecondViewRateBenchmark: row.sixSecondViewRateBenchmark || undefined,
-    engagementRateBenchmark: row.engagementRateBenchmark || undefined,
-    industryTag: row.industryTag || undefined,
-    videoContentTag: row.videoContentTag || undefined,
-    brandedVideosCount: row.brandedVideosCount != null ? Number(row.brandedVideosCount) : undefined,
-    industryCoveredCount: row.industryCoveredCount != null ? Number(row.industryCoveredCount) : undefined,
     recentVideos: parseJson(row.recentVideos, undefined),
     demographics: parseJson(row.demographics, undefined),
-    scores: parseJson(row.scores, undefined),
     isMock: row.isMock != null ? Boolean(row.isMock) : undefined,
-    audienceDemographicsFull: parseJson(row.audienceDemographicsFull, undefined),
-    followerHistory: parseJson(row.followerHistory, undefined),
-    topVideos: parseJson(row.topVideos, undefined),
-    recentVideosFull: parseJson(row.recentVideosFull, undefined),
-    brandPartners: parseJson(row.brandPartners, undefined),
     scoreBreakdown: parseJson(row.scoreBreakdown, undefined),
     campaignScores: parseJson(row.campaignScores, undefined),
+    gmvTier: row.gmvTier || undefined,
+    gpm: row.gpm != null ? Number(row.gpm) : undefined,
+    beautyCategoryRatio: row.beautyCategoryRatio != null ? Number(row.beautyCategoryRatio) : undefined,
+    hasAffiliateGmv: row.hasAffiliateGmv != null ? Boolean(row.hasAffiliateGmv) : undefined,
+    metricsSource: row.metricsSource || undefined,
+    metricsSyncedAt: row.metricsSyncedAt || undefined,
+    pps: parseJson(row.pps, undefined),
+    sampleScore: parseJson(row.sampleScore, undefined),
+    salesMetrics: parseJson(row.salesMetrics, undefined),
+    collabMetrics: parseJson(row.collabMetrics, undefined),
+    videoMetrics: parseJson(row.videoMetrics, undefined),
+    liveMetrics: parseJson(row.liveMetrics, undefined),
   };
 }
 
@@ -303,6 +302,40 @@ export function rowToAssignment(row: any): CreatorCampaignAssignment {
     assignedAt: row.assignedAt,
     ratePaid: row.ratePaid != null ? Number(row.ratePaid) : undefined,
     notes: row.notes || undefined,
+    gmvTier: row.gmvTier || undefined,
+    qualification: row.qualification || undefined,
+    originalPrice: row.originalPrice != null ? Number(row.originalPrice) : undefined,
+    negotiatedPrice: row.negotiatedPrice != null ? Number(row.negotiatedPrice) : undefined,
+    pricePerVideo: row.pricePerVideo != null ? Number(row.pricePerVideo) : undefined,
+    commissionPercent: row.commissionPercent != null ? Number(row.commissionPercent) : undefined,
+    contractedVideoCount: row.contractedVideoCount != null ? Number(row.contractedVideoCount) : undefined,
+    contractUrl: row.contractUrl || undefined,
+    castingStage: row.castingStage || undefined,
+  };
+}
+
+export function rowToPostedVideo(row: any): PostedVideo {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId || undefined,
+    reviewId: row.reviewId || undefined,
+    creatorId: row.creatorId,
+    creatorName: row.creatorName,
+    creatorHandle: row.creatorHandle,
+    campaignId: row.campaignId,
+    campaignName: row.campaignName,
+    round: row.round || undefined,
+    pricePerVideo: row.pricePerVideo != null ? Number(row.pricePerVideo) : undefined,
+    paid: row.paid != null ? Boolean(row.paid) : undefined,
+    postedAt: row.postedAt,
+    videoUrl: row.videoUrl,
+    videoId: row.videoId || undefined,
+    adCode: row.adCode || undefined,
+    roi: row.roi != null ? Number(row.roi) : undefined,
+    totalRevenue: row.totalRevenue != null ? Number(row.totalRevenue) : undefined,
+    totalOrders: row.totalOrders != null ? Number(row.totalOrders) : undefined,
+    totalAdSpend: row.totalAdSpend != null ? Number(row.totalAdSpend) : undefined,
+    isMock: row.isMock != null ? Boolean(row.isMock) : undefined,
   };
 }
 
@@ -337,6 +370,7 @@ export async function saveWorkspace(w: Workspace): Promise<void> {
     creatorCount: w.creatorCount ?? 0,
     activeCampaignCount: w.activeCampaignCount ?? 0,
     isMock: !!w.isMock,
+    scoringCriteria: w.scoringCriteria ?? null,
     created_at_ts: Date.now(),
   }));
 }
@@ -355,7 +389,6 @@ export async function saveCreator(c: Creator): Promise<void> {
     language: c.language ?? null,
     bio: c.bio ?? '',
     profileUrl: c.profileUrl,
-    tiktokOneId: c.tiktokOneId ?? null,
     followers: c.followers ?? null,
     avgViews: c.avgViews ?? null,
     engagementRate: c.engagementRate ?? null,
@@ -382,25 +415,23 @@ export async function saveCreator(c: Creator): Promise<void> {
     lastVideoDate: c.lastVideoDate ?? null,
     erFollower: c.erFollower ?? null,
     medianViews: c.medianViews ? String(c.medianViews) : null,
-    medianViewsBenchmark: c.medianViewsBenchmark ?? null,
-    sixSecondViewRate: c.sixSecondViewRate ?? null,
-    sixSecondViewRateBenchmark: c.sixSecondViewRateBenchmark ?? null,
-    engagementRateBenchmark: c.engagementRateBenchmark ?? null,
-    industryTag: c.industryTag ?? null,
-    videoContentTag: c.videoContentTag ?? null,
-    brandedVideosCount: c.brandedVideosCount ?? null,
-    industryCoveredCount: c.industryCoveredCount ?? null,
     recentVideos: c.recentVideos ?? null,
     demographics: c.demographics ?? null,
-    scores: c.scores ?? null,
     isMock: !!c.isMock,
-    audienceDemographicsFull: c.audienceDemographicsFull ?? null,
-    followerHistory: c.followerHistory ?? null,
-    topVideos: c.topVideos ?? null,
-    recentVideosFull: c.recentVideosFull ?? null,
-    brandPartners: c.brandPartners ?? null,
     scoreBreakdown: c.scoreBreakdown ?? null,
     campaignScores: c.campaignScores ?? null,
+    gmvTier: c.gmvTier ?? null,
+    gpm: c.gpm ?? null,
+    beautyCategoryRatio: c.beautyCategoryRatio ?? null,
+    hasAffiliateGmv: c.hasAffiliateGmv ?? null,
+    metricsSource: c.metricsSource ?? null,
+    metricsSyncedAt: c.metricsSyncedAt ?? null,
+    pps: c.pps ?? null,
+    sampleScore: c.sampleScore ?? null,
+    salesMetrics: c.salesMetrics ?? null,
+    collabMetrics: c.collabMetrics ?? null,
+    videoMetrics: c.videoMetrics ?? null,
+    liveMetrics: c.liveMetrics ?? null,
     created_at_ts: c.createdAt ? new Date(c.createdAt).getTime() || Date.now() : Date.now(),
   }));
 }
@@ -593,6 +624,15 @@ export async function saveAssignment(a: CreatorCampaignAssignment): Promise<void
     assignedAt: a.assignedAt,
     ratePaid: a.ratePaid ?? null,
     notes: a.notes ?? null,
+    gmvTier: a.gmvTier ?? null,
+    qualification: a.qualification ?? null,
+    originalPrice: a.originalPrice ?? null,
+    negotiatedPrice: a.negotiatedPrice ?? null,
+    pricePerVideo: a.pricePerVideo ?? null,
+    commissionPercent: a.commissionPercent ?? null,
+    contractedVideoCount: a.contractedVideoCount ?? null,
+    contractUrl: a.contractUrl ?? null,
+    castingStage: a.castingStage ?? null,
     created_at_ts: a.assignedAt ? new Date(a.assignedAt).getTime() || Date.now() : Date.now(),
   }));
 }
@@ -664,6 +704,51 @@ export async function unassignCreatorFromCampaign(assignmentId: string): Promise
     await saveCampaign(campaign);
   }
   return campaign;
+}
+
+export async function savePostedVideo(v: PostedVideo): Promise<void> {
+  const db = getDb();
+  check(await db.from('posted_videos').upsert({
+    id: v.id,
+    workspaceId: v.workspaceId ?? null,
+    reviewId: v.reviewId ?? null,
+    creatorId: v.creatorId,
+    creatorName: v.creatorName,
+    creatorHandle: v.creatorHandle,
+    campaignId: v.campaignId,
+    campaignName: v.campaignName,
+    round: v.round ?? null,
+    pricePerVideo: v.pricePerVideo ?? null,
+    paid: v.paid ?? null,
+    postedAt: v.postedAt,
+    videoUrl: v.videoUrl,
+    videoId: v.videoId ?? null,
+    adCode: v.adCode ?? null,
+    roi: v.roi ?? null,
+    totalRevenue: v.totalRevenue ?? null,
+    totalOrders: v.totalOrders ?? null,
+    totalAdSpend: v.totalAdSpend ?? null,
+    isMock: !!v.isMock,
+    created_at_ts: v.postedAt ? new Date(v.postedAt).getTime() || Date.now() : Date.now(),
+  }));
+}
+
+export async function getAllPostedVideos(): Promise<PostedVideo[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('posted_videos')
+    .select('*')
+    .order('created_at_ts', { ascending: false })
+    .order('rowid', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(rowToPostedVideo);
+}
+
+export async function getPostedVideoById(id: string): Promise<PostedVideo | null> {
+  const db = getDb();
+  const { data, error } = await db.from('posted_videos').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data ? rowToPostedVideo(data) : null;
 }
 
 export async function saveUnmatchedInboundEmail(u: UnmatchedInboundEmail): Promise<void> {
@@ -802,25 +887,6 @@ export async function getCreatorByHandle(handle: string): Promise<Creator | null
   const { data, error } = await db.from('creators').select('*').ilike('handle', cleanHandle).maybeSingle();
   if (error) throw error;
   return data ? rowToCreator(data) : null;
-}
-
-export async function findCreatorByHandleOrTikTokOneId(handle?: string, tiktokOneId?: string): Promise<Creator | null> {
-  const db = getDb();
-  const cleanHandle = (handle || '').replace(/^@/, '').toLowerCase().trim();
-
-  if (cleanHandle) {
-    const { data, error } = await db.from('creators').select('*').ilike('handle', cleanHandle).maybeSingle();
-    if (error) throw error;
-    if (data) return rowToCreator(data);
-  }
-
-  if (tiktokOneId) {
-    const { data, error } = await db.from('creators').select('*').eq('tiktokOneId', tiktokOneId).maybeSingle();
-    if (error) throw error;
-    if (data) return rowToCreator(data);
-  }
-
-  return null;
 }
 
 export async function archiveCreator(id: string): Promise<Creator | null> {
@@ -972,6 +1038,13 @@ export async function getAllWorkspaces(): Promise<Workspace[]> {
     .order('rowid', { ascending: false });
   if (error) throw error;
   return (data ?? []).map(rowToWorkspace);
+}
+
+export async function getWorkspaceById(id: string): Promise<Workspace | null> {
+  const db = getDb();
+  const { data, error } = await db.from('workspaces').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data ? rowToWorkspace(data) : null;
 }
 
 export async function addActivity(actor: string, action: string, target: string, entityType: any, entityId: string): Promise<ActivityItem> {

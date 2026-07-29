@@ -6,7 +6,26 @@
 // trọng số dồn cho các dòng con còn lại TRONG CÙNG NHÓM. Nếu cả nhóm không có dòng con nào
 // khả dụng (vd chưa truyền campaign nên không chấm được Audience Fit), trọng số của cả nhóm
 // dồn sang các nhóm khác — không tự ý gán điểm trung tính giả cho một nhóm rỗng.
-import { Creator, Campaign, CreatorScoreBreakdown } from './types';
+import { Creator, Campaign, CreatorScoreBreakdown, CreatorGmvTier, WorkspaceScoringCriteria } from './types';
+
+// Dùng khi workspace chưa tự cấu hình Sourcing Criteria trong Settings — đúng số trong file
+// d'Alba Onboarding.xlsx (Workflow!D22) tại thời điểm viết nhóm này.
+// gpmFloor/gpmIdeal: file nguồn không cho mốc cụ thể — đây là ước lượng đặt tạm (GPM = GMV/
+// 1000 views, đơn vị USD) để nhóm GMV Performance không bị bỏ trống hoàn toàn; SỬA lại trong
+// Settings > Sourcing Scoring Criteria ngay khi có số benchmark gpm thật từ Kalodata.
+const DEFAULT_SCORING_CRITERIA: WorkspaceScoringCriteria = {
+  gmvTierTarget: 'L3',
+  gpmFloor: 5,
+  gpmIdeal: 15,
+  genderFemaleFloor: 60,
+  genderFemaleIdeal: 80,
+  beautyCategoryRatioFloor: 70,
+  beautyCategoryRatioIdeal: 80,
+  avgViewsFloor: 800,
+  avgViewsIdeal: 900,
+  preferredAgeGroup: '35-44',
+  highFollowerNoAffiliateThreshold: 100000,
+};
 
 interface ScoreItem {
   key: string;
@@ -33,14 +52,6 @@ function clamp01(n: number): number {
   return Math.max(0, Math.min(1, n));
 }
 
-// So creator với benchmark chính chủ TikTok trả về — value >= 1.5x benchmark thì full điểm.
-function benchmarkRatioScore(value: unknown, benchmark: unknown): number | undefined {
-  const v = toNumber(value);
-  const b = toNumber(benchmark);
-  if (v === undefined || b === undefined || b <= 0) return undefined;
-  return clamp01(v / (b * 1.5));
-}
-
 function followerTierScore(followers: number | undefined): number | null {
   if (followers === undefined) return null;
   if (followers < 1000) return 0.3;
@@ -51,22 +62,6 @@ function followerTierScore(followers: number | undefined): number | null {
   return 0.75;
 }
 
-function postingConsistencyScore(freq30d: number | undefined): number | null {
-  if (freq30d === undefined) return null;
-  if (freq30d < 2) return 0.1;
-  if (freq30d < 8) return 0.1 + ((freq30d - 2) / 6) * 0.9;
-  if (freq30d <= 30) return 1.0;
-  if (freq30d <= 60) return 1.0 - ((freq30d - 30) / 30) * 0.5;
-  return 0.3;
-}
-
-function viewStabilityScore(maxMinRatio: number | undefined): number | null {
-  if (maxMinRatio === undefined) return null;
-  if (maxMinRatio <= 3) return 1.0;
-  if (maxMinRatio >= 20) return 0;
-  return clamp01(1 - (maxMinRatio - 3) / 17);
-}
-
 function niceOverlapScore(list: string[] | undefined, targets: string[]): number | null {
   if (!list || list.length === 0 || targets.length === 0) return null;
   const normTargets = targets.map(t => t.toLowerCase());
@@ -74,22 +69,39 @@ function niceOverlapScore(list: string[] | undefined, targets: string[]): number
   return clamp01(matched / targets.length);
 }
 
-function buildGroups(creator: Creator, campaign?: Campaign): ScoreGroup[] {
+// Tiêu chí d'Alba viết theo kiểu "đạt/không đạt ngưỡng" (toàn các mốc %), không phải so
+// liên tục với benchmark ngành — 0 dưới floor, 100% (1.0) từ ideal trở lên, tuyến tính ở giữa.
+function bandScore(value: number, floor: number, ideal: number): number {
+  if (ideal === floor) return value >= ideal ? 1 : 0;
+  if (value < floor) return 0;
+  if (value >= ideal) return 1;
+  return (value - floor) / (ideal - floor);
+}
+
+const GMV_TIER_ORDER: CreatorGmvTier[] = ['L1', 'L2', 'L3', 'L4'];
+
+// Không phải "càng cao càng tốt" — d'Alba nhắm đúng tier mục tiêu (mặc định L3), tier càng
+// xa mục tiêu (theo cả 2 hướng) thì điểm càng thấp.
+function gmvTierFitScore(tier: CreatorGmvTier | undefined, target: CreatorGmvTier | undefined): number | null {
+  if (!tier || !target) return null;
+  const idx = GMV_TIER_ORDER.indexOf(tier);
+  const targetIdx = GMV_TIER_ORDER.indexOf(target);
+  if (idx === -1 || targetIdx === -1) return null;
+  const distance = Math.abs(idx - targetIdx);
+  if (distance === 0) return 1;
+  if (distance === 1) return 0.65;
+  return 0.3;
+}
+
+// Content Performance/Ops Reliability (dựa TikTok One benchmark) đã bị xóa; thay bằng 3
+// nhóm dưới đây theo đúng tiêu chí sourcing thật của d'Alba (Workflow!D22): GMV Performance,
+// Audience Profile Fit, Reach Consistency. Follower Tier vẫn dùng field followers chung,
+// không phụ thuộc nguồn nào.
+function buildGroups(creator: Creator, campaign?: Campaign, criteria: WorkspaceScoringCriteria = DEFAULT_SCORING_CRITERIA): ScoreGroup[] {
   const followers = toNumber(creator.followers);
-  const maxMinRatio = toNumber(creator.maxMinRatio);
   const targetAudience = campaign?.targetAudience;
 
   const groups: ScoreGroup[] = [
-    {
-      key: 'content',
-      label: 'Content Performance',
-      weightPct: 30,
-      items: [
-        { key: 'engagementRate', label: 'Engagement rate vs benchmark', weightPct: 12, value: benchmarkRatioScore(creator.engagementRate, creator.engagementRateBenchmark) ?? null },
-        { key: 'sixSecondViewRate', label: '6s view rate vs benchmark', weightPct: 9, value: benchmarkRatioScore(creator.sixSecondViewRate, creator.sixSecondViewRateBenchmark) ?? null },
-        { key: 'medianViews', label: 'Median views vs benchmark', weightPct: 9, value: benchmarkRatioScore(creator.medianViews, creator.medianViewsBenchmark) ?? null },
-      ],
-    },
     {
       key: 'followerTier',
       label: 'Follower Tier',
@@ -98,19 +110,59 @@ function buildGroups(creator: Creator, campaign?: Campaign): ScoreGroup[] {
         { key: 'tier', label: 'Follower tier', weightPct: 10, value: followerTierScore(followers) },
       ],
     },
-    {
-      key: 'ops',
-      label: 'Ops Reliability',
-      weightPct: 20,
-      items: [
-        { key: 'postingConsistency', label: 'Posting frequency consistency', weightPct: 10, value: postingConsistencyScore(toNumber(creator.postingFrequency30d)) },
-        { key: 'viewStability', label: 'View stability (not one-hit-wonder)', weightPct: 10, value: viewStabilityScore(maxMinRatio) },
-      ],
-    },
   ];
 
-  // Niche Fit và Audience Fit chỉ chấm được khi có campaign để so khớp — không có campaign
-  // thì bỏ hẳn 2 nhóm này, KHÔNG gán điểm trung tính giả, trọng số dồn sang nhóm khác.
+  // GMV Performance — có so target GMV tier + gpm theo band, cả 2 lấy từ Kalodata import,
+  // không phụ thuộc campaign nào.
+  const gmvItems: ScoreItem[] = [
+    { key: 'gmvTier', label: `GMV tier so target ${criteria.gmvTierTarget || 'L3'}`, weightPct: 20, value: gmvTierFitScore(creator.gmvTier, criteria.gmvTierTarget) },
+  ];
+  const gpm = toNumber(creator.gpm);
+  if (gpm !== undefined && criteria.gpmFloor != null && criteria.gpmIdeal != null) {
+    gmvItems.push({ key: 'gpm', label: 'GPM (GMV/1000 views, USD)', weightPct: 15, value: bandScore(gpm, criteria.gpmFloor, criteria.gpmIdeal) });
+  }
+  groups.push({ key: 'gmvPerformance', label: 'GMV Performance', weightPct: 35, items: gmvItems });
+
+  // Audience Profile Fit — đối chiếu demographics thật của creator với chân dung audience
+  // d'Alba nhắm tới (nữ, beauty/personal care, ưu tiên 35-44), KHÔNG phải Audience Fit theo
+  // targetAudience của 1 campaign cụ thể (nhóm 'audience' phía dưới vẫn giữ nguyên riêng).
+  const audienceProfileItems: ScoreItem[] = [];
+  const genderFemale = toNumber(creator.demographics?.genderFemale);
+  if (genderFemale !== undefined && criteria.genderFemaleFloor != null && criteria.genderFemaleIdeal != null) {
+    audienceProfileItems.push({ key: 'genderFemale', label: '% nữ trong audience', weightPct: 12, value: bandScore(genderFemale, criteria.genderFemaleFloor, criteria.genderFemaleIdeal) });
+  }
+  const beautyRatio = toNumber(creator.beautyCategoryRatio);
+  if (beautyRatio !== undefined && criteria.beautyCategoryRatioFloor != null && criteria.beautyCategoryRatioIdeal != null) {
+    audienceProfileItems.push({ key: 'beautyCategoryRatio', label: '% nội dung beauty/personal care', weightPct: 12, value: bandScore(beautyRatio, criteria.beautyCategoryRatioFloor, criteria.beautyCategoryRatioIdeal) });
+  }
+  const preferredAgePct = criteria.preferredAgeGroup
+    ? creator.demographics?.ageDistribution?.find(a => a.name === criteria.preferredAgeGroup)?.value
+    : undefined;
+  if (preferredAgePct !== undefined) {
+    // d'Alba chỉ nói "ưu tiên" tuổi 35-44, không phải ngưỡng loại cứng — chấm như điểm
+    // thưởng liên tục (% càng cao trong nhóm tuổi này càng tốt), không dùng bandScore floor/ideal.
+    audienceProfileItems.push({ key: 'preferredAge', label: `% audience ở nhóm tuổi ưu tiên (${criteria.preferredAgeGroup})`, weightPct: 6, value: clamp01(preferredAgePct / 100) });
+  }
+  if (audienceProfileItems.length > 0) {
+    groups.push({ key: 'audienceProfileFit', label: 'Audience Profile Fit', weightPct: 30, items: audienceProfileItems });
+  }
+
+  // Reach Consistency — avgViews theo band mốc d'Alba muốn (800-900+ view/video).
+  const avgViews = toNumber(creator.avgViews);
+  if (avgViews !== undefined && criteria.avgViewsFloor != null && criteria.avgViewsIdeal != null) {
+    groups.push({
+      key: 'reachConsistency',
+      label: 'Reach Consistency',
+      weightPct: 20,
+      items: [
+        { key: 'avgViews', label: 'Avg views/video', weightPct: 20, value: bandScore(avgViews, criteria.avgViewsFloor, criteria.avgViewsIdeal) },
+      ],
+    });
+  }
+
+  // Niche Fit và Audience Fit (theo campaign) chỉ chấm được khi có campaign để so khớp —
+  // không có campaign thì bỏ hẳn 2 nhóm này, KHÔNG gán điểm trung tính giả, trọng số dồn
+  // sang nhóm khác.
   if (campaign) {
     groups.push({
       key: 'niche',
@@ -162,9 +214,10 @@ function buildGroups(creator: Creator, campaign?: Campaign): ScoreGroup[] {
   return groups;
 }
 
-function computeRiskFlags(creator: Creator): { flags: string[]; penalty: number } {
+function computeRiskFlags(creator: Creator, criteria: WorkspaceScoringCriteria = DEFAULT_SCORING_CRITERIA): { flags: string[]; penalty: number } {
   const flags: string[] = [];
   const maxMinRatio = toNumber(creator.maxMinRatio);
+  const followers = toNumber(creator.followers);
 
   if (creator.lastVideoDate) {
     const daysSince = (Date.parse(new Date().toISOString()) - Date.parse(creator.lastVideoDate)) / 86400000;
@@ -172,12 +225,18 @@ function computeRiskFlags(creator: Creator): { flags: string[]; penalty: number 
   }
   if (maxMinRatio !== undefined && maxMinRatio > 15) flags.push('View performance depends heavily on a single viral video');
   if ((!creator.niche || creator.niche.length === 0) && !creator.category) flags.push('No niche/category recorded');
+  // Eligibility gate d'Alba: follower cao nhưng chưa từng chứng minh được GMV affiliate —
+  // rủi ro sourcing (nổi tiếng nhưng chưa chắc bán được hàng affiliate), không loại hẳn khỏi
+  // list, chỉ đánh dấu risk flag như các flag khác trong hàm này.
+  if (creator.hasAffiliateGmv === false && followers !== undefined && criteria.highFollowerNoAffiliateThreshold != null && followers >= criteria.highFollowerNoAffiliateThreshold) {
+    flags.push('High follower count but no proven affiliate GMV yet');
+  }
 
   return { flags, penalty: Math.min(15, flags.length * 5) };
 }
 
-export function scoreCreator(creator: Creator, campaign?: Campaign): CreatorScoreBreakdown {
-  const groups = buildGroups(creator, campaign);
+export function scoreCreator(creator: Creator, campaign?: Campaign, criteria: WorkspaceScoringCriteria = DEFAULT_SCORING_CRITERIA): CreatorScoreBreakdown {
+  const groups = buildGroups(creator, campaign, criteria);
 
   const groupResults = groups.map(g => {
     const available = g.items.filter(i => i.value !== null);
@@ -194,7 +253,7 @@ export function scoreCreator(creator: Creator, campaign?: Campaign): CreatorScor
     ? usableGroups.reduce((s, g) => s + (g.scorePct as number) * g.weightPct, 0) / usableWeight
     : 0;
 
-  const { flags, penalty } = computeRiskFlags(creator);
+  const { flags, penalty } = computeRiskFlags(creator, criteria);
   const totalScore = Math.round(clamp01((weightedScore - penalty) / 100) * 100);
 
   // A creator with zero scorable fields (not yet scraped/enriched) must not read the same

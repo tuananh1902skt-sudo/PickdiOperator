@@ -2,10 +2,54 @@ import React, { useEffect, useState } from 'react';
 import { X, Play, Sparkles, CheckCircle2, AlertTriangle, RefreshCw, ThumbsUp, RotateCcw, HelpCircle } from 'lucide-react';
 import { DraftReview } from '../../types';
 
+type Checklist = NonNullable<DraftReview['checklist']>;
+type ChecklistKey = keyof Checklist;
+
+const CHECKLIST_ITEMS: { key: ChecklistKey; label: string }[] = [
+  { key: 'productNameCorrect', label: 'Tên sản phẩm nhắc đúng' },
+  { key: 'ingredientsBenefitsCorrect', label: 'Thành phần/công dụng nói đúng' },
+  { key: 'durationValid', label: 'Độ dài video hợp lý (30-90 giây)' },
+  { key: 'hookIn3Seconds', label: 'Có hook trong 3 giây đầu' },
+  { key: 'matchesBrief', label: 'Đúng theo brief đã gửi' },
+];
+
+// Click cycles chưa xét (undefined) -> đạt (true) -> không đạt (false) -> chưa xét.
+const nextChecklistValue = (value: boolean | undefined): boolean | undefined => {
+  if (value === undefined) return true;
+  if (value === true) return false;
+  return undefined;
+};
+
+// Creator gửi draft qua link Drive (xem Phần 7 export "Link Drive") — Drive cho embed trực
+// tiếp qua /preview, không cần API key. Video file trực tiếp (.mp4...) dùng thẻ <video> chuẩn.
+// Các link khác (TikTok, Dropbox share link thường...) chặn iframe (X-Frame-Options) nên không
+// đoán embed được — vẫn phải mở tab mới cho các trường hợp đó.
+type EmbeddablePlayer = { type: 'drive' | 'file'; src: string } | null;
+
+function getEmbeddablePlayer(url?: string): EmbeddablePlayer {
+  if (!url) return null;
+
+  const driveMatch = url.match(/drive\.google\.com\/file\/d\/([^/]+)/) || url.match(/[?&]id=([^&]+)/);
+  if (url.includes('drive.google.com') && driveMatch) {
+    return { type: 'drive', src: `https://drive.google.com/file/d/${driveMatch[1]}/preview` };
+  }
+
+  if (/\.(mp4|mov|webm|m4v)(\?.*)?$/i.test(url)) {
+    return { type: 'file', src: url };
+  }
+
+  return null;
+}
+
 interface ReviewDetailModalProps {
   review: DraftReview | null;
   onClose: () => void;
-  onUpdateStatus: (reviewId: string, status: 'Approved' | 'Revision Requested' | 'Rejected', feedback?: string) => void;
+  onUpdateStatus: (
+    reviewId: string,
+    status: 'Approved' | 'Revision Requested' | 'Rejected',
+    feedback?: string,
+    checklist?: Checklist
+  ) => void;
 }
 
 export const ReviewDetailModal: React.FC<ReviewDetailModalProps> = ({
@@ -14,17 +58,27 @@ export const ReviewDetailModal: React.FC<ReviewDetailModalProps> = ({
   onUpdateStatus
 }) => {
   const [feedback, setFeedback] = useState('');
+  const [checklist, setChecklist] = useState<Checklist>({});
   const [aiChecking, setAiChecking] = useState(false);
   const [aiReviewResult, setAiReviewResult] = useState<any>(null);
+  const [isPlayingInline, setIsPlayingInline] = useState(false);
 
   // This modal stays mounted and just swaps `review` — clear the previous
   // review's draft feedback and AI result so they don't leak into the next one.
   useEffect(() => {
     setFeedback('');
+    setChecklist(review?.checklist ?? {});
     setAiReviewResult(null);
+    setIsPlayingInline(false);
   }, [review?.id]);
 
   if (!review) return null;
+
+  const embeddablePlayer = getEmbeddablePlayer(review.draftUrl);
+
+  const toggleChecklistItem = (key: ChecklistKey) => {
+    setChecklist(prev => ({ ...prev, [key]: nextChecklistValue(prev[key]) }));
+  };
 
   const handleRunAiCheck = async () => {
     setAiChecking(true);
@@ -77,18 +131,49 @@ export const ReviewDetailModal: React.FC<ReviewDetailModalProps> = ({
             {/* Video Player Card */}
             <div className="space-y-3">
               <div className="relative aspect-[9/16] bg-slate-950 rounded-2xl overflow-hidden flex items-center justify-center group shadow-md">
-                <img
-                  src={review.thumbnailUrl}
-                  alt={review.videoTitle}
-                  className="w-full h-full object-cover opacity-80 group-hover:scale-105 transition-transform duration-300"
-                />
-                <div className="absolute inset-0 bg-slate-900/40 flex flex-col items-center justify-center p-4 text-center text-white">
-                  <div className="w-12 h-12 rounded-full bg-indigo-600/90 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                    <Play className="w-6 h-6 text-white fill-white ml-1" />
-                  </div>
-                  <span className="text-xs font-bold mt-2">{review.videoTitle}</span>
-                  <span className="text-[10px] text-slate-300 font-mono mt-1">{review.durationSeconds}s duration</span>
-                </div>
+                {isPlayingInline && embeddablePlayer?.type === 'drive' && (
+                  <iframe
+                    src={embeddablePlayer.src}
+                    className="w-full h-full border-0"
+                    allow="autoplay"
+                    allowFullScreen
+                    title={review.videoTitle}
+                  />
+                )}
+                {isPlayingInline && embeddablePlayer?.type === 'file' && (
+                  <video
+                    src={embeddablePlayer.src}
+                    className="w-full h-full object-contain bg-black"
+                    controls
+                    autoPlay
+                  />
+                )}
+                {!isPlayingInline && (
+                  <>
+                    <img
+                      src={review.thumbnailUrl}
+                      alt={review.videoTitle}
+                      className="w-full h-full object-cover opacity-80 group-hover:scale-105 transition-transform duration-300"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => embeddablePlayer && setIsPlayingInline(true)}
+                      disabled={!embeddablePlayer}
+                      className="absolute inset-0 bg-slate-900/40 flex flex-col items-center justify-center p-4 text-center text-white disabled:cursor-not-allowed"
+                    >
+                      <div className="w-12 h-12 rounded-full bg-indigo-600/90 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                        <Play className="w-6 h-6 text-white fill-white ml-1" />
+                      </div>
+                      <span className="text-xs font-bold mt-2">{review.videoTitle}</span>
+                      <span className="text-[10px] text-slate-300 font-mono mt-1">{review.durationSeconds}s duration</span>
+                      {!embeddablePlayer && (
+                        <span className="text-[10px] text-amber-300 font-semibold mt-2">
+                          Không phát được trong app — dùng nút "Open Draft Video in New Tab" bên dưới
+                        </span>
+                      )}
+                    </button>
+                  </>
+                )}
               </div>
 
               <a
@@ -105,25 +190,25 @@ export const ReviewDetailModal: React.FC<ReviewDetailModalProps> = ({
             <div className="space-y-4">
               <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 space-y-2">
                 <h4 className="font-bold text-slate-900 dark:text-white text-xs uppercase tracking-wider">
-                  Brand Policy Compliance Check
+                  Checklist duyệt video (d'Alba)
                 </h4>
 
                 <div className="space-y-1.5 text-[11px]">
-                  {[
-                    { key: 'linkCorrect', label: 'TikTok Shop product link pinned in bio & video' },
-                    { key: 'productVisible', label: 'Brand logo & product visible in first 3 seconds' },
-                    { key: 'ctaPresent', label: 'Clear call-to-action to click orange basket' },
-                    { key: 'compliance', label: 'FTC #ad disclosure present in caption' }
-                  ].map(item => {
-                    const value = review.checklist?.[item.key as keyof NonNullable<typeof review.checklist>];
+                  {CHECKLIST_ITEMS.map(item => {
+                    const value = checklist[item.key];
                     const Icon = value === true ? CheckCircle2 : value === false ? AlertTriangle : HelpCircle;
                     const colorClass =
                       value === true ? 'text-emerald-600' : value === false ? 'text-rose-600' : 'text-slate-400';
                     return (
-                      <div key={item.key} className={`flex items-center gap-2 font-semibold ${colorClass}`}>
+                      <button
+                        type="button"
+                        key={item.key}
+                        onClick={() => toggleChecklistItem(item.key)}
+                        className={`w-full flex items-center gap-2 font-semibold text-left rounded-lg px-1.5 py-1 hover:bg-slate-100 dark:hover:bg-slate-800 ${colorClass}`}
+                      >
                         <Icon className="w-4 h-4 shrink-0" />
-                        <span>{item.label}{value === undefined ? ' (not yet checked)' : ''}</span>
-                      </div>
+                        <span>{item.label}{value === undefined ? ' (chưa xét)' : ''}</span>
+                      </button>
                     );
                   })}
                 </div>
@@ -198,7 +283,7 @@ export const ReviewDetailModal: React.FC<ReviewDetailModalProps> = ({
           <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
             <button
               type="button"
-              onClick={() => onUpdateStatus(review.id, 'Rejected', feedback)}
+              onClick={() => onUpdateStatus(review.id, 'Rejected', feedback, checklist)}
               className="px-4 py-2 bg-rose-50 text-rose-700 font-bold rounded-xl border border-rose-200 hover:bg-rose-100"
             >
               Reject Video
@@ -207,7 +292,7 @@ export const ReviewDetailModal: React.FC<ReviewDetailModalProps> = ({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => onUpdateStatus(review.id, 'Revision Requested', feedback)}
+                onClick={() => onUpdateStatus(review.id, 'Revision Requested', feedback, checklist)}
                 className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl shadow-xs flex items-center gap-1.5"
               >
                 <RotateCcw className="w-4 h-4" />
@@ -216,7 +301,7 @@ export const ReviewDetailModal: React.FC<ReviewDetailModalProps> = ({
 
               <button
                 type="button"
-                onClick={() => onUpdateStatus(review.id, 'Approved', feedback)}
+                onClick={() => onUpdateStatus(review.id, 'Approved', feedback, checklist)}
                 className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-xs flex items-center gap-1.5"
               >
                 <ThumbsUp className="w-4 h-4" />

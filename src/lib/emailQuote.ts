@@ -40,6 +40,48 @@ function normalizeWhitespace(text: string): string {
     .trim();
 }
 
+// Token liên hệ (URL, email, số điện thoại) — nhiều signature email lặp lại cùng 1 giá
+// trị nhiều lần liền nhau (icon + text cùng trỏ tới 1 tel:/mailto: href được convert
+// riêng rẽ từ HTML) khiến nội dung dồn cục, khó đọc.
+const CONTACT_TOKEN_RE = /<?(https?:\/\/[^\s<>]+|[\w.+-]+@[\w-]+\.[\w.-]{2,}|\+?\d[\d\s().-]{6,}\d)>?/g;
+
+const normalizeContactToken = (token: string): string =>
+  token.replace(/^[<(]+|[>)]+$/g, '').replace(/[\s().-]/g, '').toLowerCase();
+
+/**
+ * Gộp các token liên hệ (SĐT/email/URL) lặp lại liên tiếp — thường do HTML signature
+ * render cùng 1 giá trị 2-3 lần dưới các dạng khác nhau (plain text, <tel:...>, <https:...>)
+ * — về 1 lần duy nhất, đồng thời tách mỗi token ra dòng riêng và bỏ dấu <> thừa để phần
+ * chữ ký (tên, công ty, email, SĐT, website) dễ đọc thay vì dồn thành 1 dòng dài.
+ */
+function collapseRepeatedContactTokens(text: string): string {
+  const matches = [...text.matchAll(CONTACT_TOKEN_RE)];
+  if (matches.length === 0) return text;
+
+  let result = '';
+  let cursor = 0;
+  let lastNormalized: string | null = null;
+
+  for (const match of matches) {
+    const start = match.index!;
+    const bare = match[1];
+    const normalized = normalizeContactToken(bare);
+    const between = text.slice(cursor, start);
+
+    if (normalized === lastNormalized && /^[\s\-–—,;]*$/.test(between)) {
+      // Cùng giá trị với token ngay trước, chỉ cách nhau bởi khoảng trắng/dấu gạch nối
+      // -> bỏ qua bản lặp và phần nối giữa hai token.
+    } else {
+      const separator = between.replace(/[ \t]*$/, between.trim() ? '\n' : (cursor === 0 ? '' : '\n'));
+      result += separator + bare;
+      lastNormalized = normalized;
+    }
+    cursor = start + match[0].length;
+  }
+  result += text.slice(cursor);
+  return result;
+}
+
 // Chữ ký/quote hay gặp mà email-reply-parser (thư viện EN-first, không có locale
 // tiếng Việt) không nhận diện được — chạy TRƯỚC khi đưa vào thư viện.
 const PRE_LIB_PATTERNS: RegExp[] = [
@@ -80,6 +122,8 @@ export function stripQuotedReply(text: string): string {
     // Thư viện lỗi (input bất thường) — giữ nguyên bản đã lọc ở bước heuristic trên.
   }
 
+  cleaned = normalizeWhitespace(cleaned);
+  cleaned = collapseRepeatedContactTokens(cleaned);
   cleaned = normalizeWhitespace(cleaned);
 
   // Giới hạn kết quả tối đa 5000 ký tự

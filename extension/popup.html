@@ -13,43 +13,73 @@
     button:hover { background: #4338ca; }
     button.secondary { background: #111827; margin-top: 6px; }
     button.secondary:hover { background: #000; }
-    #findStatus, #detailStatus, #engagementStatus { margin-top: 8px; font-size: 11px; color: #374151; word-break: break-word; }
+    #findStatus, #detailStatus, #autoScanStatus, #engagementStatus { margin-top: 8px; font-size: 11px; color: #374151; word-break: break-word; }
+    button.accent { background: #059669; }
+    button.accent:hover { background: #047857; }
     hr { border: none; border-top: 1px solid #e5e7eb; margin: 14px 0; }
   </style>
 </head>
 <body>
-  <h3>⚡ Pickdi TikTok One Scraper</h3>
+  <h3>⚡ Pickdi TCM Creator Scraper</h3>
 
   <label>Webapp URL:</label>
   <input type="text" id="webappUrl" placeholder="http://localhost:3000">
 
   <hr>
 
-  <label>🔍 Tìm creator qua TikTok One</label>
+  <label>🔍 Import creator từ TCM (Affiliate Center)</label>
+  <p style="font-size:11px; color:#6b7280; margin:2px 0 8px 0; line-height:1.4;">
+    Mở trang Find Creators trên affiliate-us.tiktok.com, tự cuộn/chuyển trang qua danh sách
+    creator bạn muốn (extension âm thầm bắt data khi bạn thao tác), rồi bấm nút bên dưới để
+    đẩy toàn bộ những gì đã bắt được lên Pickdi — đã tự kèm luôn PPS, GMV/units sold, Video &amp;
+    LIVE GPM cho MỌI creator trong danh sách, không cần mở từng trang chi tiết. Sample score,
+    Collaboration metrics và % demographics đầy đủ thì vẫn cần mở trang chi tiết từng creator
+    (mục bên dưới) vì TCM chỉ tính các số đó khi bạn thực sự mở trang.
+  </p>
   <div class="row">
     <input type="number" id="followerMin" placeholder="Follower min">
     <input type="number" id="followerMax" placeholder="Follower max">
   </div>
-  <div class="row">
-    <input type="number" id="budgetMin" placeholder="Budget min $">
-    <input type="number" id="budgetMax" placeholder="Budget max $">
-  </div>
-  <input type="text" id="keyword" placeholder="Từ khoá (vd: skincare)">
-  <label style="font-weight:normal; display:flex; align-items:center; gap:6px; margin:6px 0;">
-    <input type="checkbox" id="fetchFullDetail" style="width:auto; margin:0;">
-    Lấy luôn chi tiết đầy đủ (chậm hơn — mở lần lượt từng profile)
-  </label>
-  <button id="findCreatorsBtn">🔍 Tìm creator</button>
+  <input type="text" id="keyword" placeholder="Lọc theo handle/nickname/ngành hàng">
+  <button id="findCreatorsBtn">⬆️ Import creator đã bắt được</button>
   <div id="findStatus"></div>
+
+  <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin-top:10px; cursor:pointer;">
+    <input type="checkbox" id="autoDetailCheckbox" style="width:auto; margin:0;">
+    🤖 Sau khi import, tự mở tab ẩn lấy chi tiết từng creator (chạy nền, chậm rãi)
+  </label>
+  <p style="font-size:10px; color:#9ca3af; margin:4px 0 8px 0; line-height:1.4;">
+    Tự mở lần lượt từng trang chi tiết ở tab ẩn (request thật do chính TCM tự ký, không giả
+    mạo) để lấy Sample score/Collaboration metrics/demographics — cách nhau 4-8s ngẫu nhiên,
+    tối đa <input type="number" id="autoDetailMax" value="20" min="1" max="100" style="width:44px; display:inline; padding:2px 4px; margin:0 2px;"> creator/lần.
+    Vẫn có thể bị TCM phát hiện là hành vi tự động — dùng thận trọng, có thể dừng bất kỳ lúc nào.
+  </p>
+  <div id="autoDetailQueueStatus" style="font-size:11px; color:#374151; word-break:break-word; margin-bottom:6px;"></div>
+  <button id="stopAutoDetailBtn" class="secondary" style="display:none;">⏹ Dừng hàng đợi</button>
 
   <hr>
 
-  <button id="pushDetailBtn" class="secondary">📋 Lấy chi tiết trang này</button>
+  <label>📋 Lấy chi tiết creator (khuyên dùng)</label>
+  <p style="font-size:11px; color:#6b7280; margin:2px 0 8px 0; line-height:1.4;">
+    Xác nhận qua recon thật: toàn bộ trang chi tiết (PPS/Sample score/Sales/Collaboration
+    metrics/Video/LIVE) chỉ 1 request duy nhất khi trang vừa mở — KHÔNG cần click qua tab nào.
+    Chỉ cần mở trang chi tiết 1 creator trên TCM, đợi ~1-2 giây cho trang load xong, rồi bấm
+    nút này.
+  </p>
+  <button id="pushDetailBtn" class="accent">📋 Lấy chi tiết trang này</button>
   <div id="detailStatus"></div>
+
+  <p style="font-size:11px; color:#6b7280; margin:10px 0 8px 0; line-height:1.4;">
+    Followers demographics (Gender/Age) đôi khi load riêng khi cuộn tới — nếu nút trên chưa bắt
+    được, thử nút dưới (tự cuộn/bấm qua các tab để kích hoạt) trước khi bấm lại nút trên.
+  </p>
+  <button id="autoScanBtn" class="secondary">🚀 Auto quét qua các tab (dự phòng)</button>
+  <div id="autoScanStatus"></div>
 
   <button id="pushEngagementBtn" class="secondary">📊 Lấy engagement (tiktok.com)</button>
   <div id="engagementStatus"></div>
 
+  <script src="shared.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

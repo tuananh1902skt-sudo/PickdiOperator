@@ -15,17 +15,17 @@ import { Message, Conversation, CheckInboxResult, UnmatchedInboundEmail } from '
 export async function checkInboxForReplies(): Promise<CheckInboxResult> {
   const config = await getEmailConfig();
 
-  if (!config.gmailUser || !config.appPassword) {
-    throw new Error('Gmail chưa được cấu hình — vào Settings > Email để thiết lập');
+  if (!config.email || !config.password || !config.imapHost || !config.imapPort) {
+    throw new Error('Email chưa được cấu hình đủ — vào Settings > Email để thiết lập');
   }
 
   const client = new ImapFlow({
-    host: 'imap.gmail.com',
-    port: 993,
+    host: config.imapHost,
+    port: config.imapPort,
     secure: true,
     auth: {
-      user: config.gmailUser,
-      pass: config.appPassword,
+      user: config.email,
+      pass: config.password,
     },
     logger: false,
   });
@@ -97,7 +97,7 @@ export async function checkInboxForReplies(): Promise<CheckInboxResult> {
 
       // Step 1 — Early exclusions (before trying to match)
       // Ignore emails sent by our own Gmail account
-      if (senderEmail && senderEmail === config.gmailUser.toLowerCase().trim()) {
+      if (senderEmail && senderEmail === config.email.toLowerCase().trim()) {
         continue;
       }
 

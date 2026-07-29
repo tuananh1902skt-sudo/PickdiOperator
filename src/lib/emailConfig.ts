@@ -1,15 +1,27 @@
 import { getAppConfig, setAppConfig } from '../db';
 
 export interface EmailConfig {
-  gmailUser: string;
-  appPassword: string;
+  email: string;
+  password: string;
+  imapHost: string;
+  imapPort: number | null;
+  smtpHost: string;
+  smtpPort: number | null;
+  smtpSecure?: boolean;
   brand?: string;
   product?: string;
   lastImapUid?: number;
 }
 
 const CONFIG_KEY = 'emailConfig';
-const EMPTY: EmailConfig = { gmailUser: '', appPassword: '' };
+const EMPTY: EmailConfig = {
+  email: '',
+  password: '',
+  imapHost: '',
+  imapPort: null,
+  smtpHost: '',
+  smtpPort: null,
+};
 
 export async function getEmailConfig(): Promise<EmailConfig> {
   try {
@@ -24,8 +36,13 @@ export async function saveEmailConfig(partial: Partial<EmailConfig>): Promise<Em
   const current = await getEmailConfig();
 
   const updated: EmailConfig = {
-    gmailUser: partial.gmailUser !== undefined ? partial.gmailUser : current.gmailUser,
-    appPassword: (partial.appPassword && partial.appPassword.trim() !== '') ? partial.appPassword : current.appPassword,
+    email: partial.email !== undefined ? partial.email : current.email,
+    password: (partial.password && partial.password.trim() !== '') ? partial.password : current.password,
+    imapHost: partial.imapHost !== undefined ? partial.imapHost : current.imapHost,
+    imapPort: partial.imapPort !== undefined ? partial.imapPort : current.imapPort,
+    smtpHost: partial.smtpHost !== undefined ? partial.smtpHost : current.smtpHost,
+    smtpPort: partial.smtpPort !== undefined ? partial.smtpPort : current.smtpPort,
+    smtpSecure: partial.smtpSecure !== undefined ? partial.smtpSecure : current.smtpSecure,
     brand: partial.brand !== undefined ? partial.brand : current.brand,
     product: partial.product !== undefined ? partial.product : current.product,
     lastImapUid: partial.lastImapUid !== undefined ? partial.lastImapUid : current.lastImapUid,

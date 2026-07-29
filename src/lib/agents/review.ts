@@ -26,12 +26,11 @@ Generate qualitative metadata evaluation in JSON format:
   "improvementSuggestions": "Actionable feedback for creator based on metadata",
   "recommendation": "APPROVED" | "REVISION_REQUIRED" | "REJECTED",
   "checklist": {
-    "productVisible": false,
-    "brandMentioned": false,
-    "ctaPresent": false,
-    "linkCorrect": false,
-    "compliance": false,
-    "hookQualityScore": 0
+    "productNameCorrect": false,
+    "ingredientsBenefitsCorrect": false,
+    "durationValid": false,
+    "hookIn3Seconds": false,
+    "matchesBrief": false
   },
   "analysisScope": "metadata-only"
 }`,

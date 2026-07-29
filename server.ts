@@ -41,6 +41,8 @@ import {
   ActivityItem,
   BulkOutreachJob,
   BulkOutreachItem,
+  CreatorCampaignAssignment,
+  PostedVideo,
 } from './src/types';
 import {
   INITIAL_WORKSPACES,
@@ -63,10 +65,10 @@ import {
   getAllCreators,
   getCreatorById,
   getCreatorByHandle,
-  findCreatorByHandleOrTikTokOneId,
   saveCreator,
   archiveCreator,
   getAllWorkspaces,
+  getWorkspaceById,
   saveWorkspace,
   getAllCampaigns,
   getCampaignById,
@@ -93,11 +95,15 @@ import {
   getUnmatchedInboundEmailById,
   saveUnmatchedInboundEmail,
   getAllAssignments,
+  getAssignmentById,
   saveAssignment,
   assignCreatorToCampaign,
   unassignCreatorFromCampaign,
   saveBulkOutreachJob,
   getBulkOutreachJobById,
+  getAllPostedVideos,
+  getPostedVideoById,
+  savePostedVideo,
 } from './src/db';
 
 dotenv.config();
@@ -119,10 +125,10 @@ function publicAppUrl(): string {
   return url.replace(/\/$/, '');
 }
 
-// Enable CORS for TikTok One scraper extension, local dev, and this app's own Cloud Run
-// deployment — the batch-import/update-detail routes come from a content script on
-// tiktok.com or the extension. APP_URL pins the exact deployed host instead of trusting
-// every *.run.app tenant on Cloud Run.
+// Enable CORS for creator-import sources (Kalodata/TCM extension, local dev, and this
+// app's own Cloud Run deployment) — the batch-import route can be called from a content
+// script or extension. APP_URL pins the exact deployed host instead of trusting every
+// *.run.app tenant on Cloud Run.
 const allowedOriginPatterns: RegExp[] = [
   /^https:\/\/(www\.)?tiktok\.com$/,
   /^https:\/\/ads\.tiktok\.com$/,
@@ -266,6 +272,11 @@ function isValidCreatorHandle(handleStr: string): boolean {
 
   const noiseList = ['profile', 'explore', 'search', 'select', 'filter', 'category', 'copyright', 'undefined', 'pickdi', 'keyword', 'recommended', 'tools', 'payment', 'sort', 'relevance'];
   if (noiseList.some(n => lower === n || lower.includes('undefined'))) return false;
+
+  // A scraper source coerced a non-string field (object/array) to string via String(x) — e.g.
+  // `[object Object]` — instead of throwing. Catch that failure mode here instead of letting
+  // it become a permanent garbage creator record.
+  if (lower.includes('[object object]') || lower.includes('[object array]')) return false;
 
   return true;
 }
@@ -453,12 +464,14 @@ app.delete('/api/creators/:id', async (req, res) => {
 });
 
 // ==========================================
-// ZERO-COST TIKTOK SCRAPER ENGINE ROUTES
+// CREATOR IMPORT ROUTES
 // ==========================================
 
-// 1. Webhook Endpoint for Extension & Scraper Script Sync
+// 1. Webhook Endpoint for Extension & Scraper Script Sync — receives creators from any
+// import source via item.metricsSource (Kalodata, TCM, CSV, etc.); source-specific field
+// mapping is added per-source as those integrations land.
 app.post('/api/creators/batch-import', async (req, res) => {
-  const { workspaceId, source, region, creators: batchList } = req.body;
+  const { workspaceId, source, region, metricsSource, creators: batchList } = req.body;
   if (!Array.isArray(batchList) || batchList.length === 0) {
     return res.status(400).json({ success: false, message: 'No valid creators provided in batch payload' });
   }
@@ -466,8 +479,10 @@ app.post('/api/creators/batch-import', async (req, res) => {
   let importedCount = 0;
   let updatedCount = 0;
   const avatarJobs: { creatorId: string; avatarUrl: string }[] = [];
+  const failedHandles: { handle: string; message: string }[] = [];
 
   for (const item of batchList as any[]) {
+   try {
     const rawHandle = (
       item.handle ||
       item.unique_id ||
@@ -490,7 +505,6 @@ app.post('/api/creators/batch-import', async (req, res) => {
     const targetWs = workspaceId || INITIAL_WORKSPACES[0]?.id;
     const countryName = item.country || region || (rawHandle.includes('_us') ? 'United States' : rawHandle.includes('_uk') ? 'United Kingdom' : undefined);
 
-    const scrapedTiktokOneId = item.tiktokOneId || item.creator_id || item.creator_o_id || item.star_id || item.user_id || undefined;
     const cleanDisplayName = sanitizeCreatorDisplayName(item.displayName || item.nickname || item.name || rawHandle, rawHandle);
 
     const scrapedFollowers = item.followers ?? item.follower_cnt ?? item.follower_count;
@@ -498,6 +512,8 @@ app.post('/api/creators/batch-import', async (req, res) => {
     const scrapedEngagement = item.engagementRate ?? item.engagement ?? item.engagement_rate;
     const scrapedGmv = item.gmv30d ?? item.e_commerce_gmv ?? item.gmv;
     const rawAvatar = item.avatar || item.avatar_thumb || item.head_url;
+    // d'Alba sourcing criteria (Kalodata import) — chỉ có khi import từ tab Kalodata.
+    const itemMetricsSource = metricsSource || item.metricsSource || undefined;
 
     if (existing) {
       if (rawAvatar && typeof rawAvatar === 'string' && rawAvatar.startsWith('http')) {
@@ -512,19 +528,34 @@ app.post('/api/creators/batch-import', async (req, res) => {
         ...existing,
         workspaceId: existing.workspaceId || targetWs,
         displayName: sanitizeCreatorDisplayName(existing.displayName, rawHandle),
-        avatar: (rawAvatar && rawAvatar.startsWith('/api/avatars/')) ? rawAvatar : existing.avatar,
-        tiktokOneId: scrapedTiktokOneId || existing.tiktokOneId,
+        avatar: (typeof rawAvatar === 'string' && rawAvatar.startsWith('/api/avatars/')) ? rawAvatar : existing.avatar,
         followers: toFiniteNumber(scrapedFollowers) ?? existing.followers,
         avgViews: toFiniteNumber(scrapedAvgViews) ?? existing.avgViews,
         engagementRate: toFiniteNumber(scrapedEngagement) ?? existing.engagementRate,
         gmv30d: toFiniteNumber(scrapedGmv) ?? existing.gmv30d,
         email: item.email || item.contact_email || existing.email,
         bio: item.bio || existing.bio,
+        category: (typeof item.category === 'string' && item.category) ? item.category : existing.category,
+        niche: (item.niche && (Array.isArray(item.niche) ? item.niche.length : String(item.niche).length))
+          ? (Array.isArray(item.niche) ? item.niche : String(item.niche).split(','))
+          : existing.niche,
         recentVideos: (item.recentVideos && item.recentVideos.length > 0) ? item.recentVideos : existing.recentVideos,
         demographics: item.demographics || existing.demographics,
-        scores: item.scores || existing.scores,
         followerGrowthRate: item.followerGrowthRate || existing.followerGrowthRate,
         postingFrequency30d: item.postingFrequency30d || existing.postingFrequency30d,
+        gpm: toFiniteNumber(item.gpm) ?? existing.gpm,
+        beautyCategoryRatio: toFiniteNumber(item.beautyCategoryRatio) ?? existing.beautyCategoryRatio,
+        hasAffiliateGmv: item.hasAffiliateGmv !== undefined ? item.hasAffiliateGmv : existing.hasAffiliateGmv,
+        // Chi tiết theo tab thật của TCM (PPS/Sample score/Sales/Collaboration/Video/LIVE) —
+        // popup.js đã chuẩn hoá đúng shape Creator, chỉ forward nguyên object, không parse lại.
+        pps: item.pps || existing.pps,
+        sampleScore: item.sampleScore || existing.sampleScore,
+        salesMetrics: item.salesMetrics || existing.salesMetrics,
+        collabMetrics: item.collabMetrics || existing.collabMetrics,
+        videoMetrics: item.videoMetrics || existing.videoMetrics,
+        liveMetrics: item.liveMetrics || existing.liveMetrics,
+        metricsSource: itemMetricsSource || existing.metricsSource,
+        metricsSyncedAt: itemMetricsSource ? new Date().toISOString() : existing.metricsSyncedAt,
         tags: Array.from(new Set([...(existing.tags || []), 'Scraper Enriched', source || 'Pickdi Extension'])),
         updatedAt: new Date().toISOString()
       };
@@ -543,18 +574,17 @@ app.post('/api/creators/batch-import', async (req, res) => {
         workspaceId: targetWs,
         handle: rawHandle,
         displayName: cleanDisplayName,
-        avatar: (rawAvatar && rawAvatar.startsWith('/api/avatars/')) ? rawAvatar : undefined,
+        avatar: (typeof rawAvatar === 'string' && rawAvatar.startsWith('/api/avatars/')) ? rawAvatar : undefined,
         platform: 'TikTok',
         country: countryName,
         language: countryName === 'United States' || countryName === 'United Kingdom' ? 'English' : (countryName ? 'Vietnamese' : undefined),
         bio: item.bio || '',
         profileUrl: item.profileUrl || `https://tiktok.com/@${rawHandle}`,
-        tiktokOneId: scrapedTiktokOneId,
         followers: toFiniteNumber(scrapedFollowers),
         avgViews: toFiniteNumber(scrapedAvgViews),
         engagementRate: toFiniteNumber(scrapedEngagement),
         gmv30d: toFiniteNumber(scrapedGmv),
-        category: item.category || undefined,
+        category: (typeof item.category === 'string' && item.category) ? item.category : undefined,
         niche: item.niche ? (Array.isArray(item.niche) ? item.niche : item.niche.split(',')) : undefined,
         brandFitScore: toFiniteNumber(item.brandFitScore),
         commercialScore: toFiniteNumber(item.commercialScore),
@@ -568,11 +598,26 @@ app.post('/api/creators/batch-import', async (req, res) => {
         notes: [],
         recentVideos: item.recentVideos || [],
         demographics: item.demographics || undefined,
-        scores: item.scores || undefined
+        gpm: toFiniteNumber(item.gpm),
+        beautyCategoryRatio: toFiniteNumber(item.beautyCategoryRatio),
+        hasAffiliateGmv: item.hasAffiliateGmv,
+        pps: item.pps || undefined,
+        sampleScore: item.sampleScore || undefined,
+        salesMetrics: item.salesMetrics || undefined,
+        collabMetrics: item.collabMetrics || undefined,
+        videoMetrics: item.videoMetrics || undefined,
+        liveMetrics: item.liveMetrics || undefined,
+        metricsSource: itemMetricsSource,
+        metricsSyncedAt: itemMetricsSource ? new Date().toISOString() : undefined
       };
       await applyScore(newCr, undefined);
       importedCount++;
     }
+   } catch (err: any) {
+    console.error('batch-import: failed to save one creator record:', err);
+    const failedHandle = (item && (item.handle || item.nickname || item.name)) || '(unknown)';
+    failedHandles.push({ handle: String(failedHandle), message: err && err.message ? String(err.message) : String(err) });
+   }
   }
 
   await normalizeCreatorStoreInDb(isValidCreatorHandle, sanitizeCreatorDisplayName);
@@ -590,12 +635,17 @@ app.post('/api/creators/batch-import', async (req, res) => {
     link: '/creators'
   });
 
+  const allFailed = failedHandles.length > 0 && importedCount === 0 && updatedCount === 0;
   res.json({
-    success: true,
+    success: !allFailed,
     importedCount,
     updatedCount,
+    failedCount: failedHandles.length,
+    failed: failedHandles,
     totalProcessed: batchList.length,
-    message: `Successfully processed ${batchList.length} creator records into workspace (${importedCount} new, ${updatedCount} enriched).`
+    message: allFailed
+      ? `Failed to save ${failedHandles.length} creator record(s): ${failedHandles[0].message}`
+      : `Successfully processed ${batchList.length} creator records into workspace (${importedCount} new, ${updatedCount} enriched)${failedHandles.length > 0 ? `, ${failedHandles.length} failed` : ''}.`
   });
 
   // Background non-blocking avatar downloads
@@ -620,145 +670,11 @@ app.post('/api/creators/batch-import', async (req, res) => {
   }
 });
 
-// TikTok One Detail Page Update Endpoint — chỉ set field khi extension thực sự scrape
-// được giá trị; field nào scrape không ra thì bỏ qua, KHÔNG đè bằng số/hằng số bịa và
-// KHÔNG xoá mất giá trị thật đã lưu trước đó.
-app.post('/api/creators/update-detail', async (req, res) => {
-  const { handle, tiktokOneId, detail } = req.body;
-  if (!handle && !tiktokOneId) {
-    return res.status(400).json({ status: 'error', message: 'Thiếu handle hoặc tiktokOneId' });
-  }
-
-  const creator = await findCreatorByHandleOrTikTokOneId(handle, tiktokOneId);
-
-  if (!creator) {
-    return res.status(404).json({ status: 'error', message: `Không tìm thấy creator @${handle} trong CRM` });
-  }
-
-  if (tiktokOneId) creator.tiktokOneId = tiktokOneId;
-
-  if (detail) {
-    if (detail.videoContentTag) creator.videoContentTag = detail.videoContentTag;
-    if (detail.industryTag) creator.industryTag = detail.industryTag;
-    if (detail.languagesSpoken) creator.language = detail.languagesSpoken;
-    if (detail.followerGrowthRate) creator.followerGrowthRate = detail.followerGrowthRate;
-    if (detail.postingFrequencyPer30Days != null) creator.postingFrequency30d = detail.postingFrequencyPer30Days;
-
-    if (detail.collabScore != null || detail.collabBroadcasting != null || detail.collabDiligence != null || detail.collabCommercial != null) {
-      creator.scores = {
-        ...creator.scores,
-        ...(detail.collabScore != null ? { overall: detail.collabScore } : {}),
-        ...(detail.collabBroadcasting != null ? { broadcasting: detail.collabBroadcasting } : {}),
-        ...(detail.collabDiligence != null ? { diligence: detail.collabDiligence } : {}),
-        ...(detail.collabCommercial != null ? { commercial: detail.collabCommercial } : {})
-      };
-    }
-
-    if (detail.medianViews) creator.medianViews = detail.medianViews;
-    if (detail.medianViewsBenchmark) creator.medianViewsBenchmark = detail.medianViewsBenchmark;
-    if (detail.sixSecondViewRate) creator.sixSecondViewRate = detail.sixSecondViewRate;
-    if (detail.sixSecondViewRateBenchmark) creator.sixSecondViewRateBenchmark = detail.sixSecondViewRateBenchmark;
-    if (detail.engagementRateContent) creator.engagementRate = parseFloat(detail.engagementRateContent) || creator.engagementRate;
-    if (detail.engagementRateBenchmark) creator.engagementRateBenchmark = detail.engagementRateBenchmark;
-    if (detail.brandedVideosCount != null) creator.brandedVideosCount = detail.brandedVideosCount;
-    if (detail.industryCoveredCount != null) creator.industryCoveredCount = detail.industryCoveredCount;
-
-    const followerDemo = (detail.audienceDemographics && detail.audienceDemographics.follower) || {};
-    const genderRatios: { gender?: string; ratio?: number }[] = followerDemo.gender || [];
-    const ageRatios: { ageInterval?: string; ratio?: number }[] = followerDemo.age || [];
-    const countryRatios: { country?: string; ratio?: number }[] = followerDemo.region || [];
-    const femaleRatio = genderRatios.find((g) => g.gender === 'Female');
-    const maleRatio = genderRatios.find((g) => g.gender === 'Male');
-    const ageDistribution = ageRatios
-      .filter((a) => a.ageInterval && a.ratio != null)
-      .map((a) => ({ name: a.ageInterval as string, value: Math.round((a.ratio as number) * 100) }));
-    const countryDistribution = countryRatios
-      .filter((c) => c.country && c.ratio != null)
-      .map((c) => ({ name: c.country as string, value: Math.round((c.ratio as number) * 100) }));
-
-    if (
-      detail.audienceTopGender || detail.audienceTopAgeRange || detail.audienceTopCountry ||
-      femaleRatio || maleRatio || ageDistribution.length > 0 || countryDistribution.length > 0
-    ) {
-      creator.demographics = {
-        ...creator.demographics,
-        ...(detail.audienceTopGender ? { topGender: detail.audienceTopGender } : {}),
-        ...(detail.audienceTopAgeRange ? { topAgeGroup: detail.audienceTopAgeRange } : {}),
-        ...(detail.audienceTopCountry ? { topCountry: detail.audienceTopCountry } : {}),
-        ...(femaleRatio && femaleRatio.ratio != null ? { genderFemale: Math.round(femaleRatio.ratio * 100) } : {}),
-        ...(maleRatio && maleRatio.ratio != null ? { genderMale: Math.round(maleRatio.ratio * 100) } : {}),
-        ...(ageDistribution.length > 0 ? { ageDistribution } : {}),
-        ...(countryDistribution.length > 0 ? { countryDistribution } : {})
-      };
-    }
-
-    if (detail.audienceDemographics) creator.audienceDemographicsFull = detail.audienceDemographics;
-    if (detail.followerHistory) creator.followerHistory = detail.followerHistory;
-    if (detail.topVideos) creator.topVideos = detail.topVideos;
-    if (detail.recentVideos) creator.recentVideosFull = detail.recentVideos;
-    if (detail.brandInfoList) creator.brandPartners = detail.brandInfoList;
-
-    await applyScore(creator, undefined);
-  } else {
-    await saveCreator(creator);
-  }
-
-  await addActivity('TikTok One Extension', `updated detail metrics for @${creator.handle}`, `@${creator.handle}`, 'creator', creator.id);
-
-  res.json({ status: 'ok', creator });
-});
-
-// TikTok Profile Engagement Update Endpoint — pure passthrough/computed từ số liệu scrape thật,
-// không có fallback bịa.
-app.post('/api/creators/update-engagement', async (req, res) => {
-  const { handle, avatarUrl, bio, email, instagram, engagement } = req.body;
-  if (!handle) {
-    return res.status(400).json({ status: 'error', message: 'Thiếu handle' });
-  }
-
-  const creator = await getCreatorByHandle(handle);
-
-  if (!creator) {
-    return res.status(404).json({ status: 'error', message: `Không tìm thấy creator @${handle} trong CRM` });
-  }
-
-  if (avatarUrl) {
-    if (avatarUrl.startsWith('http')) {
-      const localPath = await downloadAvatar(avatarUrl, creator.id);
-      if (localPath) {
-        creator.avatar = localPath;
-      }
-    } else {
-      creator.avatar = avatarUrl;
-    }
-  }
-  if (bio) creator.bio = bio;
-  if (email) creator.email = email;
-  if (instagram) creator.instagram = instagram;
-
-  if (engagement) {
-    if (engagement.avgViews) creator.avgViews = engagement.avgViews;
-    if (engagement.maxMinRatio) creator.maxMinRatio = engagement.maxMinRatio;
-    if (engagement.lastVideoDate) creator.lastVideoDate = engagement.lastVideoDate;
-    if (engagement.postingFrequency) creator.postingFrequency30d = Math.round(engagement.postingFrequency * 4);
-    if (engagement.erView) creator.engagementRate = engagement.erView;
-    if (engagement.erFollower) creator.erFollower = engagement.erFollower;
-
-    await applyScore(creator, undefined);
-  } else {
-    await saveCreator(creator);
-  }
-
-  await addActivity('TikTok Extension', `updated engagement metrics for @${creator.handle}`, `@${creator.handle}`, 'creator', creator.id);
-
-  res.json({ status: 'ok', creator });
-});
-
 // Download the Chrome Extension source as a .zip for "Load unpacked" — team chưa đăng
 // Chrome Web Store, nên đây là cách phân phối extension nhanh nhất.
 app.get('/api/extension/download', (req, res) => {
   const extensionDir = path.join(process.cwd(), 'extension');
-  res.attachment('pickdi-tiktok-one-scraper.zip');
+  res.attachment('pickdi-tcm-scraper.zip');
   const archive = new ZipArchive({ zlib: { level: 9 } });
   archive.on('error', (err: Error) => {
     console.error('Extension zip error:', err);
@@ -804,6 +720,20 @@ app.post('/api/workspaces', async (req, res) => {
   await saveWorkspace(newWorkspace);
   await addActivity('Anh Tuan', 'created new workspace', newWorkspace.name, 'workspace', newWorkspace.id);
   res.status(201).json({ success: true, data: newWorkspace });
+});
+
+// Dùng để sửa cấu hình workspace, hiện chủ yếu cho Sourcing Scoring Criteria trong Settings
+// (xem WorkspaceScoringCriteria) — tiêu chí GMV/audience thay đổi theo thời gian nên phải
+// sửa được qua UI thay vì hardcode trong scoring.ts.
+app.put('/api/workspaces/:id', async (req, res) => {
+  const workspace = await getWorkspaceById(req.params.id);
+  if (!workspace) {
+    return res.status(404).json({ success: false, message: 'Workspace not found' });
+  }
+
+  const updatedWorkspace: Workspace = { ...workspace, ...stripImmutableFields(req.body) };
+  await saveWorkspace(updatedWorkspace);
+  res.json({ success: true, data: updatedWorkspace });
 });
 
 app.get('/api/campaigns', async (req, res) => {
@@ -883,6 +813,22 @@ app.post('/api/assignments', async (req, res) => {
   res.status(201).json({ success: true, data: result });
 });
 
+// Cập nhật thông tin Sourcing List (giá/hợp đồng/hạng GMV...) của 1 assignment cụ thể —
+// khác với POST ở trên chỉ tạo mới/đổi status, route này chỉ sửa các trường thương mại.
+app.patch('/api/assignments/:id', async (req, res) => {
+  const assignment = await getAssignmentById(req.params.id);
+  if (!assignment) {
+    return res.status(404).json({ success: false, message: 'Assignment not found' });
+  }
+
+  const updated: CreatorCampaignAssignment = {
+    ...assignment,
+    ...stripImmutableFields(req.body, ['creatorId', 'campaignId', 'campaignName', 'workspaceId', 'assignedAt']),
+  };
+  await saveAssignment(updated);
+  res.json({ success: true, data: updated });
+});
+
 app.delete('/api/assignments/:id', async (req, res) => {
   const campaign = await unassignCreatorFromCampaign(req.params.id);
   if (!campaign) {
@@ -897,32 +843,44 @@ app.get('/api/settings/email', async (req, res) => {
   res.json({
     success: true,
     data: {
-      gmailUser: config.gmailUser,
+      email: config.email,
+      imapHost: config.imapHost || '',
+      imapPort: config.imapPort ?? null,
+      smtpHost: config.smtpHost || '',
+      smtpPort: config.smtpPort ?? null,
       brand: config.brand || '',
       product: config.product || '',
-      hasAppPassword: Boolean(config.appPassword)
+      hasPassword: Boolean(config.password)
     }
   });
 });
 
 app.put('/api/settings/email', async (req, res) => {
-  const { gmailUser, appPassword, brand, product } = req.body;
-  if (gmailUser && (!gmailUser.includes('@') || !gmailUser.includes('.'))) {
+  const { email, password, imapHost, imapPort, smtpHost, smtpPort, brand, product } = req.body;
+  if (email && (!email.includes('@') || !email.includes('.'))) {
     return res.status(400).json({ success: false, message: 'Email không hợp lệ' });
   }
   const updated = await saveEmailConfig({
-    gmailUser,
-    appPassword: appPassword || undefined,
+    email,
+    password: password || undefined,
+    imapHost,
+    imapPort: imapPort !== undefined && imapPort !== '' ? Number(imapPort) : undefined,
+    smtpHost,
+    smtpPort: smtpPort !== undefined && smtpPort !== '' ? Number(smtpPort) : undefined,
     brand,
     product
   });
   res.json({
     success: true,
     data: {
-      gmailUser: updated.gmailUser,
+      email: updated.email,
+      imapHost: updated.imapHost || '',
+      imapPort: updated.imapPort ?? null,
+      smtpHost: updated.smtpHost || '',
+      smtpPort: updated.smtpPort ?? null,
       brand: updated.brand || '',
       product: updated.product || '',
-      hasAppPassword: Boolean(updated.appPassword)
+      hasPassword: Boolean(updated.password)
     }
   });
 });
@@ -934,7 +892,7 @@ app.post('/api/inbox/check', async (req, res) => {
     res.json({ success: true, ...result });
   } catch (err: any) {
     console.error('Inbox check error:', err);
-    res.status(500).json({ success: false, message: 'Không thể đồng bộ hộp thư lúc này. Vui lòng kiểm tra cấu hình Gmail trong Cài đặt hoặc thử lại sau.' });
+    res.status(500).json({ success: false, message: 'Không thể đồng bộ hộp thư lúc này. Vui lòng kiểm tra cấu hình Email trong Cài đặt hoặc thử lại sau.' });
   }
 });
 
@@ -1115,7 +1073,7 @@ app.post('/api/outreach/send', async (req, res) => {
     const noEmail = err?.message === 'Creator này chưa có email';
     if (notFound) return res.status(404).json({ success: false, message: err.message });
     if (noEmail) return res.status(400).json({ success: false, message: err.message });
-    res.status(500).json({ success: false, message: 'Gửi email thất bại. Vui lòng kiểm tra cấu hình Gmail App Password trong Cài đặt và thử lại.' });
+    res.status(500).json({ success: false, message: 'Gửi email thất bại. Vui lòng kiểm tra cấu hình Email trong Cài đặt và thử lại.' });
   }
 });
 
@@ -1544,10 +1502,63 @@ app.patch('/api/reviews/:id', async (req, res) => {
 
   rev.status = req.body.status;
   if (req.body.feedback) rev.feedback = req.body.feedback;
+  if (req.body.checklist) rev.checklist = req.body.checklist;
 
   await saveReview(rev);
   await addActivity('Anh Tuan', `marked draft review as ${req.body.status}`, `${rev.creatorName} - ${rev.videoTitle}`, 'review', rev.id);
   res.json({ success: true, data: rev });
+});
+
+// Posted Videos API — bảng "Uploaded" trong file d'Alba, video đã đăng chính thức + ROI.
+app.get('/api/posted-videos', async (req, res) => {
+  res.json({ success: true, data: await getAllPostedVideos() });
+});
+
+app.post('/api/posted-videos', async (req, res) => {
+  const { creatorId, creatorName, creatorHandle, campaignId, campaignName, videoUrl } = req.body;
+  if (!creatorId || !campaignId || !videoUrl) {
+    return res.status(400).json({ success: false, message: 'creatorId, campaignId và videoUrl là bắt buộc' });
+  }
+
+  const newVideo: PostedVideo = {
+    id: `pv-${Date.now()}`,
+    workspaceId: req.body.workspaceId,
+    reviewId: req.body.reviewId,
+    creatorId,
+    creatorName,
+    creatorHandle,
+    campaignId,
+    campaignName,
+    round: req.body.round,
+    pricePerVideo: toFiniteNumber(req.body.pricePerVideo),
+    paid: req.body.paid,
+    postedAt: req.body.postedAt || new Date().toISOString(),
+    videoUrl,
+    videoId: req.body.videoId,
+    adCode: req.body.adCode,
+    roi: toFiniteNumber(req.body.roi),
+    totalRevenue: toFiniteNumber(req.body.totalRevenue),
+    totalOrders: toFiniteNumber(req.body.totalOrders),
+    totalAdSpend: toFiniteNumber(req.body.totalAdSpend),
+  };
+
+  await savePostedVideo(newVideo);
+  await addActivity('Anh Tuan', 'marked video as posted', `${newVideo.creatorName} - ${newVideo.campaignName}`, 'campaign', newVideo.id);
+  res.status(201).json({ success: true, data: newVideo });
+});
+
+app.patch('/api/posted-videos/:id', async (req, res) => {
+  const video = await getPostedVideoById(req.params.id);
+  if (!video) {
+    return res.status(404).json({ success: false, message: 'Posted video not found' });
+  }
+
+  const updated: PostedVideo = {
+    ...video,
+    ...stripImmutableFields(req.body, ['creatorId', 'campaignId', 'workspaceId', 'reviewId']),
+  };
+  await savePostedVideo(updated);
+  res.json({ success: true, data: updated });
 });
 
 // Tasks API
@@ -1605,8 +1616,19 @@ app.get('/api/search', async (req, res) => {
 });
 
 // Deterministic Brand-Fit Scoring
+// Sourcing criteria (GMV tier target, gpm/gender/beauty/avgViews band) sống ở
+// Workspace.scoringCriteria (cấu hình trong Settings), không hardcode trong scoring.ts —
+// ưu tiên workspace của campaign (brand đang chạy) rồi mới tới workspace gốc của creator.
+async function getScoringCriteria(creator: Creator, campaign: Campaign | undefined) {
+  const workspaceId = campaign?.workspaceId || creator.workspaceId;
+  if (!workspaceId) return undefined;
+  const workspace = await getWorkspaceById(workspaceId);
+  return workspace?.scoringCriteria;
+}
+
 async function applyScore(creator: Creator, campaign: Campaign | undefined) {
-  const breakdown = scoreCreator(creator, campaign);
+  const criteria = await getScoringCriteria(creator, campaign);
+  const breakdown = scoreCreator(creator, campaign, criteria);
   if (campaign) {
     const entry = { campaignId: campaign.id, breakdown, scoredAt: new Date().toISOString() };
     creator.campaignScores = [...(creator.campaignScores || []).filter((s: any) => s.campaignId !== campaign.id), entry];
@@ -1664,7 +1686,7 @@ app.post('/api/ai/research', async (req, res) => {
   const campaign = campaignId ? await getCampaignById(campaignId) : undefined;
 
   const stored = creator?.id ? await getCreatorById(creator.id) : null;
-  const breakdown = stored ? await applyScore(stored, campaign) : scoreCreator(creator, campaign);
+  const breakdown = stored ? await applyScore(stored, campaign) : scoreCreator(creator, campaign, await getScoringCriteria(creator, campaign));
 
   try {
     const { data } = await runAgent(creatorDeepResearchAgent, { creator, campaign, breakdown });

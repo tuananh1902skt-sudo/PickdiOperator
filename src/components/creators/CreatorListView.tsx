@@ -2,8 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   Users,
   Search,
-  Plus,
-  Download,
   Sparkles,
   ExternalLink,
   Mail,
@@ -11,7 +9,7 @@ import {
   Archive,
   ChevronLeft,
   ChevronRight,
-  Zap
+  UploadCloud
 } from 'lucide-react';
 import { Creator, Campaign, Workspace, CreatorCampaignAssignment } from '../../types';
 import { WorkspaceBanner } from '../layout/WorkspaceBanner';
@@ -25,7 +23,6 @@ interface CreatorListViewProps {
   onSelectWorkspace?: (id: string) => void;
   onOpenSettings?: () => void;
   onSelectCreator: (cr: Creator) => void;
-  onOpenQuickAdd: () => void;
   onOpenImport: () => void;
   onOpenEmailComposer: (cr: Creator) => void;
   onArchiveCreator: (id: string) => void;
@@ -44,7 +41,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   onSelectWorkspace,
   onOpenSettings,
   onSelectCreator,
-  onOpenQuickAdd,
   onOpenImport,
   onOpenEmailComposer,
   onArchiveCreator,
@@ -53,12 +49,12 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   onUnassignCampaign,
   onOpenBulkOutreach
 }) => {
-  // Ở view Agency (PICKDI, tổng hợp nhiều brand) chưa gắn campaign cụ thể nên hiển thị Overall
-  // score (comprehensiveScore riêng của TikTok One) để so sánh nhanh cả kho creator. Khi chuyển
-  // sang 1 workspace brand cụ thể, đổi lại thành Brand Fit (điểm nền tự tính, xem src/scoring.ts).
-  const isAgencyView = !activeWorkspace || Boolean(activeWorkspace.isAgency);
-  const scoreColumnLabel = isAgencyView ? 'Overall Score' : 'Brand Fit';
-  const getScoreValue = (cr: Creator) => (isAgencyView ? cr.scores?.overall : cr.brandFitScore);
+  // "Brand Fit" cũ đọc như 1 điểm content-quality chung chung — đổi tên cho đúng ý nghĩa
+  // thật của brandFitScore: điểm phù hợp với TIÊU CHÍ SOURCING d'Alba (GMV tier, GPM, %
+  // audience nữ, % beauty category, avg views — xem src/scoring.ts), không phải điểm
+  // content/production quality.
+  const scoreColumnLabel = "d'Alba Fit";
+  const getScoreValue = (cr: Creator) => cr.brandFitScore;
 
   // Search & Filter state
   const [search, setSearch] = useState('');
@@ -122,36 +118,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     }
   };
 
-  const csvEscape = (value: unknown) => {
-    const str = value === undefined || value === null ? '' : String(value);
-    return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
-  };
-
-  const handleExportCSV = () => {
-    const headers = ['Handle', 'Name', 'Category', 'Followers', 'AvgViews', 'ER%', 'BrandFitScore', 'Status', 'Email'];
-    const rows = filteredCreators.map(c => [
-      c.handle,
-      c.displayName,
-      c.category,
-      c.followers,
-      c.avgViews,
-      c.engagementRate,
-      c.brandFitScore,
-      c.status,
-      c.email
-    ]);
-    const csvContent = [headers, ...rows].map(row => row.map(csvEscape).join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `tiktok_creators_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
   const formatNumber = (num?: number | null) => {
     if (num === undefined || num === null || isNaN(num)) return '—';
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
@@ -193,24 +159,8 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
             onClick={onOpenImport}
             className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
           >
-            <Zap className="w-4 h-4 text-amber-300" />
-            Extension / Scraper (0đ)
-          </button>
-
-          <button
-            onClick={handleExportCSV}
-            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all"
-          >
-            <Download className="w-4 h-4 text-indigo-500" />
-            Export CSV
-          </button>
-
-          <button
-            onClick={onOpenQuickAdd}
-            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            New Creator
+            <UploadCloud className="w-4 h-4" />
+            Import Creator
           </button>
         </div>
       </div>
@@ -425,7 +375,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                         {cr.engagementRate !== undefined ? `${cr.engagementRate}%` : '—'}
                       </td>
 
-                      {/* Score Badge — Overall score (agency view) hoặc Brand Fit (brand view), xem isAgencyView ở trên */}
+                      {/* Score Badge — Brand Fit (điểm nền tự tính, xem src/scoring.ts) */}
                       <td className="py-3.5 px-4 text-center">
                         {(() => {
                           const scoreVal = getScoreValue(cr);

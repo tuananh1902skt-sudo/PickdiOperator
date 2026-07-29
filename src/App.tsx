@@ -21,11 +21,13 @@ import { CreateCampaignModal } from './components/campaigns/CreateCampaignModal'
 
 import { ReviewsView } from './components/reviews/ReviewsView';
 import { ReviewDetailModal } from './components/reviews/ReviewDetailModal';
+import { PostedVideoModal, PostedVideoFormData } from './components/reviews/PostedVideoModal';
 
 import { TasksView } from './components/tasks/TasksView';
 import { CreateTaskModal } from './components/tasks/CreateTaskModal';
 
 import { ReportsView } from './components/reports/ReportsView';
+import { ExportView } from './components/export/ExportView';
 import { SettingsView } from './components/settings/SettingsView';
 
 import {
@@ -40,7 +42,8 @@ import {
   DashboardKPIs,
   ActivityItem,
   Workspace,
-  CreatorCampaignAssignment
+  CreatorCampaignAssignment,
+  PostedVideo
 } from './types';
 
 import {
@@ -73,6 +76,7 @@ export function App() {
   const [outreachList, setOutreachList] = useState<OutreachEmail[]>(INITIAL_OUTREACH);
   const [conversations, setConversations] = useState<Conversation[]>(INITIAL_CONVERSATIONS);
   const [reviews, setReviews] = useState<DraftReview[]>(INITIAL_REVIEWS);
+  const [postedVideos, setPostedVideos] = useState<PostedVideo[]>([]);
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
   const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
   const [activities, setActivities] = useState<ActivityItem[]>(INITIAL_ACTIVITIES);
@@ -123,6 +127,8 @@ export function App() {
   const workspaceOutreach = outreachList.filter(o => inActiveWorkspace(o.workspaceId));
   const workspaceConversations = conversations.filter(c => inActiveWorkspace(c.workspaceId));
   const workspaceReviews = reviews.filter(r => inActiveWorkspace(r.workspaceId));
+  const workspacePostedVideos = postedVideos.filter(v => inActiveWorkspace(v.workspaceId));
+  const workspaceAssignments = assignments.filter(a => inActiveWorkspace(a.workspaceId));
   const workspaceTasks = tasks.filter(t => inActiveWorkspace(t.workspaceId));
   const workspaceNotifications = notifications.filter(n => inActiveWorkspace(n.workspaceId));
 
@@ -146,6 +152,7 @@ export function App() {
   const [selectedCreatorDetail, setSelectedCreatorDetail] = useState<Creator | null>(null);
   const [preselectCampaignId, setPreselectCampaignId] = useState<string | null>(null);
   const [selectedReviewDetail, setSelectedReviewDetail] = useState<DraftReview | null>(null);
+  const [reviewForPostedVideo, setReviewForPostedVideo] = useState<DraftReview | null>(null);
 
   // Fetch state from backend & poll periodically for background script syncs
   const refreshCreators = async (opts: { skipIfHidden?: boolean } = {}) => {
@@ -227,6 +234,26 @@ export function App() {
       .then(data => { if (data && Array.isArray(data.data)) setAssignments(data.data); })
       .catch(err => console.error(err));
 
+    fetch('/api/reviews')
+      .then(res => res.ok && res.headers.get('content-type')?.includes('application/json') ? res.json() : null)
+      .then(data => { if (data && Array.isArray(data.data)) setReviews(data.data); })
+      .catch(err => console.error(err));
+
+    fetch('/api/posted-videos')
+      .then(res => res.ok && res.headers.get('content-type')?.includes('application/json') ? res.json() : null)
+      .then(data => { if (data && Array.isArray(data.data)) setPostedVideos(data.data); })
+      .catch(err => console.error(err));
+
+    fetch('/api/conversations')
+      .then(res => res.ok && res.headers.get('content-type')?.includes('application/json') ? res.json() : null)
+      .then(data => { if (data && Array.isArray(data.data)) setConversations(data.data); })
+      .catch(err => console.error(err));
+
+    fetch('/api/outreach')
+      .then(res => res.ok && res.headers.get('content-type')?.includes('application/json') ? res.json() : null)
+      .then(data => { if (data && Array.isArray(data.data)) setOutreachList(data.data); })
+      .catch(err => console.error(err));
+
     // Poll every 10 seconds for new scraped creators from extension/userscript
     const interval = setInterval(() => refreshCreators({ skipIfHidden: true }), 10000);
 
@@ -239,6 +266,20 @@ export function App() {
       window.removeEventListener('focus', handleFocus);
     };
   }, []);
+
+  // Drawer chi tiết creator chỉ nhận `creator` như 1 snapshot lúc click — nếu để mở trong lúc
+  // extension đẩy data mới lên backend (vd nút "Auto quét + Lấy chi tiết" chạy trong tab TCM
+  // khác), poll 10s ở trên vẫn cập nhật `creators` nhưng KHÔNG tự thay object bên trong drawer
+  // đang mở, nên user thấy backend báo cập nhật thành công mà UI vẫn hiện data cũ/trống cho
+  // tới khi tự đóng-mở lại. Đồng bộ lại tham chiếu mỗi khi `creators` đổi để drawer luôn hiện
+  // đúng data mới nhất mà không cần thao tác gì thêm.
+  useEffect(() => {
+    setSelectedCreatorDetail(prev => {
+      if (!prev) return prev;
+      const fresh = creators.find(c => c.id === prev.id);
+      return fresh || prev;
+    });
+  }, [creators]);
 
   // Dark mode class toggle
   useEffect(() => {
@@ -268,6 +309,7 @@ export function App() {
   // Calculated Dashboard KPIs — all time-windowed fields are filtered against actual
   // dates (previously these counted all-time totals/status matches mislabeled as "today"/"this week").
   const todayStr = new Date().toISOString().split('T')[0];
+  const currentMonthStr = todayStr.slice(0, 7);
   const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
   const kpis: DashboardKPIs = {
     todayEmailsSent: workspaceOutreach.filter(o => o.sentAt && o.sentAt.startsWith(todayStr)).length,
@@ -281,6 +323,8 @@ export function App() {
     creatorsAddedThisWeek: workspaceCreators.filter(c => c.createdAt && new Date(c.createdAt) >= sevenDaysAgo).length,
     conversionRate: conversionRate
   };
+  const creatorsAddedToday = workspaceCreators.filter(c => c.createdAt && c.createdAt.startsWith(todayStr)).length;
+  const videosPostedThisMonth = workspacePostedVideos.filter(v => v.postedAt && v.postedAt.startsWith(currentMonthStr)).length;
 
   // HANDLERS
   const WORKSPACE_COLOR_CYCLE: Workspace['color'][] = ['indigo', 'rose', 'emerald', 'amber'];
@@ -353,6 +397,23 @@ export function App() {
       },
       ...prev
     ]);
+  };
+
+  const handleUpdateWorkspaceScoringCriteria = async (workspaceId: string, criteria: Workspace['scoringCriteria']) => {
+    setWorkspaces(prev => prev.map(w => (w.id === workspaceId ? { ...w, scoringCriteria: criteria } : w)));
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scoringCriteria: criteria })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setWorkspaces(prev => prev.map(w => (w.id === workspaceId ? data.data : w)));
+      }
+    } catch (err) {
+      console.error('Error saving scoring criteria:', err);
+    }
   };
 
   const handleQuickAddCreator = async (newCr: any): Promise<boolean> => {
@@ -630,6 +691,41 @@ export function App() {
     }
   };
 
+  // Sửa các trường Sourcing List (giá/hợp đồng/hạng GMV...) của 1 assignment đã tồn tại —
+  // khác với handleAssignCampaignToCreator (tạo mới/đổi status), hàm này chỉ PATCH thông tin
+  // thương mại, không đụng tới status/campaign hiện tại.
+  const handleUpdateAssignment = async (assignmentId: string, updates: Partial<CreatorCampaignAssignment>) => {
+    const prevAssignments = assignments;
+    setAssignments(prev => prev.map(a => (a.id === assignmentId ? { ...a, ...updates } : a)));
+    try {
+      const res = await fetch(`/api/assignments/${assignmentId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Không thể lưu thông tin Sourcing List.');
+      }
+      setAssignments(prev => prev.map(a => (a.id === data.data.id ? data.data : a)));
+    } catch (err) {
+      console.error('Error updating assignment:', err);
+      setAssignments(prevAssignments);
+      setNotifications(prev => [
+        {
+          id: `notif-${Date.now()}`,
+          title: 'Lưu Sourcing List thất bại',
+          description: 'Không thể lưu thông tin giá/hợp đồng. Vui lòng thử lại.',
+          priority: 'HIGH',
+          category: 'System',
+          isRead: false,
+          createdAt: new Date().toISOString()
+        },
+        ...prev
+      ]);
+    }
+  };
+
   const handleUnassignCreatorCampaign = async (assignmentId: string) => {
     const prevAssignments = assignments;
     setAssignments(prev => prev.filter(a => a.id !== assignmentId));
@@ -665,13 +761,68 @@ export function App() {
     }
   };
 
-  const handleUpdateReviewStatus = (reviewId: string, status: DraftReview['status'], feedback?: string) => {
-    setReviews(prev =>
-      prev.map(r =>
-        r.id === reviewId ? { ...r, status, feedbackNote: feedback } : r
-      )
-    );
+  const handleUpdateReviewStatus = async (
+    reviewId: string,
+    status: DraftReview['status'],
+    feedback?: string,
+    checklist?: DraftReview['checklist']
+  ) => {
     setSelectedReviewDetail(null);
+    try {
+      const res = await fetch(`/api/reviews/${reviewId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, feedback, checklist })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setReviews(prev => prev.map(r => (r.id === reviewId ? data.data : r)));
+      }
+    } catch (err) {
+      console.error('Error updating review status:', err);
+    }
+  };
+
+  const handleSubmitPostedVideo = async (reviewId: string, form: PostedVideoFormData) => {
+    setReviewForPostedVideo(null);
+    const review = reviews.find(r => r.id === reviewId);
+    if (!review) return;
+
+    const existing = postedVideos.find(v => v.reviewId === reviewId);
+    try {
+      if (existing) {
+        const res = await fetch(`/api/posted-videos/${existing.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(form)
+        });
+        const data = await res.json();
+        if (data.success && data.data) {
+          setPostedVideos(prev => prev.map(v => (v.id === existing.id ? data.data : v)));
+        }
+      } else {
+        const res = await fetch('/api/posted-videos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspaceId: review.workspaceId,
+            reviewId: review.id,
+            creatorId: review.creatorId,
+            creatorName: review.creatorName,
+            creatorHandle: review.creatorHandle,
+            campaignId: review.campaignId,
+            campaignName: review.campaignName,
+            ...form
+          })
+        });
+        const data = await res.json();
+        if (data.success && data.data) {
+          setPostedVideos(prev => [data.data, ...prev]);
+        }
+      }
+    } catch (err) {
+      console.error('Error saving posted video:', err);
+    }
   };
 
   const handleAddCreatorNote = (creatorId: string, content: string) => {
@@ -733,6 +884,8 @@ export function App() {
               activities={activities}
               recentReplies={workspaceConversations}
               creators={workspaceCreators}
+              creatorsAddedToday={creatorsAddedToday}
+              videosPostedThisMonth={videosPostedThisMonth}
               activeWorkspace={activeWorkspace}
               workspaces={workspaces}
               onSelectWorkspace={id => setActiveWorkspaceId(id)}
@@ -756,7 +909,6 @@ export function App() {
               onSelectWorkspace={id => setActiveWorkspaceId(id)}
               onOpenSettings={() => setActiveTab('settings')}
               onSelectCreator={setSelectedCreatorDetail}
-              onOpenQuickAdd={() => setIsQuickAddModalOpen(true)}
               onOpenImport={() => setIsImportModalOpen(true)}
               onOpenEmailComposer={cr => {
                 setSelectedCreatorForEmail(cr);
@@ -817,7 +969,9 @@ export function App() {
           {activeTab === 'reviews' && (
             <ReviewsView
               reviews={workspaceReviews}
+              postedVideos={workspacePostedVideos}
               onSelectReview={setSelectedReviewDetail}
+              onMarkAsPosted={setReviewForPostedVideo}
             />
           )}
 
@@ -839,12 +993,23 @@ export function App() {
             />
           )}
 
+          {activeTab === 'export' && (
+            <ExportView
+              creators={workspaceCreators}
+              campaigns={workspaceCampaigns}
+              assignments={workspaceAssignments}
+              reviews={workspaceReviews}
+              postedVideos={workspacePostedVideos}
+            />
+          )}
+
           {activeTab === 'settings' && (
             <SettingsView
               activeWorkspace={activeWorkspace}
               workspaces={workspaces}
               onSelectWorkspace={id => setActiveWorkspaceId(id)}
               onAddWorkspace={handleAddWorkspace}
+              onUpdateScoringCriteria={handleUpdateWorkspaceScoringCriteria}
             />
           )}
         </main>
@@ -942,6 +1107,7 @@ export function App() {
         campaigns={campaigns}
         workspaces={workspaces}
         assignments={assignments}
+        scoringCriteria={activeWorkspace?.scoringCriteria}
         onClose={() => setSelectedCreatorDetail(null)}
         onOpenEmailComposer={cr => {
           setSelectedCreatorForEmail(cr);
@@ -952,12 +1118,20 @@ export function App() {
         onRunAiResearch={() => setIsAiDrawerOpen(true)}
         onAssignCampaign={handleAssignCampaignToCreator}
         onUnassignCampaign={handleUnassignCreatorCampaign}
+        onUpdateAssignment={handleUpdateAssignment}
       />
 
       <ReviewDetailModal
         review={selectedReviewDetail}
         onClose={() => setSelectedReviewDetail(null)}
         onUpdateStatus={handleUpdateReviewStatus}
+      />
+
+      <PostedVideoModal
+        review={reviewForPostedVideo}
+        existing={reviewForPostedVideo ? postedVideos.find(v => v.reviewId === reviewForPostedVideo.id) : null}
+        onClose={() => setReviewForPostedVideo(null)}
+        onSubmit={handleSubmitPostedVideo}
       />
     </div>
   );
