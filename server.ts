@@ -111,6 +111,25 @@ dotenv.config();
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
+// Express 4 doesn't forward a rejected promise from an async route handler to the error
+// middleware below — it's silently swallowed as an unhandled rejection, which crashes the
+// whole serverless invocation instead of returning a JSON error for that one request. Wrap
+// every route handler registered on `app` so async failures reach next(err) like a thrown
+// error would.
+for (const method of ['get', 'post', 'put', 'patch', 'delete'] as const) {
+  const original = app[method].bind(app);
+  (app as any)[method] = (path: any, ...handlers: any[]) => {
+    const wrapped = handlers.map((h) =>
+      typeof h === 'function'
+        ? (req: express.Request, res: express.Response, next: express.NextFunction) => {
+            Promise.resolve(h(req, res, next)).catch(next);
+          }
+        : h
+    );
+    return original(path, ...wrapped);
+  };
+}
+
 const qstashClient = process.env.QSTASH_TOKEN ? new QStashClient({ token: process.env.QSTASH_TOKEN }) : null;
 const qstashReceiver = (process.env.QSTASH_CURRENT_SIGNING_KEY && process.env.QSTASH_NEXT_SIGNING_KEY)
   ? new QStashReceiver({
@@ -556,6 +575,7 @@ app.post('/api/creators/batch-import', async (req, res) => {
         liveMetrics: item.liveMetrics || existing.liveMetrics,
         metricsSource: itemMetricsSource || existing.metricsSource,
         metricsSyncedAt: itemMetricsSource ? new Date().toISOString() : existing.metricsSyncedAt,
+        tcmCreatorOecuid: item.tcmCreatorOecuid || existing.tcmCreatorOecuid,
         tags: Array.from(new Set([...(existing.tags || []), 'Scraper Enriched', source || 'Pickdi Extension'])),
         updatedAt: new Date().toISOString()
       };
@@ -608,7 +628,8 @@ app.post('/api/creators/batch-import', async (req, res) => {
         videoMetrics: item.videoMetrics || undefined,
         liveMetrics: item.liveMetrics || undefined,
         metricsSource: itemMetricsSource,
-        metricsSyncedAt: itemMetricsSource ? new Date().toISOString() : undefined
+        metricsSyncedAt: itemMetricsSource ? new Date().toISOString() : undefined,
+        tcmCreatorOecuid: item.tcmCreatorOecuid || undefined
       };
       await applyScore(newCr, undefined);
       importedCount++;
@@ -1988,6 +2009,15 @@ app.post('/api/agent-prompts/:agentId/test', async (req, res) => {
   } catch (error: any) {
     await handleAiRouteError(error, res);
   }
+});
+
+// Last middleware in the chain — catches anything forwarded via next(err), including the
+// async rejections the wrapper above now routes here, so a failure returns a JSON 500
+// instead of crashing the whole function.
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Unhandled route error:', err);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ success: false, message: err?.message || 'Internal server error' });
 });
 
 async function startServer() {
