@@ -2,7 +2,6 @@ import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
 import { ZipArchive } from 'archiver';
-import { createServer as createViteServer } from 'vite';
 import { scoreCreator } from './src/scoring';
 import { getEmailConfig, saveEmailConfig } from './src/lib/emailConfig';
 import { sendEmail } from './src/lib/mailer';
@@ -2022,6 +2021,11 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
+    // Dynamic import so `vite` (and the rollup native binary it pulls in) is only ever
+    // loaded for local dev — this whole branch is already unreachable on Vercel (guarded by
+    // `!process.env.VERCEL` below), but a static top-level import would still eagerly load
+    // vite's module graph in the serverless bundle and crash on the missing native binary.
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
