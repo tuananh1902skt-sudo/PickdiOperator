@@ -489,11 +489,15 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   const pageStart = (safePage - 1) * PAGE_SIZE;
   const paginatedCreators = filteredCreators.slice(pageStart, pageStart + PAGE_SIZE);
 
+  // Select-all only applies to the rows currently on screen (this page of the
+  // filtered/paginated set), not every creator matching the filter across all pages.
   const toggleSelectAll = () => {
-    if (selectedIds.length === filteredCreators.length) {
-      setSelectedIds([]);
+    const visibleIds = paginatedCreators.map(c => c.id);
+    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.includes(id));
+    if (allVisibleSelected) {
+      setSelectedIds(prev => prev.filter(id => !visibleIds.includes(id)));
     } else {
-      setSelectedIds(filteredCreators.map(c => c.id));
+      setSelectedIds(prev => Array.from(new Set([...prev, ...visibleIds])));
     }
   };
 
@@ -985,7 +989,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                 <th className="py-3 px-4 w-10 text-center">
                   <input
                     type="checkbox"
-                    checked={selectedIds.length === filteredCreators.length && filteredCreators.length > 0}
+                    checked={paginatedCreators.length > 0 && paginatedCreators.every(c => selectedIds.includes(c.id))}
                     onChange={toggleSelectAll}
                     className="rounded text-indigo-600 focus:ring-indigo-500"
                   />
