@@ -193,7 +193,15 @@
           res.clone().text().then(ingest).catch(function () {});
         }
       }).catch(function () {});
-    } else if (url.includes('/api/v1/oec/affiliate/creator/marketplace/find')) {
+    } else if (
+      url.includes('/api/v1/oec/affiliate/creator/marketplace/find') ||
+      url.includes('/api/v1/oec/affiliate/creator/marketplace/ai/find')
+    ) {
+      // "marketplace/ai/find" là endpoint riêng cho ô "AI search" (gõ mô tả/handle rồi tìm) —
+      // response CÙNG shape hệt "marketplace/find" thường (đã xác nhận qua recon thật: cùng
+      // {code,message,next_pagination,creator_profile_list} + cùng field {value,is_authorized,
+      // status}), chỉ khác URL nên trước đây không match, khiến search-by-handle luôn "no_match"
+      // dù TCM đã tìm ra đúng creator (UI hiện đúng, chỉ là interceptor không bắt được response).
       p.then(function (res) {
         if (res && res.clone) {
           res.clone().text().then(ingestTcmFind).catch(function () {});
@@ -223,7 +231,10 @@
       this.addEventListener('load', function () {
         ingest(this.responseText);
       });
-    } else if (url.includes('/api/v1/oec/affiliate/creator/marketplace/find')) {
+    } else if (
+      url.includes('/api/v1/oec/affiliate/creator/marketplace/find') ||
+      url.includes('/api/v1/oec/affiliate/creator/marketplace/ai/find')
+    ) {
       this.addEventListener('load', function () {
         ingestTcmFind(this.responseText);
       });

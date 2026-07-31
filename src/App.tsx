@@ -139,6 +139,7 @@ export function App() {
   const [isQuickAddModalOpen, setIsQuickAddModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isCreateCampaignModalOpen, setIsCreateCampaignModalOpen] = useState(false);
+  const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState(false);
 
   // Selected Detail states
@@ -333,11 +334,16 @@ export function App() {
   // campaign mới từ view Agency mà brand đã nhập chưa có workspace tương ứng. Không hardcode
   // sẵn danh sách brand nào (xem INITIAL_WORKSPACES) — khớp tên (không phân biệt hoa/thường)
   // với workspace đã có trước, nếu chưa có thì tạo mới.
+  // So khớp brand bỏ qua hoa/thường, dấu câu (', ., -, ...) và khoảng trắng thừa — để
+  // "dalba", "D'alba", "D' Alba" đều trỏ về cùng 1 workspace thay vì tạo trùng.
+  const normalizeBrandKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
   const resolveOrCreateWorkspaceForBrand = (brandName: string): string => {
     const trimmed = brandName.trim();
     if (!trimmed) return activeWorkspaceId;
+    const key = normalizeBrandKey(trimmed);
     const existing = workspaces.find(
-      w => w.brandName.toLowerCase() === trimmed.toLowerCase() || w.name.toLowerCase() === trimmed.toLowerCase()
+      w => normalizeBrandKey(w.brandName) === key || normalizeBrandKey(w.name) === key
     );
     if (existing) return existing.id;
 
@@ -592,6 +598,60 @@ export function App() {
     }
   };
 
+  const handleUpdateCampaign = async (campaignId: string, campData: any) => {
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(campData)
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.data) {
+        throw new Error(data.message || 'Failed to update campaign');
+      }
+      setCampaigns(prev => prev.map(c => (c.id === campaignId ? (data.data as Campaign) : c)));
+    } catch (err) {
+      console.error('Error updating campaign:', err);
+      setNotifications(prev => [
+        {
+          id: `notif-${Date.now()}`,
+          title: 'Cập nhật campaign thất bại',
+          description: `Không thể lưu thay đổi cho campaign "${campData.name}". Vui lòng thử lại.`,
+          priority: 'HIGH',
+          category: 'System',
+          isRead: false,
+          createdAt: new Date().toISOString()
+        },
+        ...prev
+      ]);
+    }
+  };
+
+  const handleArchiveCampaign = async (campaignId: string) => {
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Failed to archive campaign');
+      }
+      setCampaigns(prev => prev.map(c => (c.id === campaignId ? { ...c, status: 'Archived' } : c)));
+    } catch (err) {
+      console.error('Error archiving campaign:', err);
+      setNotifications(prev => [
+        {
+          id: `notif-${Date.now()}`,
+          title: 'Xóa campaign thất bại',
+          description: 'Không thể lưu thay đổi này. Vui lòng thử lại.',
+          priority: 'HIGH',
+          category: 'System',
+          isRead: false,
+          createdAt: new Date().toISOString()
+        },
+        ...prev
+      ]);
+    }
+  };
+
   const handleCreateTask = (taskData: any) => {
     const newTask: Task = {
       id: `task-${Date.now()}`,
@@ -655,6 +715,34 @@ export function App() {
   };
 
   const handleArchiveCreator = (creatorId: string) => updateCreatorWorkspaceStatus(creatorId, 'Archived');
+
+  // Xóa vĩnh viễn creator khỏi DB (không thể hoàn tác) — khác handleArchiveCreator (soft-delete).
+  // Xem deleteCreatorPermanently ở src/db.ts để biết các bảng liên quan bị dọn theo.
+  const handleDeleteCreatorPermanently = async (creatorId: string) => {
+    try {
+      const res = await fetch(`/api/creators/${creatorId}/permanent`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Không thể xóa creator này.');
+      }
+      setCreators(prev => prev.filter(c => c.id !== creatorId));
+      setAssignments(prev => prev.filter(a => a.creatorId !== creatorId));
+    } catch (err) {
+      console.error('Error permanently deleting creator:', err);
+      setNotifications(prev => [
+        {
+          id: `notif-${Date.now()}`,
+          title: 'Xóa creator thất bại',
+          description: 'Không thể xóa creator này. Vui lòng thử lại.',
+          priority: 'HIGH',
+          category: 'System',
+          isRead: false,
+          createdAt: new Date().toISOString()
+        },
+        ...prev
+      ]);
+    }
+  };
 
   const handleUpdateCreatorStatus = (creatorId: string, status: CreatorStatus) =>
     updateCreatorWorkspaceStatus(creatorId, status);
@@ -915,6 +1003,7 @@ export function App() {
                 setIsEmailComposerOpen(true);
               }}
               onArchiveCreator={handleArchiveCreator}
+              onDeleteCreatorPermanently={handleDeleteCreatorPermanently}
               onRunAiScore={() => setIsAiDrawerOpen(true)}
               onAssignCampaign={handleAssignCampaignToCreator}
               onUnassignCampaign={handleUnassignCreatorCampaign}
@@ -959,6 +1048,8 @@ export function App() {
               onSelectWorkspace={id => setActiveWorkspaceId(id)}
               onOpenSettings={() => setActiveTab('settings')}
               onOpenCreateCampaign={() => setIsCreateCampaignModalOpen(true)}
+              onEditCampaign={setEditingCampaign}
+              onArchiveCampaign={handleArchiveCampaign}
               onSelectCreator={setSelectedCreatorDetail}
               onScoreCreator={handleScoreCreatorForCampaign}
               preselectCampaignId={preselectCampaignId}
@@ -1073,6 +1164,16 @@ export function App() {
         isOpen={isCreateCampaignModalOpen}
         onClose={() => setIsCreateCampaignModalOpen(false)}
         onSubmit={handleCreateCampaign}
+      />
+
+      <CreateCampaignModal
+        key={editingCampaign?.id || 'edit-campaign-empty'}
+        isOpen={!!editingCampaign}
+        campaign={editingCampaign}
+        onClose={() => setEditingCampaign(null)}
+        onSubmit={campData => {
+          if (editingCampaign) handleUpdateCampaign(editingCampaign.id, campData);
+        }}
       />
 
       <CreateTaskModal

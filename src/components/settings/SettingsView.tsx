@@ -113,6 +113,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [smtpPort, setSmtpPort] = useState('');
   const [emailBrand, setEmailBrand] = useState('');
   const [emailProduct, setEmailProduct] = useState('');
+  const [emailLogoUrl, setEmailLogoUrl] = useState('');
+  const [emailPrimaryColor, setEmailPrimaryColor] = useState('');
+  const [emailSenderName, setEmailSenderName] = useState('');
+  const [emailDefaultCc, setEmailDefaultCc] = useState('');
   const [hasPassword, setHasPassword] = useState(false);
   const [emailConfigLoading, setEmailConfigLoading] = useState(false);
   const [emailConfigSaving, setEmailConfigSaving] = useState(false);
@@ -132,6 +136,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           setSmtpPort(data.data.smtpPort ? String(data.data.smtpPort) : '');
           setEmailBrand(data.data.brand || '');
           setEmailProduct(data.data.product || '');
+          setEmailLogoUrl(data.data.logoUrl || '');
+          setEmailPrimaryColor(data.data.primaryColor || '');
+          setEmailSenderName(data.data.senderName || '');
+          setEmailDefaultCc(data.data.defaultCc || '');
           setHasPassword(Boolean(data.data.hasPassword));
         }
       })
@@ -155,7 +163,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           smtpHost: smtpHost.trim(),
           smtpPort: smtpPort.trim(),
           brand: emailBrand,
-          product: emailProduct
+          product: emailProduct,
+          logoUrl: emailLogoUrl.trim(),
+          primaryColor: emailPrimaryColor.trim(),
+          senderName: emailSenderName.trim(),
+          defaultCc: emailDefaultCc.trim()
         })
       });
       const data = await res.json();
@@ -910,6 +922,75 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 onChange={e => setEmailProduct(e.target.value)}
                 className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
               />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Logo URL (cho email HTML)
+              </label>
+              <input
+                type="url"
+                placeholder="https://your-domain.com/logo.png"
+                value={emailLogoUrl}
+                onChange={e => setEmailLogoUrl(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Phải là URL ảnh công khai trên internet (email client tải ảnh trực tiếp từ URL này, không lấy từ máy bạn).
+                Để trống nếu chưa có ảnh — email vẫn gửi được, chỉ hiện tên brand dạng chữ ở phần header thay logo.
+              </p>
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Màu thương hiệu (nút CTA)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={emailPrimaryColor || '#735c00'}
+                  onChange={e => setEmailPrimaryColor(e.target.value)}
+                  className="h-10 w-14 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 cursor-pointer"
+                />
+                <input
+                  type="text"
+                  placeholder="#735c00"
+                  value={emailPrimaryColor}
+                  onChange={e => setEmailPrimaryColor(e.target.value)}
+                  className="flex-1 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                />
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">Để trống dùng màu vàng gold mặc định của mẫu "Piedmont Ethereal".</p>
+            </div>
+
+            <div>
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Tên người gửi (chữ ký email)
+              </label>
+              <input
+                type="text"
+                placeholder="Juan"
+                value={emailSenderName}
+                onChange={e => setEmailSenderName(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">Để trống mặc định là "Juan" — dùng cho dòng "Best regards, {'{'}Tên{'}'}" ở cuối email.</p>
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                CC mặc định cho email outreach
+              </label>
+              <input
+                type="text"
+                placeholder="teammate@company.com, another@company.com"
+                value={emailDefaultCc}
+                onChange={e => setEmailDefaultCc(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Tự động điền vào ô CC khi soạn email outreach (đơn lẻ hoặc hàng loạt) — vẫn có thể chỉnh sửa hoặc xoá trước khi gửi. Nhiều địa chỉ cách nhau bởi dấu phẩy.
+              </p>
             </div>
           </div>
 

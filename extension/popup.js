@@ -72,6 +72,21 @@ const JOB_STATUS_DIVS = {
   'push-engagement': 'engagementStatus',
 };
 
+const JOB_STOP_BUTTONS = {
+  'list-import': 'stopListImportBtn',
+  'detail-single': 'stopDetailSingleBtn',
+  'auto-scan': 'stopAutoScanBtn',
+  'push-engagement': 'stopEngagementBtn',
+};
+
+for (const [jobType, btnId] of Object.entries(JOB_STOP_BUTTONS)) {
+  const btn = document.getElementById(btnId);
+  if (!btn) continue;
+  btn.addEventListener('click', async () => {
+    await chrome.runtime.sendMessage({ type: 'STOP_EXT_JOB', jobType });
+  });
+}
+
 const copiedFailedPayloadAt = {};
 function renderJob(jobType, job) {
   const divId = JOB_STATUS_DIVS[jobType];
@@ -84,6 +99,8 @@ function renderJob(jobType, job) {
     copiedFailedPayloadAt[jobType] = job.updatedAt;
     copyToClipboardFallback(job.failedPayload, div);
   }
+  const stopBtn = document.getElementById(JOB_STOP_BUTTONS[jobType]);
+  if (stopBtn) stopBtn.style.display = job.status === 'running' ? 'block' : 'none';
 }
 
 let jobsPollTimer = null;
@@ -122,7 +139,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const autoDetailState = await chrome.runtime.sendMessage({ type: 'GET_AUTO_DETAIL_STATUS' }).catch(() => null);
   if (autoDetailState && autoDetailState.queue && autoDetailState.queue.length > 0) {
     renderAutoDetailStatus(autoDetailState);
-    if (autoDetailState.status === 'running') startAutoDetailPolling();
+    // Poll cả khi 'done' nhưng autoContinue bật + còn pending, để popup tự cập nhật UI ngay khi
+    // alarm nạp chunk kế tiếp và chuyển lại 'running' (không cần user tự mở/đóng popup để thấy).
+    if (autoDetailState.status === 'running' || (autoDetailState.status === 'done' && autoDetailState.autoContinue && autoDetailState.pending && autoDetailState.pending.length > 0)) {
+      startAutoDetailPolling();
+    }
   }
 });
 
@@ -157,6 +178,8 @@ document.getElementById('findCreatorsBtn').addEventListener('click', async () =>
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const autoDetail = document.getElementById('autoDetailCheckbox').checked;
   const autoDetailMax = Number(document.getElementById('autoDetailMax').value) || 20;
+  const autoDetailContinue = document.getElementById('autoDetailContinueCheckbox').checked;
+  const autoDetailCooldownMs = (Number(document.getElementById('autoDetailCooldownMin').value) || 1) * 60000;
 
   setStatusText(findStatusDiv, '⏳ Đang đọc data đã bắt được...', 'orange');
   await chrome.runtime.sendMessage({
@@ -167,6 +190,8 @@ document.getElementById('findCreatorsBtn').addEventListener('click', async () =>
     filters,
     autoDetail,
     autoDetailMax,
+    autoDetailContinue,
+    autoDetailCooldownMs,
   });
   startJobsPolling();
   if (autoDetail) {
@@ -182,7 +207,8 @@ function startAutoDetailPolling() {
   const tick = async () => {
     const state = await chrome.runtime.sendMessage({ type: 'GET_AUTO_DETAIL_STATUS' });
     renderAutoDetailStatus(state);
-    if (!state || state.status !== 'running') {
+    const waitingForAutoContinue = state && state.status === 'done' && state.autoContinue && state.pending && state.pending.length > 0;
+    if (!state || (state.status !== 'running' && !waitingForAutoContinue)) {
       clearInterval(autoDetailPollTimer);
       autoDetailPollTimer = null;
     }
@@ -194,26 +220,46 @@ function startAutoDetailPolling() {
 function renderAutoDetailStatus(state) {
   const div = document.getElementById('autoDetailQueueStatus');
   const stopBtn = document.getElementById('stopAutoDetailBtn');
+  const continueBtn = document.getElementById('continueAutoDetailBtn');
   if (!state || !state.queue || state.queue.length === 0) {
     stopBtn.style.display = 'none';
+    continueBtn.style.display = 'none';
     return;
   }
-  const total = state.queue.length;
+  // `queue` chỉ là đợt (chunk) hiện tại — total/done phải tính trên totalCount (toàn bộ danh
+  // sách đã import) để không bị reset về đợt nhỏ mỗi lần "Lấy tiếp" nạp chunk kế.
+  const total = state.totalCount || state.queue.length;
   const done = state.processedCount || 0;
   const failed = state.failedCount || 0;
+  const pending = (state.pending && state.pending.length) || 0;
   if (state.status === 'running') {
     stopBtn.style.display = 'block';
+    continueBtn.style.display = 'none';
     setStatusText(div, `🤖 Đang chạy nền: ${done}/${total} xong (${failed} lỗi)${state.currentHandle ? ` — đang mở @${state.currentHandle}` : ''}...`, 'orange');
   } else {
     stopBtn.style.display = 'none';
     const color = failed > 0 ? 'orange' : 'green';
     const label = state.status === 'stopped' ? 'Đã dừng' : 'Hoàn tất';
-    setStatusText(div, `${state.status === 'stopped' ? '⏹' : '✅'} ${label}: ${done}/${total} xong (${failed} lỗi).`, color);
+    if (state.status === 'done' && pending > 0 && state.autoContinue) {
+      continueBtn.style.display = 'none';
+      setStatusText(div, `${label} đợt này: ${done}/${total} xong (${failed} lỗi). ⏳ Còn ${pending} creator chưa lấy — sẽ tự lấy tiếp sau ${Math.round((state.cooldownMs || 45000) / 60000 * 10) / 10} phút.`, color);
+    } else if (state.status === 'done' && pending > 0) {
+      continueBtn.style.display = 'block';
+      setStatusText(div, `${label} đợt này: ${done}/${total} xong (${failed} lỗi). Còn ${pending} creator chưa lấy — bấm "Lấy tiếp" khi sẵn sàng.`, color);
+    } else {
+      continueBtn.style.display = 'none';
+      setStatusText(div, `${state.status === 'stopped' ? '⏹' : '✅'} ${label}: ${done}/${total} xong (${failed} lỗi).`, color);
+    }
   }
 }
 
 document.getElementById('stopAutoDetailBtn').addEventListener('click', async () => {
   await chrome.runtime.sendMessage({ type: 'STOP_AUTO_DETAIL_QUEUE' });
+});
+
+document.getElementById('continueAutoDetailBtn').addEventListener('click', async () => {
+  await chrome.runtime.sendMessage({ type: 'CONTINUE_AUTO_DETAIL_QUEUE' });
+  startAutoDetailPolling();
 });
 
 // ================== LẤY CHI TIẾT TRANG CREATOR TCM ==================

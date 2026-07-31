@@ -190,6 +190,9 @@ export interface Creator {
   hasAffiliateGmv?: boolean;
   metricsSource?: 'kalodata' | 'tcm' | 'manual';
   metricsSyncedAt?: string;
+  // creator_oecuid thật của TCM — dùng để dựng link "Xem trên TCM" trong CreatorDetailDrawer
+  // (affiliate-us.tiktok.com/connection/creator/detail?cid=<tcmCreatorOecuid>).
+  tcmCreatorOecuid?: string;
   // Chi tiết theo đúng layout tab thật của TCM creator detail — chỉ có khi metricsSource
   // là 'tcm' và extension đã cào được (xem tcm-scraper-endpoints memory). KHÔNG áp dụng cho
   // creator nhập từ Kalodata/manual.
@@ -253,7 +256,18 @@ export interface Campaign {
   creatorIds: string[];
   targetCategories: string[];
   targetAudience?: CampaignTargetAudience;
-  products: { id: string; name: string; sku: string; price: number }[];
+  products: {
+    id: string; name: string; sku: string; price: number; imageUrl?: string; productUrl?: string;
+    // Social-proof + USP shown in the first-contact outreach email's product card
+    // (src/lib/emailTemplate.ts renderFirstContactEmailHtml). All optional — the card
+    // gracefully drops the rating line / checklist when unset.
+    rating?: number; reviewCount?: number; soldCount?: string; highlights?: string[];
+    // Starting compensation pitch shown in the first-contact outreach email, e.g.
+    // "$100 for 10 videos" — free text since it's a negotiation opener, not a fixed rate.
+    // Lives on the product (not the campaign) because it round-trips through the
+    // `products` jsonb column — there is no dedicated `compensationOffer` DB column.
+    compensationOffer?: string;
+  }[];
   isMock?: boolean;
 }
 
@@ -334,6 +348,7 @@ export interface OutreachEmail {
   campaignName?: string;
   subject: string;
   body: string;
+  cc?: string;
   status: 'Draft' | 'Sent' | 'Opened' | 'Replied';
   sentAt?: string;
   repliedAt?: string;
@@ -523,6 +538,7 @@ export interface BulkOutreachJob {
   campaignId?: string;
   campaignName?: string;
   sequenceStage: 'first' | 'reminder_1' | 'reminder_2' | 'reminder_3';
+  cc?: string;
   status: 'generating' | 'ready' | 'sending' | 'done';
   pacingMinSeconds: number;
   pacingMaxSeconds: number;

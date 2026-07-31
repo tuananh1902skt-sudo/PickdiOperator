@@ -43,6 +43,7 @@
   <input type="text" id="keyword" placeholder="Lọc theo handle/nickname/ngành hàng">
   <button id="findCreatorsBtn">⬆️ Import creator đã bắt được</button>
   <div id="findStatus"></div>
+  <button id="stopListImportBtn" class="secondary" style="display:none;">⏹ Dừng</button>
 
   <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin-top:10px; cursor:pointer;">
     <input type="checkbox" id="autoDetailCheckbox" style="width:auto; margin:0;">
@@ -51,10 +52,17 @@
   <p style="font-size:10px; color:#9ca3af; margin:4px 0 8px 0; line-height:1.4;">
     Tự mở lần lượt từng trang chi tiết ở tab ẩn (request thật do chính TCM tự ký, không giả
     mạo) để lấy Sample score/Collaboration metrics/demographics — cách nhau 4-8s ngẫu nhiên,
-    tối đa <input type="number" id="autoDetailMax" value="20" min="1" max="100" style="width:44px; display:inline; padding:2px 4px; margin:0 2px;"> creator/lần.
+    mỗi đợt <input type="number" id="autoDetailMax" value="20" min="1" max="100" style="width:44px; display:inline; padding:2px 4px; margin:0 2px;"> creator. Danh sách import nhiều hơn số này KHÔNG bị bỏ —
+    phần dư được giữ lại, bấm "Lấy tiếp" để lấy đợt kế, hoặc bật tự động lấy tiếp bên dưới.
     Vẫn có thể bị TCM phát hiện là hành vi tự động — dùng thận trọng, có thể dừng bất kỳ lúc nào.
   </p>
+  <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin:0 0 8px 0; cursor:pointer; font-size:11px; color:#4b5563;">
+    <input type="checkbox" id="autoDetailContinueCheckbox" style="width:auto; margin:0;">
+    Tự lấy tiếp đợt kế sau khi nghỉ
+    <input type="number" id="autoDetailCooldownMin" value="1" min="0.5" max="30" step="0.5" style="width:44px; display:inline; padding:2px 4px; margin:0 2px;"> phút
+  </label>
   <div id="autoDetailQueueStatus" style="font-size:11px; color:#374151; word-break:break-word; margin-bottom:6px;"></div>
+  <button id="continueAutoDetailBtn" class="accent" style="display:none;">▶️ Lấy tiếp</button>
   <button id="stopAutoDetailBtn" class="secondary" style="display:none;">⏹ Dừng hàng đợi</button>
 
   <hr>
@@ -68,6 +76,7 @@
   </p>
   <button id="pushDetailBtn" class="accent">📋 Lấy chi tiết trang này</button>
   <div id="detailStatus"></div>
+  <button id="stopDetailSingleBtn" class="secondary" style="display:none;">⏹ Dừng</button>
 
   <p style="font-size:11px; color:#6b7280; margin:10px 0 8px 0; line-height:1.4;">
     Followers demographics (Gender/Age) đôi khi load riêng khi cuộn tới — nếu nút trên chưa bắt
@@ -75,9 +84,11 @@
   </p>
   <button id="autoScanBtn" class="secondary">🚀 Auto quét qua các tab (dự phòng)</button>
   <div id="autoScanStatus"></div>
+  <button id="stopAutoScanBtn" class="secondary" style="display:none;">⏹ Dừng</button>
 
   <button id="pushEngagementBtn" class="secondary">📊 Lấy engagement (tiktok.com)</button>
   <div id="engagementStatus"></div>
+  <button id="stopEngagementBtn" class="secondary" style="display:none;">⏹ Dừng</button>
 
   <script src="shared.js"></script>
   <script src="popup.js"></script>

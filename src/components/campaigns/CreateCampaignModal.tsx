@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { X, Target } from 'lucide-react';
+import { Campaign } from '../../types';
 
 interface CreateCampaignModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (campaignData: any) => void;
+  campaign?: Campaign | null;
 }
 
 const AGE_GROUP_OPTIONS = ['13-17', '18-24', '25-34', '35-44', '45-54', '55+'];
@@ -12,24 +14,33 @@ const AGE_GROUP_OPTIONS = ['13-17', '18-24', '25-34', '35-44', '45-54', '55+'];
 export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
   isOpen,
   onClose,
-  onSubmit
+  onSubmit,
+  campaign
 }) => {
-  const [name, setName] = useState('');
-  const [brand, setBrand] = useState('');
-  const [objective, setObjective] = useState('');
-  const [description, setDescription] = useState('');
-  const [budget, setBudget] = useState('10000');
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date(Date.now() + 30*86400000).toISOString().split('T')[0]);
-  const [productName, setProductName] = useState('');
-  const [productSku, setProductSku] = useState('');
-  const [productPrice, setProductPrice] = useState('30');
+  const isEditMode = !!campaign;
+  const [name, setName] = useState(campaign?.name || '');
+  const [brand, setBrand] = useState(campaign?.brand || '');
+  const [objective, setObjective] = useState(campaign?.objective || '');
+  const [description, setDescription] = useState(campaign?.description || '');
+  const [budget, setBudget] = useState(String(campaign?.budget ?? '10000'));
+  const [startDate, setStartDate] = useState(campaign?.startDate || new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(campaign?.endDate || new Date(Date.now() + 30*86400000).toISOString().split('T')[0]);
+  const [productName, setProductName] = useState(campaign?.products?.[0]?.name || '');
+  const [productSku, setProductSku] = useState(campaign?.products?.[0]?.sku || '');
+  const [productPrice, setProductPrice] = useState(String(campaign?.products?.[0]?.price ?? '30'));
+  const [productImageUrl, setProductImageUrl] = useState(campaign?.products?.[0]?.imageUrl || '');
+  const [productUrl, setProductUrl] = useState(campaign?.products?.[0]?.productUrl || '');
+  const [productRating, setProductRating] = useState(String(campaign?.products?.[0]?.rating ?? ''));
+  const [productReviewCount, setProductReviewCount] = useState(String(campaign?.products?.[0]?.reviewCount ?? ''));
+  const [productSoldCount, setProductSoldCount] = useState(campaign?.products?.[0]?.soldCount || '');
+  const [productHighlights, setProductHighlights] = useState((campaign?.products?.[0]?.highlights || []).join('\n'));
+  const [compensationOffer, setCompensationOffer] = useState(campaign?.products?.[0]?.compensationOffer || '');
 
   // Target audience — dùng để chấm Audience Fit trong scoreCreator() (src/scoring.ts).
   // Không bắt buộc: bỏ trống thì nhóm Audience Fit tự bị loại khỏi công thức chấm điểm.
-  const [targetGender, setTargetGender] = useState<'Any' | 'Male' | 'Female'>('Any');
-  const [targetAgeGroups, setTargetAgeGroups] = useState<string[]>([]);
-  const [targetCountries, setTargetCountries] = useState('');
+  const [targetGender, setTargetGender] = useState<'Any' | 'Male' | 'Female'>(campaign?.targetAudience?.gender || 'Any');
+  const [targetAgeGroups, setTargetAgeGroups] = useState<string[]>(campaign?.targetAudience?.ageGroups || []);
+  const [targetCountries, setTargetCountries] = useState((campaign?.targetAudience?.countries || []).join(', '));
 
   if (!isOpen) return null;
 
@@ -56,8 +67,20 @@ export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
       budget: Number(budget) || 5000,
       startDate,
       endDate,
-      status: 'Planning',
-      products: productName ? [{ id: `p-${Date.now()}`, name: productName, sku: productSku || 'SKU-001', price: Number(productPrice) || 25 }] : [],
+      ...(isEditMode ? {} : { status: 'Planning' }),
+      products: productName ? [{
+        id: campaign?.products?.[0]?.id || `p-${Date.now()}`,
+        name: productName,
+        sku: productSku || 'SKU-001',
+        price: Number(productPrice) || 25,
+        imageUrl: productImageUrl.trim() || undefined,
+        productUrl: productUrl.trim() || undefined,
+        rating: productRating.trim() ? Number(productRating) : undefined,
+        reviewCount: productReviewCount.trim() ? Number(productReviewCount) : undefined,
+        soldCount: productSoldCount.trim() || undefined,
+        highlights: productHighlights.split('\n').map(s => s.trim()).filter(Boolean),
+        compensationOffer: compensationOffer.trim() || undefined,
+      }] : [],
       targetAudience: hasTargetAudience ? {
         gender: targetGender,
         ageGroups: targetAgeGroups,
@@ -77,7 +100,7 @@ export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
         <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
             <Target className="w-5 h-5 text-indigo-600" />
-            Create New Affiliate Campaign
+            {isEditMode ? 'Edit Campaign' : 'Create New Affiliate Campaign'}
           </h3>
           <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded">
             <X className="w-5 h-5" />
@@ -184,6 +207,67 @@ export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
                 className="p-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
               />
             </div>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <input
+                type="url"
+                placeholder="Product Image URL (dùng cho email HTML)"
+                value={productImageUrl}
+                onChange={e => setProductImageUrl(e.target.value)}
+                className="p-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              />
+              <input
+                type="url"
+                placeholder="Link sản phẩm trên TikTok Shop"
+                value={productUrl}
+                onChange={e => setProductUrl(e.target.value)}
+                className="p-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              />
+            </div>
+            <div className="mt-2">
+              <input
+                type="text"
+                placeholder="Compensation offer, e.g. $100 for a package of 10 videos (open to discussion)"
+                value={compensationOffer}
+                onChange={e => setCompensationOffer(e.target.value)}
+                className="w-full p-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="5"
+                placeholder="Rating (vd: 4.8)"
+                value={productRating}
+                onChange={e => setProductRating(e.target.value)}
+                className="p-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              />
+              <input
+                type="number"
+                min="0"
+                placeholder="Review count"
+                value={productReviewCount}
+                onChange={e => setProductReviewCount(e.target.value)}
+                className="p-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              />
+              <input
+                type="text"
+                placeholder="Sold count (vd: 2.7K+)"
+                value={productSoldCount}
+                onChange={e => setProductSoldCount(e.target.value)}
+                className="p-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              />
+            </div>
+            <div className="mt-2">
+              <textarea
+                rows={3}
+                placeholder={'USP / điểm nổi bật cho email — mỗi dòng 1 ý, vd:\n50,000ppm Volufiline™\nWhite Truffle + Vegan Collagen'}
+                value={productHighlights}
+                onChange={e => setProductHighlights(e.target.value)}
+                className="w-full p-2 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              />
+            </div>
           </div>
 
           {/* Target Audience section — dùng để chấm Audience Fit cho creator, không bắt buộc */}
@@ -246,7 +330,7 @@ export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
               type="submit"
               className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-xs"
             >
-              Launch Campaign
+              {isEditMode ? 'Save Changes' : 'Launch Campaign'}
             </button>
           </div>
         </form>

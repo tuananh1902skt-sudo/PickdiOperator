@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Pickdi TCM Creator Scraper",
-  "version": "3.5.0",
+  "version": "3.8.3",
   "description": "Cào creator thật từ TikTok Shop Affiliate Center (Creator Marketplace) và tiktok.com, đẩy vào Pickdi Operator CRM.",
   "permissions": [
     "activeTab",
+    "alarms",
     "scripting",
     "storage",
     "tabs"
@@ -19,6 +20,12 @@
     "http://*/*",
     "https://*/*"
   ],
+  "externally_connectable": {
+    "matches": [
+      "http://localhost:*/*",
+      "http://127.0.0.1:*/*"
+    ]
+  },
   "background": {
     "service_worker": "background.js"
   },

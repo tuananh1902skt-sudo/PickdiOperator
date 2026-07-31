@@ -3,8 +3,10 @@ import { getEmailConfig } from './emailConfig';
 
 export async function sendEmail(opts: {
   to: string;
+  cc?: string;
   subject: string;
   text: string;
+  html?: string;
   inReplyTo?: string;
 }): Promise<{ messageId: string }> {
   const config = await getEmailConfig();
@@ -31,6 +33,16 @@ export async function sendEmail(opts: {
     subject: opts.subject,
     text: opts.text,
   };
+
+  if (opts.cc && opts.cc.trim()) {
+    mailOptions.cc = opts.cc.trim();
+  }
+
+  // Plain-text part always stays (spam-filter/deliverability fallback + clients that
+  // block HTML); html is additive, never a replacement for it.
+  if (opts.html) {
+    mailOptions.html = opts.html;
+  }
 
   if (opts.inReplyTo) {
     mailOptions.inReplyTo = opts.inReplyTo;

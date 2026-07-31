@@ -1,6 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Sparkles, Send, RefreshCw, AlertTriangle, CheckCircle2, XCircle, Clock, Loader2 } from 'lucide-react';
+import { X, Sparkles, Send, RefreshCw, AlertTriangle, CheckCircle2, XCircle, Clock, Loader2, Eye, Pencil } from 'lucide-react';
 import { Creator, Campaign, BulkOutreachJob, BulkOutreachItem } from '../../types';
+import { renderOutreachEmailHtml, renderFirstContactEmailHtml } from '../../lib/emailTemplate';
+
+interface EmailBranding {
+  brand?: string;
+  logoUrl?: string;
+  primaryColor?: string;
+  email?: string;
+  senderName?: string;
+  defaultCc?: string;
+}
 
 type SequenceStage = 'first' | 'reminder_1' | 'reminder_2' | 'reminder_3';
 
@@ -62,6 +72,7 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
 }) => {
   const [campaignId, setCampaignId] = useState(defaultCampaignId || campaigns[0]?.id || '');
   const [sequenceStage, setSequenceStage] = useState<SequenceStage>(defaultSequenceStage);
+  const [cc, setCc] = useState('');
   const [job, setJob] = useState<BulkOutreachJob | null>(null);
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
@@ -70,6 +81,8 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
   const [pacingMin, setPacingMin] = useState(45);
   const [pacingMax, setPacingMax] = useState(120);
   const [dailyCap, setDailyCap] = useState(80);
+  const [previewCreatorId, setPreviewCreatorId] = useState<string | null>(null);
+  const [branding, setBranding] = useState<EmailBranding>({});
 
   useEffect(() => {
     if (isOpen) {
@@ -77,8 +90,17 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
       setError('');
       setCampaignId(defaultCampaignId || campaigns[0]?.id || '');
       setSequenceStage(defaultSequenceStage);
+      setPreviewCreatorId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    fetch('/api/settings/email')
+      .then(res => res.json())
+      .then(data => { if (data.success) { setBranding(data.data); setCc(data.data.defaultCc || ''); } })
+      .catch(err => console.error('Failed to load email branding:', err));
   }, [isOpen]);
 
   // Poll job progress while the send loop is running in the background.
@@ -113,7 +135,7 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
       const res = await fetch('/api/outreach/bulk/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ creatorIds, campaignId, sequenceStage, workspaceId }),
+        body: JSON.stringify({ creatorIds, campaignId, sequenceStage, workspaceId, cc: cc.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.message || 'Tạo bản nháp thất bại');
@@ -170,7 +192,7 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
       const res = await fetch(`/api/outreach/bulk/${job.id}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pacingMinSeconds: pacingMin, pacingMaxSeconds: pacingMax, dailyCap }),
+        body: JSON.stringify({ pacingMinSeconds: pacingMin, pacingMaxSeconds: pacingMax, dailyCap, cc: cc.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.message || 'Gửi thất bại');
@@ -182,6 +204,7 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
     }
   };
 
+  const currentCampaign = campaigns.find(c => c.id === campaignId);
   const draftItems = job?.items.filter(i => i.status !== 'skipped_no_email' && i.status !== 'skipped_do_not_contact' && i.status !== 'skipped_cooldown') || [];
   const skippedItems = job?.items.filter(i => i.status === 'skipped_no_email' || i.status === 'skipped_do_not_contact' || i.status === 'skipped_cooldown') || [];
   const sentCount = job?.items.filter(i => i.status === 'sent').length || 0;
@@ -241,6 +264,17 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
                 </div>
               </div>
 
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">CC (tùy chọn, áp dụng cho cả đợt)</label>
+                <input
+                  type="text"
+                  placeholder="teammate@company.com, another@company.com"
+                  value={cc}
+                  onChange={e => setCc(e.target.value)}
+                  className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
+                />
+              </div>
+
               <div className="p-2.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-[11px] text-indigo-700 dark:text-indigo-300">
                 AI sẽ viết 1 email riêng cho từng creator (dựa trên niche, follower, tương tác...),
                 tự tránh lặp văn phong giữa các email trong cùng đợt. Creator không có email, đã đánh dấu
@@ -278,14 +312,22 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
                   <div key={item.creatorId} className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-slate-800 dark:text-slate-200">{item.creatorName} ({item.creatorHandle})</span>
-                      <button
-                        onClick={() => handleRegenerate(item.creatorId)}
-                        disabled={regeneratingId === item.creatorId}
-                        className="px-2 py-1 text-[10px] font-bold text-indigo-600 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/40 flex items-center gap-1"
-                      >
-                        {regeneratingId === item.creatorId ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                        Viết lại
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => setPreviewCreatorId(prev => prev === item.creatorId ? null : item.creatorId)}
+                          className="px-2 py-1 text-[10px] font-bold text-indigo-600 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/40 flex items-center gap-1"
+                        >
+                          {previewCreatorId === item.creatorId ? <><Pencil className="w-3 h-3" /> Sửa</> : <><Eye className="w-3 h-3" /> Xem trước</>}
+                        </button>
+                        <button
+                          onClick={() => handleRegenerate(item.creatorId)}
+                          disabled={regeneratingId === item.creatorId}
+                          className="px-2 py-1 text-[10px] font-bold text-indigo-600 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/40 flex items-center gap-1"
+                        >
+                          {regeneratingId === item.creatorId ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                          Viết lại
+                        </button>
+                      </div>
                     </div>
 
                     {item.source === 'template_fallback' && (
@@ -307,13 +349,47 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
                       onBlur={() => handleSaveEdit(item)}
                       className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
                     />
-                    <textarea
-                      rows={4}
-                      value={item.body}
-                      onChange={e => updateItem(item.creatorId, { body: e.target.value })}
-                      onBlur={() => handleSaveEdit(item)}
-                      className="w-full p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white leading-relaxed"
-                    />
+                    {previewCreatorId === item.creatorId ? (
+                      <iframe
+                        title={`Preview - ${item.creatorName}`}
+                        sandbox=""
+                        srcDoc={sequenceStage === 'first'
+                          ? renderFirstContactEmailHtml({
+                              creatorName: item.creatorName,
+                              senderName: branding.senderName,
+                              brandName: currentCampaign?.brand || branding.brand,
+                              logoUrl: branding.logoUrl,
+                              primaryColor: branding.primaryColor,
+                              productName: currentCampaign?.products?.[0]?.name,
+                              productImageUrl: currentCampaign?.products?.[0]?.imageUrl,
+                              productUrl: currentCampaign?.products?.[0]?.productUrl,
+                              productRating: currentCampaign?.products?.[0]?.rating,
+                              productReviewCount: currentCampaign?.products?.[0]?.reviewCount,
+                              productSoldCount: currentCampaign?.products?.[0]?.soldCount,
+                              productHighlights: currentCampaign?.products?.[0]?.highlights,
+                              compensationOffer: currentCampaign?.products?.[0]?.compensationOffer,
+                              bodyText: item.body,
+                              ctaHref: branding.email ? `mailto:${branding.email}` : undefined,
+                            })
+                          : renderOutreachEmailHtml({
+                              bodyText: item.body,
+                              brandName: currentCampaign?.brand || branding.brand,
+                              logoUrl: branding.logoUrl,
+                              primaryColor: branding.primaryColor,
+                              ctaHref: branding.email ? `mailto:${branding.email}` : undefined,
+                              signatureName: branding.brand,
+                            })}
+                        className="w-full h-72 rounded-lg border border-slate-200 dark:border-slate-700 bg-white"
+                      />
+                    ) : (
+                      <textarea
+                        rows={4}
+                        value={item.body}
+                        onChange={e => updateItem(item.creatorId, { body: e.target.value })}
+                        onBlur={() => handleSaveEdit(item)}
+                        className="w-full p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white leading-relaxed"
+                      />
+                    )}
                   </div>
                 ))}
               </div>

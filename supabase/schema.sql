@@ -108,6 +108,10 @@ alter table creators add column if not exists "collabMetrics" jsonb;
 alter table creators add column if not exists "videoMetrics" jsonb;
 alter table creators add column if not exists "liveMetrics" jsonb;
 
+-- creator_oecuid từ TCM (affiliate-us.tiktok.com) — dùng để dựng link thẳng tới trang
+-- creator detail thật trên TCM, hiển thị cạnh link profile TikTok trong CreatorDetailDrawer.
+alter table creators add column if not exists "tcmCreatorOecuid" text;
+
 create table if not exists campaigns (
   id text primary key,
   "workspaceId" text,

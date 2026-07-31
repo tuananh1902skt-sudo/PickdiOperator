@@ -27,6 +27,7 @@
 importScripts('shared.js');
 
 const STORAGE_KEY = 'autoDetailState';
+const AUTO_CONTINUE_ALARM = 'autoDetailContinue';
 const TAB_LOAD_TIMEOUT_MS = 20000;
 const POST_LOAD_BUFFER_MS = 1800; // đợi thêm sau khi tab 'complete' để interceptor.js kịp merge response
 
@@ -132,7 +133,20 @@ async function runLoop() {
       const state = await getState();
       if (!state || state.status !== 'running') break;
       if (state.index >= state.queue.length) {
-        await patchState({ status: 'done' });
+        // Hết chunk hiện tại — nếu còn creator dư (pending) và user đã bật auto-continue, đặt
+        // 1 chrome.alarms (KHÔNG sleep() trong service worker — SW có thể bị Chrome tắt giữa
+        // chừng lúc idle, sleep() sẽ chết theo và không bao giờ tự nạp tiếp) để nghỉ dài hơn
+        // nhiều so với 4-8s giữa 2 creator (mặc định 45s) trước khi tự nạp chunk kế tiếp, giống
+        // hành vi "nghỉ giải lao" của người dùng thật hơn là dừng hẳn rồi chạy lại ngay. Nếu
+        // không bật auto-continue, dừng ở 'done' và giữ nguyên `pending` để user tự bấm
+        // "Lấy tiếp" bất kỳ lúc nào (kể cả sau khi đóng popup).
+        if (state.autoContinue && state.pending && state.pending.length > 0) {
+          await patchState({ status: 'done', currentHandle: null });
+          const cooldownMinutes = Math.max((state.cooldownMs || 45000) / 60000, 0.5);
+          chrome.alarms.create(AUTO_CONTINUE_ALARM, { delayInMinutes: cooldownMinutes });
+        } else {
+          await patchState({ status: 'done' });
+        }
         break;
       }
 
@@ -154,10 +168,8 @@ async function runLoop() {
       });
 
       const after = await getState();
-      if (!after || after.status !== 'running' || after.index >= after.queue.length) {
-        if (after && after.index >= after.queue.length) await patchState({ status: 'done' });
-        break;
-      }
+      if (!after || after.status !== 'running') break;
+      if (after.index >= after.queue.length) continue; // quay lại đầu vòng lặp để check auto-continue/pending
 
       await sleep(randomDelay(state.delayMinMs || 4000, state.delayMaxMs || 8000));
     }
@@ -166,17 +178,24 @@ async function runLoop() {
   }
 }
 
-async function startAutoDetailQueueInternal(items, webappUrl, shopId, shopRegion, maxCount) {
-  const queued = items.slice(0, maxCount || 20);
+async function startAutoDetailQueueInternal(items, webappUrl, shopId, shopRegion, maxCount, autoContinue, cooldownMs) {
+  const chunkSize = maxCount || 20;
+  const queued = items.slice(0, chunkSize);
+  const pending = items.slice(chunkSize);
   await setState({
     status: queued.length > 0 ? 'running' : 'done',
     queue: queued,
+    pending,
+    chunkSize,
+    totalCount: items.length,
     index: 0,
     webappUrl,
     shopId,
     shopRegion: shopRegion || 'US',
     delayMinMs: 4000,
     delayMaxMs: 8000,
+    autoContinue: !!autoContinue,
+    cooldownMs: cooldownMs || 45000,
     processedCount: 0,
     failedCount: 0,
     results: [],
@@ -185,7 +204,181 @@ async function startAutoDetailQueueInternal(items, webappUrl, shopId, shopRegion
     updatedAt: Date.now(),
   });
   runLoop();
-  return queued.length;
+  return { queued: queued.length, pending: pending.length, total: items.length };
+}
+
+// Nạp tiếp chunk kế tiếp từ `pending` sau khi chunk trước đã 'done' — dùng cho nút "Lấy tiếp"
+// (user tự bấm) khi autoContinue tắt, hoặc khi user bật lại autoContinue giữa chừng.
+// Cộng dồn processedCount/failedCount/results thay vì reset, vì đây vẫn là cùng 1 danh sách
+// gốc đã import, chỉ tiếp tục phần chưa lấy — không phải một lượt chạy mới.
+async function continueAutoDetailQueueInternal() {
+  const state = await getState();
+  if (!state || !state.pending || state.pending.length === 0) return { continued: false, pending: 0 };
+  if (state.status === 'running') return { continued: false, pending: state.pending.length }; // đang chạy rồi, không cần nạp tay
+  const chunkSize = state.chunkSize || 20;
+  const nextQueue = state.pending.slice(0, chunkSize);
+  const nextPending = state.pending.slice(chunkSize);
+  await patchState({ status: 'running', queue: nextQueue, pending: nextPending, index: 0, currentHandle: null });
+  runLoop();
+  return { continued: true, queued: nextQueue.length, pending: nextPending.length };
+}
+
+// ================== HÀNG ĐỢI "TÌM CID TCM THEO HANDLE" (webapp bridge) ==================
+// Creator chỉ có TikTok handle (Kalodata/manual/file import) chưa có tcmCreatorOecuid — không
+// nằm trong bất kỳ danh sách TCM nào đã capture nên không thể mở thẳng trang chi tiết. Thay vào
+// đó: tự mở tab "Find creators", gõ handle vào ô search thật của TCM (searchTcmByHandle ở
+// shared.js — vẫn chỉ mô phỏng thao tác người dùng thật, TCM tự ký request), đọc kết quả khớp
+// đúng handle để lấy cid + category/niche/GMV, rồi POST thẳng batch-import. Cùng nhịp độ thận
+// trọng (tuần tự + delay ngẫu nhiên) như hàng đợi auto-detail ở trên.
+const SEARCH_CID_STORAGE_KEY = 'searchCidState';
+const SEARCH_TAB_POST_LOAD_BUFFER_MS = 1200;
+
+let isSearchCidProcessing = false;
+
+async function getSearchCidState() {
+  const res = await chrome.storage.local.get([SEARCH_CID_STORAGE_KEY]);
+  return res[SEARCH_CID_STORAGE_KEY] || null;
+}
+
+async function setSearchCidState(state) {
+  await chrome.storage.local.set({ [SEARCH_CID_STORAGE_KEY]: state });
+}
+
+async function patchSearchCidState(patch) {
+  const state = (await getSearchCidState()) || {};
+  const next = { ...state, ...patch, updatedAt: Date.now() };
+  await setSearchCidState(next);
+  return next;
+}
+
+async function processOneSearchCidItem(state) {
+  const item = state.queue[state.index];
+  let tab;
+  let previousActiveTabId;
+  try {
+    const url = `https://affiliate-us.tiktok.com/connection/creator?shop_region=${encodeURIComponent(state.shopRegion || 'US')}&shop_id=${encodeURIComponent(state.shopId || '')}`;
+    tab = await chrome.tabs.create({ url, active: false });
+    await waitForTabComplete(tab.id);
+    // Khác trang chi tiết creator (SSR gần đủ data ngay khi load) — ô AI-search trên Find
+    // Creators là component client-render nặng, và Chrome DỪNG HẲN requestAnimationFrame cho tab
+    // nền/ẩn (không chỉ giảm tần suất) nên tab mở active:false có thể không bao giờ mount xong ô
+    // search trong lúc vẫn ẩn — đây là nguyên nhân thật gây lỗi "search_box_not_found" khi test
+    // (xác nhận bằng cách so sánh với lần test tay trước đó luôn thành công vì tab đang active).
+    // Đánh đổi: focus tạm sang tab này khi chạy script rồi trả lại tab đang active của user ngay
+    // sau đó — có nháy tab qua lại mỗi creator, chấp nhận được để đổi lấy độ tin cậy.
+    const [prevActiveTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    previousActiveTabId = prevActiveTab && prevActiveTab.id;
+    await chrome.tabs.update(tab.id, { active: true });
+    await sleep(SEARCH_TAB_POST_LOAD_BUFFER_MS);
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: searchTcmByHandle,
+      args: [item.handle],
+    });
+    const outcome = results && results[0] && results[0].result;
+    if (!outcome || outcome.error || !outcome.match) {
+      const errorMessages = {
+        no_match: 'Không tìm thấy creator này trên TCM.',
+        search_box_not_found: 'Không tìm thấy ô search trên trang Find Creators (trang tải chậm hoặc giao diện TCM đã đổi).',
+        search_button_not_found: 'Tìm thấy ô search nhưng không tìm thấy nút search (giao diện TCM có thể đã đổi).',
+      };
+      const message =
+        (outcome && errorMessages[outcome.error]) ||
+        'Không thao tác được ô search TCM (giao diện TCM có thể đã thay đổi).';
+      return { ok: false, handle: item.handle, message };
+    }
+
+    const normalized = normalizeCreator(outcome.match);
+    if (!normalized.handle) {
+      return { ok: false, handle: item.handle, message: 'Kết quả search thiếu handle hợp lệ.' };
+    }
+
+    const res = await fetch(`${state.webappUrl}/api/creators/batch-import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'Pickdi TCM Extension (handle-search)', metricsSource: 'tcm', creators: [normalized] }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!data || !data.success) {
+      return { ok: false, handle: item.handle, message: (data && data.message) || 'Webapp từ chối (HTTP ' + res.status + ').' };
+    }
+    return { ok: true, handle: item.handle, cid: normalized.tcmCreatorOecuid };
+  } catch (err) {
+    return { ok: false, handle: item && item.handle, message: String((err && err.message) || err) };
+  } finally {
+    if (tab && tab.id) {
+      chrome.tabs.remove(tab.id).catch(() => {});
+    }
+    if (previousActiveTabId) {
+      chrome.tabs.update(previousActiveTabId, { active: true }).catch(() => {});
+    }
+  }
+}
+
+async function runSearchCidLoop() {
+  if (isSearchCidProcessing) return;
+  isSearchCidProcessing = true;
+  try {
+    for (;;) {
+      const state = await getSearchCidState();
+      if (!state || state.status !== 'running') break;
+      if (state.index >= state.queue.length) {
+        await patchSearchCidState({ status: 'done', currentHandle: null });
+        break;
+      }
+
+      const item = state.queue[state.index];
+      await patchSearchCidState({ currentHandle: item.handle });
+
+      const result = await processOneSearchCidItem(state);
+
+      const fresh = (await getSearchCidState()) || state;
+      if (fresh.status !== 'running') break;
+
+      const results = [...(fresh.results || []), result];
+      await patchSearchCidState({
+        index: fresh.index + 1,
+        results,
+        processedCount: (fresh.processedCount || 0) + 1,
+        failedCount: (fresh.failedCount || 0) + (result.ok ? 0 : 1),
+        currentHandle: null,
+      });
+
+      const after = await getSearchCidState();
+      if (!after || after.status !== 'running') break;
+      if (after.index >= after.queue.length) continue;
+
+      await sleep(randomDelay(4000, 8000));
+    }
+  } finally {
+    isSearchCidProcessing = false;
+  }
+}
+
+async function startSearchCidQueueInternal(items, webappUrl, shopId, shopRegion, maxCount) {
+  const chunkSize = maxCount || 20;
+  const queued = items.slice(0, chunkSize);
+  const pending = items.slice(chunkSize);
+  await setSearchCidState({
+    status: queued.length > 0 ? 'running' : 'done',
+    queue: queued,
+    pending,
+    totalCount: items.length,
+    index: 0,
+    webappUrl,
+    shopId,
+    shopRegion: shopRegion || 'US',
+    processedCount: 0,
+    failedCount: 0,
+    results: [],
+    currentHandle: null,
+    startedAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+  runSearchCidLoop();
+  return { queued: queued.length, pending: pending.length, total: items.length };
 }
 
 // ================== HÀNG ĐỢI JOB ĐƠN LẺ (session 10) ==================
@@ -196,6 +389,18 @@ async function startAutoDetailQueueInternal(items, webappUrl, shopId, shopRegion
 // — độc lập hoàn toàn với vòng đời popup, y hệt cơ chế hàng đợi auto-detail ở trên. popup.js
 // chỉ gửi 1 message "bắt đầu" rồi poll GET_EXT_JOBS để hiển thị lại, kể cả sau khi đóng/mở lại.
 const EXT_JOBS_KEY = 'extJobsState';
+
+// Các job này chỉ chạy 1-2 bước async (đọc tab, rồi POST) chứ không có vòng lặp như
+// auto-detail-queue, nên không thể "ngắt" nửa chừng 1 request đang bay — best-effort: đánh dấu
+// jobType vào set này, job tự kiểm tra sau mỗi bước await và dừng ngay trước bước kế tiếp
+// (không POST nếu đã bị đánh dấu dừng).
+const stoppedJobTypes = new Set();
+
+async function stopIfRequested(jobType) {
+  if (!stoppedJobTypes.has(jobType)) return false;
+  await setJob(jobType, { status: 'stopped', message: '⏹ Đã dừng.' });
+  return true;
+}
 
 async function getJobs() {
   const res = await chrome.storage.local.get([EXT_JOBS_KEY]);
@@ -223,6 +428,7 @@ async function postBatchImport(webappUrl, source, metricsSource, creators) {
 
 async function runListImportJob(message) {
   const jobType = 'list-import';
+  stoppedJobTypes.delete(jobType);
   try {
     await setJob(jobType, { status: 'running', message: '⏳ Đang đọc data đã bắt được...' });
 
@@ -231,6 +437,7 @@ async function runListImportJob(message) {
       world: 'MAIN',
       func: readTcmCapturedList,
     });
+    if (await stopIfRequested(jobType)) return;
     const scraped = results && results[0] && results[0].result;
     const rawList = (scraped && scraped.list) || [];
     if (rawList.length === 0) {
@@ -253,6 +460,7 @@ async function runListImportJob(message) {
       await setJob(jobType, { status: 'error', message: `❌ ${err.message}`, failedPayload: normalized });
       return;
     }
+    if (await stopIfRequested(jobType)) return;
     await setJob(jobType, { status: 'done', message: `✅ +${data.importedCount} creator mới (${data.updatedCount} cập nhật) / ${rawList.length} đã bắt được` });
 
     if (message.autoDetail) {
@@ -262,6 +470,9 @@ async function runListImportJob(message) {
         shopId = u.searchParams.get('shop_id') || '';
         shopRegion = u.searchParams.get('shop_region') || 'US';
       } catch (e) {}
+      // Ghi nhớ shop_id/shop_region đọc được lần này — webapp (không có tab TCM đang mở) sẽ
+      // dùng lại giá trị này làm fallback khi tự kích hoạt hàng đợi qua externally_connectable.
+      if (shopId) await chrome.storage.local.set({ lastShopId: shopId, lastShopRegion: shopRegion });
       if (!shopId) {
         await setJob('auto-detail-kickoff', { status: 'error', message: '⚠️ Không đọc được shop_id từ tab hiện tại — hàng đợi tự động lấy chi tiết chưa chạy.' });
         return;
@@ -270,7 +481,7 @@ async function runListImportJob(message) {
         .filter((c) => c.handle && c.tcmCreatorOecuid)
         .map((c) => ({ cid: c.tcmCreatorOecuid, handle: c.handle }));
       if (items.length > 0) {
-        await startAutoDetailQueueInternal(items, message.webappUrl, shopId, shopRegion, message.autoDetailMax);
+        await startAutoDetailQueueInternal(items, message.webappUrl, shopId, shopRegion, message.autoDetailMax, message.autoDetailContinue, message.autoDetailCooldownMs);
       }
     }
   } catch (err) {
@@ -280,6 +491,7 @@ async function runListImportJob(message) {
 
 async function runDetailJob(message) {
   const jobType = message.mode === 'scan' ? 'auto-scan' : 'detail-single';
+  stoppedJobTypes.delete(jobType);
   try {
     await setJob(jobType, { status: 'running', message: message.mode === 'scan' ? '⏳ Đang tự động click qua các tab (~10s)...' : '⏳ Đang đọc data đã bắt được...' });
 
@@ -288,6 +500,7 @@ async function runDetailJob(message) {
       world: 'MAIN',
       func: message.mode === 'scan' ? autoScanAndReadTcmProfile : readTcmLastProfile,
     });
+    if (await stopIfRequested(jobType)) return;
     const scraped = results && results[0] && results[0].result;
     if (!scraped) {
       await setJob(jobType, { status: 'error', message: '❌ Không đọc được trang.' });
@@ -318,6 +531,7 @@ async function runDetailJob(message) {
       await setJob(jobType, { status: 'error', message: `❌ ${err.message}`, failedPayload: detail });
       return;
     }
+    if (await stopIfRequested(jobType)) return;
     const summary = summarizeCapturedGroups(detail);
     await setJob(jobType, { status: 'done', message: `✅ Đã cập nhật chi tiết cho @${detail.handle}. ${summary} ${tabReport}` });
   } catch (err) {
@@ -327,6 +541,7 @@ async function runDetailJob(message) {
 
 async function runEngagementJob(message) {
   const jobType = 'push-engagement';
+  stoppedJobTypes.delete(jobType);
   try {
     await setJob(jobType, { status: 'running', message: '⏳ Đang đọc trang...' });
 
@@ -335,6 +550,7 @@ async function runEngagementJob(message) {
       world: 'MAIN',
       func: scrapeTikTokEngagementPage,
     });
+    if (await stopIfRequested(jobType)) return;
     const scraped = results && results[0] && results[0].result;
     if (!scraped) {
       await setJob(jobType, { status: 'error', message: '❌ Không đọc được trang.' });
@@ -366,6 +582,7 @@ async function runEngagementJob(message) {
       await setJob(jobType, { status: 'error', message: `❌ ${err.message}`, failedPayload: creatorItem });
       return;
     }
+    if (await stopIfRequested(jobType)) return;
     await setJob(jobType, { status: 'done', message: `✅ Đã cập nhật engagement cho @${creatorItem.handle}` });
   } catch (err) {
     await setJob(jobType, { status: 'error', message: `❌ ${String((err && err.message) || err)}` });
@@ -378,15 +595,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'START_AUTO_DETAIL_QUEUE') {
     (async () => {
       const items = Array.isArray(message.items) ? message.items : [];
-      const queued = await startAutoDetailQueueInternal(items, message.webappUrl, message.shopId, message.shopRegion, message.maxCount);
-      sendResponse({ ok: true, queued });
+      const result = await startAutoDetailQueueInternal(items, message.webappUrl, message.shopId, message.shopRegion, message.maxCount, message.autoContinue, message.cooldownMs);
+      sendResponse({ ok: true, ...result });
     })();
     return true; // async sendResponse
   }
 
+  if (message.type === 'CONTINUE_AUTO_DETAIL_QUEUE') {
+    (async () => {
+      const result = await continueAutoDetailQueueInternal();
+      sendResponse({ ok: true, ...result });
+    })();
+    return true;
+  }
+
   if (message.type === 'STOP_AUTO_DETAIL_QUEUE') {
     (async () => {
-      await patchState({ status: 'stopped' });
+      chrome.alarms.clear(AUTO_CONTINUE_ALARM);
+      await patchState({ status: 'stopped', autoContinue: false });
       sendResponse({ ok: true });
     })();
     return true;
@@ -426,7 +652,148 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'STOP_EXT_JOB') {
+    (async () => {
+      const jobType = message.jobType;
+      stoppedJobTypes.add(jobType);
+      const jobs = await getJobs();
+      if (jobs[jobType] && jobs[jobType].status === 'running') {
+        await setJob(jobType, { status: 'stopped', message: '⏹ Đã dừng.' });
+      }
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
   return false;
+});
+
+// ================== TRIGGER TỪ WEBAPP (externally_connectable) ==================
+// Webapp (Creator CRM) không có tab TCM đang mở nên không tự đọc được shop_id/shop_region từ
+// URL như luồng "Import creator đã bắt được" — dùng lại shop_id/shop_region đã ghi nhớ từ lần
+// gần nhất user tự chạy 1 trong 2 luồng đó trên chính máy này (xem runListImportJob ở trên).
+// Không tự fetch()/ký request gì mới — vẫn chỉ là mở tab thật + đọc data TCM tự trả về, y hệt
+// cơ chế đã có, chỉ khác nguồn kích hoạt.
+chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  if (!message || typeof message !== 'object') return false;
+
+  if (message.type === 'WEBAPP_PING') {
+    sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
+    return false;
+  }
+
+  if (message.type === 'WEBAPP_START_AUTO_DETAIL_QUEUE') {
+    (async () => {
+      const items = Array.isArray(message.items) ? message.items : [];
+      if (items.length === 0) {
+        sendResponse({ ok: false, message: 'Không có creator nào để cào (thiếu tcmCreatorOecuid).' });
+        return;
+      }
+      let shopId = message.shopId, shopRegion = message.shopRegion;
+      if (!shopId) {
+        const stored = await chrome.storage.local.get(['lastShopId', 'lastShopRegion']);
+        shopId = stored.lastShopId;
+        shopRegion = stored.lastShopRegion || 'US';
+      }
+      if (!shopId) {
+        sendResponse({
+          ok: false,
+          message: 'Chưa có Shop ID. Hãy mở popup extension, bấm "Import creator đã bắt được" ít nhất 1 lần từ tab TCM thật trước (extension tự ghi nhớ Shop ID từ đó) rồi thử lại.',
+        });
+        return;
+      }
+      const result = await startAutoDetailQueueInternal(
+        items,
+        message.webappUrl,
+        shopId,
+        shopRegion,
+        message.maxCount,
+        message.autoContinue !== false,
+        message.cooldownMs
+      );
+      sendResponse({ ok: true, ...result });
+    })();
+    return true; // async sendResponse
+  }
+
+  if (message.type === 'WEBAPP_CONTINUE_AUTO_DETAIL_QUEUE') {
+    (async () => {
+      const result = await continueAutoDetailQueueInternal();
+      sendResponse({ ok: true, ...result });
+    })();
+    return true;
+  }
+
+  if (message.type === 'WEBAPP_STOP_AUTO_DETAIL_QUEUE') {
+    (async () => {
+      chrome.alarms.clear(AUTO_CONTINUE_ALARM);
+      await patchState({ status: 'stopped', autoContinue: false });
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
+  if (message.type === 'WEBAPP_GET_AUTO_DETAIL_STATUS') {
+    (async () => {
+      const state = await getState();
+      sendResponse(state);
+    })();
+    return true;
+  }
+
+  if (message.type === 'WEBAPP_START_SEARCH_CID_QUEUE') {
+    (async () => {
+      const items = Array.isArray(message.items) ? message.items : [];
+      if (items.length === 0) {
+        sendResponse({ ok: false, message: 'Không có creator nào để tìm (thiếu handle).' });
+        return;
+      }
+      let shopId = message.shopId, shopRegion = message.shopRegion;
+      if (!shopId) {
+        const stored = await chrome.storage.local.get(['lastShopId', 'lastShopRegion']);
+        shopId = stored.lastShopId;
+        shopRegion = stored.lastShopRegion || 'US';
+      }
+      if (!shopId) {
+        sendResponse({
+          ok: false,
+          message: 'Chưa có Shop ID. Hãy mở popup extension, bấm "Import creator đã bắt được" ít nhất 1 lần từ tab TCM thật trước rồi thử lại.',
+        });
+        return;
+      }
+      const result = await startSearchCidQueueInternal(items, message.webappUrl, shopId, shopRegion, message.maxCount);
+      sendResponse({ ok: true, ...result });
+    })();
+    return true;
+  }
+
+  if (message.type === 'WEBAPP_STOP_SEARCH_CID_QUEUE') {
+    (async () => {
+      await patchSearchCidState({ status: 'stopped' });
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
+  if (message.type === 'WEBAPP_GET_SEARCH_CID_STATUS') {
+    (async () => {
+      const state = await getSearchCidState();
+      sendResponse(state);
+    })();
+    return true;
+  }
+
+  return false;
+});
+
+// Cooldown giữa 2 chunk auto-continue dùng chrome.alarms (không sleep() trong service worker)
+// vì SW có thể bị Chrome tắt giữa chừng lúc idle (vài chục giây) — alarms vẫn kích hoạt lại SW
+// đúng giờ dù nó đã bị tắt hẳn, còn 1 Promise sleep() đang treo thì chết theo SW luôn.
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== AUTO_CONTINUE_ALARM) return;
+  const state = await getState();
+  if (!state || state.status !== 'done' || !state.autoContinue || !state.pending || state.pending.length === 0) return;
+  await continueAutoDetailQueueInternal();
 });
 
 // Nếu service worker bị Chrome tắt giữa chừng rồi dựng lại (ví dụ do idle timeout), top-level
@@ -435,4 +802,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 (async () => {
   const state = await getState();
   if (state && state.status === 'running') runLoop();
+  const searchCidState = await getSearchCidState();
+  if (searchCidState && searchCidState.status === 'running') runSearchCidLoop();
 })();

@@ -3,8 +3,9 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { ZipArchive } from 'archiver';
 import { scoreCreator } from './src/scoring';
-import { getEmailConfig, saveEmailConfig } from './src/lib/emailConfig';
+import { getEmailConfig, saveEmailConfig, DEFAULT_SENDER_NAME } from './src/lib/emailConfig';
 import { sendEmail } from './src/lib/mailer';
+import { renderOutreachEmailHtml, renderFirstContactEmailHtml } from './src/lib/emailTemplate';
 import { checkInboxForReplies } from './src/lib/imapSync';
 import { downloadAvatar } from './src/lib/avatars';
 import { Client as QStashClient, Receiver as QStashReceiver } from '@upstash/qstash';
@@ -66,12 +67,14 @@ import {
   getCreatorByHandle,
   saveCreator,
   archiveCreator,
+  deleteCreatorPermanently,
   getAllWorkspaces,
   getWorkspaceById,
   saveWorkspace,
   getAllCampaigns,
   getCampaignById,
   saveCampaign,
+  archiveCampaign,
   getAllOutreach,
   saveOutreach,
   getAllConversations,
@@ -481,6 +484,16 @@ app.delete('/api/creators/:id', async (req, res) => {
   res.json({ success: true, message: 'Creator archived successfully' });
 });
 
+app.delete('/api/creators/:id/permanent', async (req, res) => {
+  const creator = await getCreatorById(req.params.id);
+  if (!creator) {
+    return res.status(404).json({ success: false, message: 'Creator not found' });
+  }
+  await deleteCreatorPermanently(req.params.id);
+  await addActivity('Anh Tuan', 'permanently deleted creator', `@${creator.handle}`, 'creator', creator.id);
+  res.json({ success: true, message: 'Creator permanently deleted' });
+});
+
 // ==========================================
 // CREATOR IMPORT ROUTES
 // ==========================================
@@ -797,6 +810,14 @@ app.patch('/api/campaigns/:id', async (req, res) => {
   res.json({ success: true, data: updatedCampaign });
 });
 
+app.delete('/api/campaigns/:id', async (req, res) => {
+  const campaign = await archiveCampaign(req.params.id);
+  if (campaign) {
+    await addActivity('Anh Tuan', 'archived campaign', campaign.name, 'campaign', campaign.id);
+  }
+  res.json({ success: true, message: 'Campaign archived successfully' });
+});
+
 // Creator ↔ Campaign assignments — 1 creator có thể được gán vào nhiều campaign ở nhiều
 // brand/workspace khác nhau cùng lúc. Đây là nguồn sự thật duy nhất cho việc "creator này
 // đang chạy campaign nào ở brand nào", thay cho field campaignId đơn (đã bỏ) trên Creator.
@@ -870,13 +891,17 @@ app.get('/api/settings/email', async (req, res) => {
       smtpPort: config.smtpPort ?? null,
       brand: config.brand || '',
       product: config.product || '',
+      logoUrl: config.logoUrl || '',
+      primaryColor: config.primaryColor || '',
+      senderName: config.senderName || DEFAULT_SENDER_NAME,
+      defaultCc: config.defaultCc || '',
       hasPassword: Boolean(config.password)
     }
   });
 });
 
 app.put('/api/settings/email', async (req, res) => {
-  const { email, password, imapHost, imapPort, smtpHost, smtpPort, brand, product } = req.body;
+  const { email, password, imapHost, imapPort, smtpHost, smtpPort, brand, product, logoUrl, primaryColor, senderName, defaultCc } = req.body;
   if (email && (!email.includes('@') || !email.includes('.'))) {
     return res.status(400).json({ success: false, message: 'Email không hợp lệ' });
   }
@@ -888,7 +913,11 @@ app.put('/api/settings/email', async (req, res) => {
     smtpHost,
     smtpPort: smtpPort !== undefined && smtpPort !== '' ? Number(smtpPort) : undefined,
     brand,
-    product
+    product,
+    logoUrl,
+    primaryColor,
+    senderName,
+    defaultCc
   });
   res.json({
     success: true,
@@ -900,6 +929,10 @@ app.put('/api/settings/email', async (req, res) => {
       smtpPort: updated.smtpPort ?? null,
       brand: updated.brand || '',
       product: updated.product || '',
+      logoUrl: updated.logoUrl || '',
+      primaryColor: updated.primaryColor || '',
+      senderName: updated.senderName || DEFAULT_SENDER_NAME,
+      defaultCc: updated.defaultCc || '',
       hasPassword: Boolean(updated.password)
     }
   });
@@ -997,16 +1030,53 @@ async function deliverOutreachEmail(payload: {
   campaignName?: string;
   subject: string;
   body: string;
+  cc?: string;
   workspaceId?: string;
   sequenceStage?: OutreachEmail['sequenceStage'];
 }): Promise<{ outreach: OutreachEmail; conversation: Conversation; assignment: any }> {
-  const { creatorId, creatorName, creatorHandle, campaignId, campaignName, subject, body, workspaceId } = payload;
+  const { creatorId, creatorName, creatorHandle, campaignId, campaignName, subject, body, cc, workspaceId } = payload;
 
   const cr = await getCreatorById(creatorId);
   if (!cr) throw new Error('Không tìm thấy creator trong CRM');
   if (!cr.email || !cr.email.trim()) throw new Error('Creator này chưa có email');
 
-  const { messageId } = await sendEmail({ to: cr.email, subject, text: body });
+  const emailConfig = await getEmailConfig();
+  const isFirstContact = !payload.sequenceStage || payload.sequenceStage === 'first';
+  const ctaHref = emailConfig.email ? `mailto:${emailConfig.email}?subject=${encodeURIComponent(`Re: ${subject}`)}` : undefined;
+
+  let html: string;
+  if (isFirstContact) {
+    const campaign = campaignId ? await getCampaignById(campaignId) : undefined;
+    const product = campaign?.products?.[0];
+    html = renderFirstContactEmailHtml({
+      creatorName,
+      senderName: emailConfig.senderName || DEFAULT_SENDER_NAME,
+      brandName: campaignName || emailConfig.brand,
+      logoUrl: emailConfig.logoUrl,
+      primaryColor: emailConfig.primaryColor,
+      productName: product?.name,
+      productImageUrl: product?.imageUrl,
+      productUrl: product?.productUrl,
+      productRating: product?.rating,
+      productReviewCount: product?.reviewCount,
+      productSoldCount: product?.soldCount,
+      productHighlights: product?.highlights,
+      compensationOffer: product?.compensationOffer,
+      bodyText: body,
+      ctaHref,
+    });
+  } else {
+    html = renderOutreachEmailHtml({
+      bodyText: body,
+      brandName: campaignName || emailConfig.brand,
+      logoUrl: emailConfig.logoUrl,
+      primaryColor: emailConfig.primaryColor,
+      ctaHref,
+      signatureName: emailConfig.brand,
+    });
+  }
+
+  const { messageId } = await sendEmail({ to: cr.email, cc, subject, text: body, html });
 
   const newOutreach: OutreachEmail = {
     id: `out-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -1018,6 +1088,7 @@ async function deliverOutreachEmail(payload: {
     campaignName,
     subject,
     body,
+    cc,
     status: 'Sent',
     sentAt: new Date().toISOString(),
     followUpCount: 0,
@@ -1126,12 +1197,14 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
       sequenceStage = 'first',
       tone,
       workspaceId,
+      cc,
     }: {
       creatorIds: string[];
       campaignId?: string;
       sequenceStage: SequenceStage;
       tone?: string;
       workspaceId?: string;
+      cc?: string;
     } = req.body;
 
     if (!Array.isArray(creatorIds) || creatorIds.length === 0) {
@@ -1208,6 +1281,7 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
       campaignId,
       campaignName: campaign?.name,
       sequenceStage,
+      cc,
       status: 'ready',
       pacingMinSeconds: DEFAULT_PACING_MIN_SECONDS,
       pacingMaxSeconds: DEFAULT_PACING_MAX_SECONDS,
@@ -1312,6 +1386,7 @@ async function sendNextBulkOutreachItem(jobId: string) {
       campaignName: job.campaignName,
       subject: item.subject,
       body: item.body,
+      cc: job.cc,
       workspaceId: job.workspaceId,
       sequenceStage: job.sequenceStage,
     });
@@ -1370,10 +1445,11 @@ app.post('/api/outreach/bulk/:jobId/send', async (req, res) => {
     return res.status(409).json({ success: false, message: 'Job này đã gửi hoặc đang gửi rồi' });
   }
 
-  const { pacingMinSeconds, pacingMaxSeconds, dailyCap } = req.body || {};
+  const { pacingMinSeconds, pacingMaxSeconds, dailyCap, cc } = req.body || {};
   if (typeof pacingMinSeconds === 'number' && pacingMinSeconds > 0) job.pacingMinSeconds = pacingMinSeconds;
   if (typeof pacingMaxSeconds === 'number' && pacingMaxSeconds > 0) job.pacingMaxSeconds = pacingMaxSeconds;
   if (typeof dailyCap === 'number' && dailyCap > 0) job.dailyCap = dailyCap;
+  if (typeof cc === 'string') job.cc = cc;
   job.status = 'sending';
   await saveBulkOutreachJob(job);
 

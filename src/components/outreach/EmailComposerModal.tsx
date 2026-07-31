@@ -1,13 +1,23 @@
 import React, { useEffect, useState } from 'react';
-import { X, Sparkles, Send, RefreshCw } from 'lucide-react';
+import { X, Sparkles, Send, RefreshCw, Eye, Pencil } from 'lucide-react';
 import { Creator, Campaign } from '../../types';
+import { renderFirstContactEmailHtml } from '../../lib/emailTemplate';
+
+interface EmailBranding {
+  brand?: string;
+  logoUrl?: string;
+  primaryColor?: string;
+  email?: string;
+  senderName?: string;
+  defaultCc?: string;
+}
 
 interface EmailComposerModalProps {
   isOpen: boolean;
   onClose: () => void;
   creator: Creator | null;
   campaigns: Campaign[];
-  onSendEmail: (payload: { creatorId: string; creatorName: string; creatorHandle: string; campaignId?: string; campaignName?: string; subject: string; body: string }) => Promise<boolean>;
+  onSendEmail: (payload: { creatorId: string; creatorName: string; creatorHandle: string; campaignId?: string; campaignName?: string; subject: string; body: string; cc?: string }) => Promise<boolean>;
 }
 
 export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
@@ -20,9 +30,12 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>(campaigns[0]?.id || '');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [cc, setCc] = useState('');
   const [loading, setLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [generateError, setGenerateError] = useState('');
+  const [showPreview, setShowPreview] = useState(false);
+  const [branding, setBranding] = useState<EmailBranding>({});
 
   // Reset the draft whenever a different creator is opened, since this modal stays
   // mounted and only toggles `isOpen` — otherwise the previous creator's draft leaks through.
@@ -31,9 +44,21 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
       setSelectedCampaignId(campaigns[0]?.id || '');
       setSubject('');
       setBody('');
+      setCc(branding.defaultCc || '');
+      setShowPreview(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, creator?.id]);
+
+  // Loaded once per open just to render an accurate "what the creator will actually
+  // see" HTML preview — the real send always re-reads config server-side anyway.
+  useEffect(() => {
+    if (!isOpen) return;
+    fetch('/api/settings/email')
+      .then(res => res.json())
+      .then(data => { if (data.success) { setBranding(data.data); setCc(data.data.defaultCc || ''); } })
+      .catch(err => console.error('Failed to load email branding:', err));
+  }, [isOpen]);
 
   if (!isOpen || !creator) return null;
 
@@ -69,7 +94,7 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!subject.trim() || !body.trim() || isSending) return;
+    if (!subject.trim() || isSending) return;
 
     setIsSending(true);
     try {
@@ -80,7 +105,8 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
         campaignId: currentCampaign?.id,
         campaignName: currentCampaign?.name,
         subject,
-        body
+        body,
+        cc: cc.trim() || undefined
       });
 
       // Keep the draft open on failure so the composed subject/body aren't lost —
@@ -177,19 +203,73 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
             />
           </div>
 
-          {/* Email Body Textarea */}
+          {/* CC Input */}
           <div>
             <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Email Body Content *
+              CC (tùy chọn)
             </label>
-            <textarea
-              rows={8}
-              required
-              placeholder="Click 'Generate AI Email Draft' or write your invitation leading with commission rate and product gift terms..."
-              value={body}
-              onChange={e => setBody(e.target.value)}
-              className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-sans leading-relaxed text-xs"
+            <input
+              type="text"
+              placeholder="teammate@company.com, another@company.com"
+              value={cc}
+              onChange={e => setCc(e.target.value)}
+              className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
             />
+            <p className="text-[11px] text-slate-400 mt-1">
+              Nhiều địa chỉ cách nhau bởi dấu phẩy. Để trống nếu không cần CC.
+            </p>
+          </div>
+
+          {/* Email Body Textarea / HTML Preview */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block font-bold text-slate-700 dark:text-slate-300">
+                Additional Note (optional)
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowPreview(p => !p)}
+                className="text-[11px] font-bold text-indigo-600 hover:underline flex items-center gap-1"
+              >
+                {showPreview ? <><Pencil className="w-3 h-3" /> Chỉnh sửa</> : <><Eye className="w-3 h-3" /> Xem trước email HTML</>}
+              </button>
+            </div>
+
+            {showPreview ? (
+              <iframe
+                title="Email preview"
+                sandbox=""
+                srcDoc={renderFirstContactEmailHtml({
+                  creatorName: creator.displayName,
+                  senderName: branding.senderName,
+                  brandName: currentCampaign?.brand || branding.brand,
+                  logoUrl: branding.logoUrl,
+                  primaryColor: branding.primaryColor,
+                  productName: currentCampaign?.products?.[0]?.name,
+                  productImageUrl: currentCampaign?.products?.[0]?.imageUrl,
+                  productUrl: currentCampaign?.products?.[0]?.productUrl,
+                  productRating: currentCampaign?.products?.[0]?.rating,
+                  productReviewCount: currentCampaign?.products?.[0]?.reviewCount,
+                  productSoldCount: currentCampaign?.products?.[0]?.soldCount,
+                  productHighlights: currentCampaign?.products?.[0]?.highlights,
+                  compensationOffer: currentCampaign?.products?.[0]?.compensationOffer,
+                  bodyText: body,
+                  ctaHref: branding.email ? `mailto:${branding.email}` : undefined,
+                })}
+                className="w-full h-80 rounded-xl border border-slate-200 dark:border-slate-700 bg-white"
+              />
+            ) : (
+              <textarea
+                rows={4}
+                placeholder="Ghi chú/lời khen cá nhân hoá thêm cho creator này (không bắt buộc) — phần chào hỏi, offer, next-steps và chữ ký đã được template xử lý sẵn."
+                value={body}
+                onChange={e => setBody(e.target.value)}
+                className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-sans leading-relaxed text-xs"
+              />
+            )}
+            <p className="text-[11px] text-slate-400 mt-1">
+              Email dùng đúng mẫu "Piedmont Ethereal": chào hỏi, sản phẩm, offer, next-steps, chữ ký đã cố định — ô này chỉ để thêm 1 câu cá nhân hoá nếu muốn.
+            </p>
           </div>
 
           {/* Workflow Guard Notice */}
@@ -210,7 +290,7 @@ export const EmailComposerModal: React.FC<EmailComposerModalProps> = ({
 
             <button
               type="submit"
-              disabled={!subject.trim() || !body.trim() || isSending}
+              disabled={!subject.trim() || isSending}
               className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-sm flex items-center gap-2"
             >
               <Send className="w-4 h-4" />

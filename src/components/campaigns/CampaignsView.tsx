@@ -7,7 +7,9 @@ import {
   Package,
   ExternalLink,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  Pencil,
+  Archive
 } from 'lucide-react';
 import { Campaign, Creator, Workspace, CreatorCampaignAssignment } from '../../types';
 import { WorkspaceBanner } from '../layout/WorkspaceBanner';
@@ -21,6 +23,8 @@ interface CampaignsViewProps {
   onSelectWorkspace?: (id: string) => void;
   onOpenSettings?: () => void;
   onOpenCreateCampaign: () => void;
+  onEditCampaign: (campaign: Campaign) => void;
+  onArchiveCampaign: (campaignId: string) => void;
   onSelectCreator: (cr: Creator) => void;
   onScoreCreator: (creatorId: string, campaignId: string) => Promise<void>;
   preselectCampaignId?: string | null;
@@ -38,6 +42,8 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
   onSelectWorkspace,
   onOpenSettings,
   onOpenCreateCampaign,
+  onEditCampaign,
+  onArchiveCampaign,
   onSelectCreator,
   onScoreCreator,
   preselectCampaignId,
@@ -171,7 +177,28 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
                       {cmp.name}
                     </h3>
                   </div>
-                  {getStatusBadge(cmp.status)}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={e => { e.stopPropagation(); onEditCampaign(cmp); }}
+                      className="p-1 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                      title="Edit Campaign"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (window.confirm(`Archive campaign "${cmp.name}"? This will move it out of active campaigns.`)) {
+                          onArchiveCampaign(cmp.id);
+                        }
+                      }}
+                      className="p-1 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                      title="Archive Campaign"
+                    >
+                      <Archive className="w-3.5 h-3.5" />
+                    </button>
+                    {getStatusBadge(cmp.status)}
+                  </div>
                 </div>
 
                 <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">
@@ -231,6 +258,26 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
               <div className="text-right pl-3 border-l border-slate-200 dark:border-slate-800">
                 <span className="text-[10px] font-bold text-slate-400 uppercase">Assigned Creators</span>
                 <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400">{assignedCreators.length}</p>
+              </div>
+              <div className="flex items-center gap-1 pl-3 border-l border-slate-200 dark:border-slate-800">
+                <button
+                  onClick={() => onEditCampaign(selectedCampaign)}
+                  className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                  title="Edit Campaign"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Archive campaign "${selectedCampaign.name}"? This will move it out of active campaigns.`)) {
+                      onArchiveCampaign(selectedCampaign.id);
+                    }
+                  }}
+                  className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                  title="Archive Campaign"
+                >
+                  <Archive className="w-4 h-4" />
+                </button>
               </div>
             </div>
           </div>

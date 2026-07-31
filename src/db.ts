@@ -129,6 +129,7 @@ export function rowToCreator(row: any): Creator {
     hasAffiliateGmv: row.hasAffiliateGmv != null ? Boolean(row.hasAffiliateGmv) : undefined,
     metricsSource: row.metricsSource || undefined,
     metricsSyncedAt: row.metricsSyncedAt || undefined,
+    tcmCreatorOecuid: row.tcmCreatorOecuid || undefined,
     pps: parseJson(row.pps, undefined),
     sampleScore: parseJson(row.sampleScore, undefined),
     salesMetrics: parseJson(row.salesMetrics, undefined),
@@ -426,6 +427,7 @@ export async function saveCreator(c: Creator): Promise<void> {
     hasAffiliateGmv: c.hasAffiliateGmv ?? null,
     metricsSource: c.metricsSource ?? null,
     metricsSyncedAt: c.metricsSyncedAt ?? null,
+    tcmCreatorOecuid: c.tcmCreatorOecuid ?? null,
     pps: c.pps ?? null,
     sampleScore: c.sampleScore ?? null,
     salesMetrics: c.salesMetrics ?? null,
@@ -896,6 +898,38 @@ export async function archiveCreator(id: string): Promise<Creator | null> {
     creator.updatedAt = new Date().toISOString();
     await saveCreator(creator);
     return creator;
+  }
+  return null;
+}
+
+// Xóa vĩnh viễn 1 creator khỏi DB — khác archiveCreator (soft-delete). Dọn sạch mọi bản ghi
+// tham chiếu tới creatorId (assignment, outreach email, conversation, content review, posted
+// video, task liên quan) và gỡ creatorId khỏi campaign.creatorIds trước khi xóa creator.
+export async function deleteCreatorPermanently(id: string): Promise<boolean> {
+  const db = getDb();
+
+  const assignments = await getAllAssignments({ creatorId: id });
+  for (const assignment of assignments) {
+    await unassignCreatorFromCampaign(assignment.id);
+  }
+
+  await db.from('outreach_emails').delete().eq('creatorId', id);
+  await db.from('conversations').delete().eq('creatorId', id);
+  await db.from('content_reviews').delete().eq('creatorId', id);
+  await db.from('posted_videos').delete().eq('creatorId', id);
+  await db.from('tasks').delete().eq('relatedCreatorId', id);
+
+  const { error } = await db.from('creators').delete().eq('id', id);
+  if (error) throw error;
+  return true;
+}
+
+export async function archiveCampaign(id: string): Promise<Campaign | null> {
+  const campaign = await getCampaignById(id);
+  if (campaign) {
+    campaign.status = 'Archived';
+    await saveCampaign(campaign);
+    return campaign;
   }
   return null;
 }

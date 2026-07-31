@@ -10,8 +10,20 @@ export interface EmailConfig {
   smtpSecure?: boolean;
   brand?: string;
   product?: string;
+  // Marketing-style HTML outreach email branding — logoUrl must be a publicly reachable
+  // URL (email clients fetch images over the open internet, not from this app's server).
+  logoUrl?: string;
+  primaryColor?: string;
+  // Sign-off name used in the first-contact outreach email ("Best regards, {senderName}").
+  // Defaults to "Juan" when unset — see DEFAULT_SENDER_NAME below.
+  senderName?: string;
+  // Pre-fills the CC field on the outreach composer/bulk-send modals (operator can still
+  // edit or clear it per send) — comma-separated for multiple addresses.
+  defaultCc?: string;
   lastImapUid?: number;
 }
+
+export const DEFAULT_SENDER_NAME = 'Juan';
 
 const CONFIG_KEY = 'emailConfig';
 const EMPTY: EmailConfig = {
@@ -45,6 +57,10 @@ export async function saveEmailConfig(partial: Partial<EmailConfig>): Promise<Em
     smtpSecure: partial.smtpSecure !== undefined ? partial.smtpSecure : current.smtpSecure,
     brand: partial.brand !== undefined ? partial.brand : current.brand,
     product: partial.product !== undefined ? partial.product : current.product,
+    logoUrl: partial.logoUrl !== undefined ? partial.logoUrl : current.logoUrl,
+    primaryColor: partial.primaryColor !== undefined ? partial.primaryColor : current.primaryColor,
+    senderName: partial.senderName !== undefined ? partial.senderName : current.senderName,
+    defaultCc: partial.defaultCc !== undefined ? partial.defaultCc : current.defaultCc,
     lastImapUid: partial.lastImapUid !== undefined ? partial.lastImapUid : current.lastImapUid,
   };
 

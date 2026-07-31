@@ -425,6 +425,29 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 >
                   View TikTok profile <ExternalLink className="w-3 h-3" />
                 </a>
+                {/* Chỉ có khi extension đã cào được creator_oecuid từ TCM (marketplace/profile) —
+                    không tự suy diễn/đoán cid vì TCM yêu cầu cid thật để mở đúng trang creator. */}
+                {creator.tcmCreatorOecuid && (
+                  <a
+                    href={`https://affiliate-us.tiktok.com/connection/creator/detail?cid=${encodeURIComponent(creator.tcmCreatorOecuid)}&shop_region=US`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-1"
+                  >
+                    View TCM creator profile <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
+
+              <div className="mt-2 flex items-center justify-center gap-1.5 text-xs">
+                <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                {creator.email ? (
+                  <a href={`mailto:${creator.email}`} className="font-medium text-slate-600 dark:text-slate-300 hover:underline break-all">
+                    {creator.email}
+                  </a>
+                ) : (
+                  <span className="text-slate-400 italic">Chưa có email</span>
+                )}
               </div>
             </div>
 

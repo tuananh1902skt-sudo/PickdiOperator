@@ -267,6 +267,9 @@ function normalizeTcmProfileDetail(profile) {
     }));
   }
 
+  const oecuid = asString(profile.creator_oecuid) || (typeof profile.creator_oecuid === 'number' ? String(profile.creator_oecuid) : undefined);
+  if (oecuid) out.tcmCreatorOecuid = oecuid;
+
   return out;
 }
 
@@ -310,6 +313,15 @@ function normalizeCreator(flat) {
   const avgViews = flat.ec_video_avg_view_cnt != null ? Number(flat.ec_video_avg_view_cnt) : undefined;
   const gpmRaw = flat.ec_video_gpm != null ? flat.ec_video_gpm : flat.ec_live_gpm;
 
+  // `main_industry` từng bị coi là nguồn category/niche của list-endpoint (session 1) nhưng live
+  // recon DevTools thật (Claude in Chrome, phiên này) xác nhận field đó LUÔN là auth-wrapper rỗng
+  // {is_authorized,status:0} — chưa từng có giá trị thật ở bất kỳ creator nào. Category tag thật
+  // (vd "Beauty & Personal Care") nằm ở field `category`, dạng mảng [{name,starling_key}] — bug
+  // thật khiến category/niche trống 100% cho MỌI creator import qua list trước session này.
+  const categoryTags = Array.isArray(flat.category)
+    ? flat.category.map(c => asString(c && c.name)).filter(Boolean)
+    : [];
+
   const out = {
     handle,
     displayName: asString(flat.nickname) || handle,
@@ -317,7 +329,8 @@ function normalizeCreator(flat) {
     country: asString(flat.selection_region),
     followers,
     avgViews,
-    category: asString(flat.main_industry),
+    category: categoryTags[0],
+    niche: categoryTags.length > 0 ? categoryTags : undefined,
     gpm: parseMoney(extractMoneyLikeValue(gpmRaw)),
     tcmCreatorOecuid: asString(flat.creator_oecuid) || (typeof flat.creator_oecuid === 'number' ? String(flat.creator_oecuid) : undefined),
   };
@@ -346,6 +359,69 @@ function normalizeCreator(flat) {
   if (liveGpm !== undefined) out.liveMetrics = { gpm: liveGpm };
 
   return out;
+}
+
+// HÀM CHẠY BÊN TRONG TAB "Find creators" VỪA MỞ (world MAIN) — gõ handle vào đúng ô search thật
+// của TCM (textarea "Describe the creators you're looking for") rồi bấm nút search thật, để
+// chính JS của trang tự gọi API marketplace/find có chữ ký hợp lệ — KHÔNG tự fetch()/giả mạo gì.
+// Xác nhận qua recon thật (Claude in Chrome, session này): gõ đúng handle vào ô này trả về CHÍNH
+// XÁC creator đó kể cả khi họ chưa từng tương tác gì với shop trên TCM (không chỉ creator được
+// TCM tự gợi ý) — dùng để tra cid cho creator chỉ có sẵn TikTok handle (Kalodata/manual/import).
+async function searchTcmByHandle(handle) {
+  // Tìm ô search: ưu tiên đúng placeholder tiếng Anh (giao diện mặc định lúc recon), fallback
+  // sang "textarea duy nhất trên trang" nếu tài khoản dùng TCM UI ngôn ngữ khác (placeholder sẽ
+  // không khớp tiếng Anh nữa) — Find Creators chỉ có đúng 1 textarea (ô AI-search) nên an toàn.
+  // Poll tối đa 6s vì trang có thể còn đang hydrate ngay sau khi tab báo 'complete'.
+  const findSearchBox = () => {
+    const byPlaceholder = document.querySelector('textarea[placeholder="Describe the creators you\'re looking for"]');
+    if (byPlaceholder) return byPlaceholder;
+    const allTextareas = document.querySelectorAll('textarea');
+    return allTextareas.length === 1 ? allTextareas[0] : null;
+  };
+  let ta = null;
+  const findBoxStartedAt = Date.now();
+  while (Date.now() - findBoxStartedAt < 6000) {
+    ta = findSearchBox();
+    if (ta) break;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  if (!ta) return { error: 'search_box_not_found' };
+
+  const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  nativeSetter.call(ta, handle);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+
+  // Nút search thật là <button> primary (icon kính lúp) nằm cùng khối cha với ô search — không
+  // có data-testid/aria-label ổn định nên nhận diện qua class "core-btn-primary" (xác nhận qua
+  // recon thật, duy nhất 1 button primary trong khối này). Class tên không phụ thuộc ngôn ngữ tài
+  // khoản nên vẫn đáng tin cậy hơn text/placeholder — vẫn poll thêm phòng khi nút render trễ.
+  const findSearchBtn = () => {
+    let wrapper = ta;
+    for (let i = 0; i < 4 && wrapper; i++) wrapper = wrapper.parentElement;
+    return wrapper ? wrapper.querySelector('button.core-btn-primary') : null;
+  };
+  let searchBtn = null;
+  const findBtnStartedAt = Date.now();
+  while (Date.now() - findBtnStartedAt < 3000) {
+    searchBtn = findSearchBtn();
+    if (searchBtn) break;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  if (!searchBtn) return { error: 'search_button_not_found' };
+  searchBtn.click();
+
+  const wantedHandle = handle.replace(/^@/, '').trim().toLowerCase();
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 8000) {
+    const store = window.__pickdi_tcm_list || {};
+    const match = Object.values(store).find((c) => {
+      const h = c && c.handle ? String(c.handle).replace(/^@/, '').trim().toLowerCase() : '';
+      return h === wantedHandle;
+    });
+    if (match) return { match };
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  return { error: 'no_match' };
 }
 
 // HÀM CHẠY BÊN TRONG TAB TCM ĐANG MỞ — interceptor.js đã unwrap sẵn field {value,...} trước khi
