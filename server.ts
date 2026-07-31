@@ -492,12 +492,14 @@ app.post('/api/creators/:id/workspace-status', async (req, res) => {
 // creator qua Google Sheet dùng chung (cột "O/X", giá trị "O" = duyệt). 1 Apps Script gắn
 // vào Sheet đó (onEdit trigger) POST vào đây mỗi khi cột đó đổi thành "O", để tự động đẩy
 // creator sang Qualified — CÙNG logic với kéo-thả kanban tay ở route trên, không phải 1
-// đường đi riêng. "X" (từ chối) và handle không khớp creator nào đều bị bỏ qua có chủ đích
-// (an toàn hơn tự archive/tự tạo creator rác — quyết định của user 2026-07-31).
+// đường đi riêng. "O" -> Qualified, "X" -> archive vĩnh viễn (quyết định user 2026-07-31,
+// đổi từ "bỏ qua X" ban đầu). Handle không khớp creator nào thì bỏ qua (404), không tự tạo
+// creator rác.
 const DALBA_SHEET_WORKSPACE_ID = process.env.DALBA_SHEET_WORKSPACE_ID || 'ws-1785364956726';
 
 app.post('/api/creators/sheet-approval', async (req, res) => {
   const handle = typeof req.body.handle === 'string' ? req.body.handle.trim() : '';
+  const value = typeof req.body.value === 'string' ? req.body.value.trim().toUpperCase() : 'O';
   if (!handle) {
     return res.status(400).json({ success: false, message: 'handle là bắt buộc' });
   }
@@ -507,6 +509,12 @@ app.post('/api/creators/sheet-approval', async (req, res) => {
     return res
       .status(404)
       .json({ success: false, message: `Không tìm thấy creator với handle @${handle} — bỏ qua` });
+  }
+
+  if (value === 'X') {
+    const archived = await archiveCreator(creator.id);
+    await addActivity("Google Sheet (d'Alba reviewer)", 'archived via Sheet (rejected)', `@${creator.handle}`, 'creator', creator.id);
+    return res.json({ success: true, data: { handle: creator.handle, creator: archived } });
   }
 
   const result = await setCreatorWorkspaceStatus(
