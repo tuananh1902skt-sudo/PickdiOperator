@@ -412,7 +412,9 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
 
   // Filtering logic
   const filteredCreators = sourceCreators.filter(c => {
-    if (c.status === 'Archived') return false;
+    // Ẩn mặc định creator đã archive/bị từ chối khỏi mọi view — trừ khi operator chủ động
+    // lọc đúng "Archived" để tra lại danh sách đã từ chối (vd rejected bởi d'Alba qua Sheet).
+    if (c.status === 'Archived' && selectedStatus !== 'Archived') return false;
 
     const q = search.toLowerCase().trim();
     if (q) {
@@ -745,6 +747,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
               <option value="Approved">Approved</option>
               <option value="Draft Submitted">Draft Submitted</option>
               <option value="Completed">Completed</option>
+              <option value="Archived">Archived (đã từ chối)</option>
             </select>
 
             <select
