@@ -79,6 +79,8 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [missingEmailDrafts, setMissingEmailDrafts] = useState<Record<string, string>>({});
+  const [savingEmailId, setSavingEmailId] = useState<string | null>(null);
   const [pacingMin, setPacingMin] = useState(45);
   const [pacingMax, setPacingMax] = useState(120);
   const [dailyCap, setDailyCap] = useState(80);
@@ -190,6 +192,35 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
     }
   };
 
+  // Fills in a missing email for a "skipped_no_email" item — saves it to the creator's CRM
+  // profile (the source of truth used at actual send time) and un-skips the item so it
+  // rejoins the batch with a freshly generated draft.
+  const handleSaveMissingEmail = async (creatorId: string) => {
+    if (!job) return;
+    const email = (missingEmailDrafts[creatorId] || '').trim();
+    if (!email) return;
+    setSavingEmailId(creatorId);
+    try {
+      const res = await fetch(`/api/outreach/bulk/${job.id}/items/${creatorId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.message || 'Lưu email thất bại');
+      setJob(data.data);
+      setMissingEmailDrafts(prev => {
+        const next = { ...prev };
+        delete next[creatorId];
+        return next;
+      });
+    } catch (err: any) {
+      setError(err.message || 'Lưu email thất bại');
+    } finally {
+      setSavingEmailId(null);
+    }
+  };
+
   const handleSend = async () => {
     if (!job) return;
     setSending(true);
@@ -211,10 +242,16 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
 
   const currentCampaign = campaigns.find(c => c.id === campaignId);
   const draftItems = job?.items.filter(i => i.status !== 'skipped_no_email' && i.status !== 'skipped_do_not_contact' && i.status !== 'skipped_cooldown') || [];
+  // Only the still-unsent items — what the review/edit list and the send button should
+  // count. Distinct from draftItems (which includes already-sent/failed items too, needed
+  // for the sending/done progress view) so a resumed paused_cap job doesn't re-show
+  // already-sent emails as editable drafts.
+  const remainingItems = job?.items.filter(i => i.status === 'draft') || [];
   const skippedItems = job?.items.filter(i => i.status === 'skipped_no_email' || i.status === 'skipped_do_not_contact' || i.status === 'skipped_cooldown') || [];
   const sentCount = job?.items.filter(i => i.status === 'sent').length || 0;
   const failedCount = job?.items.filter(i => i.status === 'failed').length || 0;
   const isSendingOrDone = job?.status === 'sending' || job?.status === 'done';
+  const isPausedCap = job?.status === 'paused_cap';
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -340,21 +377,52 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
 
           {job && !isSendingOrDone && (
             <div className="space-y-3">
+              {isPausedCap && (
+                <div className="p-2.5 rounded-lg bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-900 text-[11px] text-orange-800 dark:text-orange-300 flex items-start gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <span>
+                    Đã tạm dừng vì chạm <strong>Giới hạn/ngày</strong> — {sentCount} email đã gửi, còn{' '}
+                    <strong>{remainingItems.length}</strong> chưa gửi. Tăng "Giới hạn/ngày" bên dưới rồi bấm
+                    "Tiếp tục gửi" để gửi nốt phần còn lại.
+                  </span>
+                </div>
+              )}
+
               {skippedItems.length > 0 && (
-                <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-[11px] text-amber-800 dark:text-amber-300 space-y-1">
+                <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-[11px] text-amber-800 dark:text-amber-300 space-y-1.5">
                   <p className="font-bold">{skippedItems.length} creator bị loại tự động:</p>
                   {skippedItems.map(i => (
-                    <p key={i.creatorId}>• {i.creatorName} — {i.skipReason}</p>
+                    <div key={i.creatorId}>
+                      <p>• {i.creatorName} — {i.skipReason}</p>
+                      {i.status === 'skipped_no_email' && (
+                        <div className="flex items-center gap-1.5 mt-1 ml-2.5">
+                          <input
+                            type="email"
+                            placeholder="Điền email để thêm creator này vào đợt gửi"
+                            value={missingEmailDrafts[i.creatorId] ?? ''}
+                            onChange={e => setMissingEmailDrafts(prev => ({ ...prev, [i.creatorId]: e.target.value }))}
+                            className="flex-1 p-1.5 rounded-lg border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-[11px]"
+                          />
+                          <button
+                            onClick={() => handleSaveMissingEmail(i.creatorId)}
+                            disabled={savingEmailId === i.creatorId || !(missingEmailDrafts[i.creatorId] || '').trim()}
+                            className="px-2 py-1.5 text-[10px] font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 rounded-lg shrink-0"
+                          >
+                            {savingEmailId === i.creatorId ? 'Đang lưu...' : 'Thêm vào đợt gửi'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
 
               <p className="font-bold text-slate-700 dark:text-slate-300">
-                {draftItems.length} email sẽ được gửi — xem lại và sửa nếu cần:
+                {remainingItems.length} email sẽ được gửi — xem lại và sửa nếu cần:
               </p>
 
               <div className="space-y-3">
-                {draftItems.map(item => (
+                {remainingItems.map(item => (
                   <div key={item.creatorId} className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-slate-800 dark:text-slate-200">{item.creatorName} ({item.creatorHandle})</span>
@@ -494,11 +562,15 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
           {job && !isSendingOrDone && (
             <button
               onClick={handleSend}
-              disabled={sending || draftItems.length === 0}
+              disabled={sending || remainingItems.length === 0}
               className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-sm flex items-center gap-2"
             >
               <Send className="w-4 h-4" />
-              {sending ? 'Đang bắt đầu gửi...' : `Gửi ${draftItems.length} Email`}
+              {sending
+                ? 'Đang bắt đầu gửi...'
+                : isPausedCap
+                  ? `Tiếp tục gửi ${remainingItems.length} email còn lại`
+                  : `Gửi ${remainingItems.length} Email`}
             </button>
           )}
         </div>

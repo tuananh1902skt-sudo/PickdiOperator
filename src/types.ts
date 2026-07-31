@@ -555,7 +555,10 @@ export interface BulkOutreachJob {
   // item stays consistent with how the rest of the batch was generated.
   contentSource: 'ai' | 'template';
   cc?: string;
-  status: 'generating' | 'ready' | 'sending' | 'done';
+  // 'paused_cap' = the send loop stopped early because dailyCap was reached — distinct
+  // from 'done' (which means every item was actually resolved) so the operator can raise
+  // the cap and resume instead of the job silently getting stuck with unsent drafts.
+  status: 'generating' | 'ready' | 'sending' | 'paused_cap' | 'done';
   pacingMinSeconds: number;
   pacingMaxSeconds: number;
   dailyCap: number;

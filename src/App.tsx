@@ -932,6 +932,44 @@ export function App() {
     }
   };
 
+  const handleUpdateCreatorEmail = async (creatorId: string, email: string) => {
+    const prevCreators = creators;
+    const prevSelected = selectedCreatorDetail;
+    setCreators(prev => prev.map(c => (c.id === creatorId ? { ...c, email } : c)));
+    if (selectedCreatorDetail?.id === creatorId) {
+      setSelectedCreatorDetail(prev => (prev ? { ...prev, email } : prev));
+    }
+    try {
+      const res = await fetch(`/api/creators/${creatorId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.message || 'Không thể lưu email.');
+      setCreators(prev => prev.map(c => (c.id === creatorId ? data.data : c)));
+      if (selectedCreatorDetail?.id === creatorId) {
+        setSelectedCreatorDetail(prev => (prev ? data.data : prev));
+      }
+    } catch (err) {
+      console.error('Error updating creator email:', err);
+      setCreators(prevCreators);
+      setSelectedCreatorDetail(prevSelected);
+      setNotifications(prev => [
+        {
+          id: `notif-${Date.now()}`,
+          title: 'Lưu email thất bại',
+          description: 'Không thể lưu email creator này. Vui lòng thử lại.',
+          priority: 'HIGH',
+          category: 'System',
+          isRead: false,
+          createdAt: new Date().toISOString()
+        },
+        ...prev
+      ]);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans flex antialiased">
       {/* Sidebar Navigation */}
@@ -1220,6 +1258,7 @@ export function App() {
         onAssignCampaign={handleAssignCampaignToCreator}
         onUnassignCampaign={handleUnassignCreatorCampaign}
         onUpdateAssignment={handleUpdateAssignment}
+        onUpdateEmail={handleUpdateCreatorEmail}
       />
 
       <ReviewDetailModal

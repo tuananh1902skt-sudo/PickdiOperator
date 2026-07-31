@@ -9,7 +9,8 @@ import {
   HelpCircle,
   Play,
   ArrowDown,
-  AlertTriangle
+  AlertTriangle,
+  Pencil
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -96,6 +97,7 @@ interface CreatorDetailDrawerProps {
   onAssignCampaign?: (creatorId: string, campaignId: string) => void;
   onUnassignCampaign?: (assignmentId: string) => void;
   onUpdateAssignment?: (assignmentId: string, updates: Partial<CreatorCampaignAssignment>) => void;
+  onUpdateEmail?: (creatorId: string, email: string) => void;
 }
 
 export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
@@ -111,12 +113,15 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
   onRunAiResearch,
   onAssignCampaign,
   onUnassignCampaign,
-  onUpdateAssignment
+  onUpdateAssignment,
+  onUpdateEmail
 }) => {
   const [activeSection, setActiveSection] = useState<string>('sec-campaigns');
   const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
   const [sourcingForm, setSourcingForm] = useState<SourcingFormState | null>(null);
   const [bookmarked, setBookmarked] = useState(false);
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [emailDraft, setEmailDraft] = useState('');
   const [contentFilter, setContentFilter] = useState<'all' | 'branded' | 'non-branded'>('all');
   const [trendSort, setTrendSort] = useState<'recent' | 'popular'>('recent');
   const [newNoteText, setNewNoteText] = useState('');
@@ -218,6 +223,7 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
     setTrendSort('recent');
     setPlayingVideo(null);
     setActiveSection('sec-campaigns');
+    setEditingEmail(false);
   }, [creator?.id]);
 
   if (!creator) return null;
@@ -339,6 +345,11 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
     if (!newNoteText.trim()) return;
     onAddNote(creator.id, newNoteText);
     setNewNoteText('');
+  };
+
+  const handleSaveEmail = () => {
+    setEditingEmail(false);
+    onUpdateEmail?.(creator.id, emailDraft.trim());
   };
 
   return (
@@ -484,14 +495,49 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 )}
               </div>
 
-              <div className="mt-2 flex items-center justify-center gap-1.5 text-xs">
+              <div className="mt-2 flex items-center justify-center gap-1.5 text-xs w-full">
                 <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                {creator.email ? (
-                  <a href={`mailto:${creator.email}`} className="font-medium text-slate-600 dark:text-slate-300 hover:underline break-all">
-                    {creator.email}
-                  </a>
+                {editingEmail ? (
+                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                    <input
+                      type="email"
+                      autoFocus
+                      value={emailDraft}
+                      onChange={e => setEmailDraft(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') { e.preventDefault(); handleSaveEmail(); }
+                        if (e.key === 'Escape') setEditingEmail(false);
+                      }}
+                      placeholder="creator@email.com"
+                      className="flex-1 min-w-0 p-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
+                    />
+                    <button onClick={handleSaveEmail} className="text-indigo-600 hover:text-indigo-800 font-bold text-[11px] shrink-0">
+                      Lưu
+                    </button>
+                    <button onClick={() => setEditingEmail(false)} className="text-slate-400 hover:text-slate-600 text-[11px] shrink-0">
+                      Hủy
+                    </button>
+                  </div>
+                ) : creator.email ? (
+                  <>
+                    <a href={`mailto:${creator.email}`} className="font-medium text-slate-600 dark:text-slate-300 hover:underline break-all">
+                      {creator.email}
+                    </a>
+                    <button
+                      onClick={() => { setEmailDraft(creator.email || ''); setEditingEmail(true); }}
+                      className="text-slate-400 hover:text-indigo-600 shrink-0"
+                      title="Sửa email"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                  </>
                 ) : (
-                  <span className="text-slate-400 italic">Chưa có email</span>
+                  <button
+                    onClick={() => { setEmailDraft(''); setEditingEmail(true); }}
+                    className="text-slate-400 italic hover:text-indigo-600 hover:no-underline underline decoration-dashed"
+                  >
+                    Chưa có email — bấm để thêm
+                  </button>
                 )}
               </div>
             </div>

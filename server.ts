@@ -1413,9 +1413,26 @@ app.patch('/api/outreach/bulk/:jobId/items/:creatorId', async (req, res) => {
   const item = job.items.find(i => i.creatorId === req.params.creatorId);
   if (!item) return res.status(404).json({ success: false, message: 'Không tìm thấy creator trong job này' });
 
-  const { subject, body, regenerate } = req.body;
+  const { subject, body, regenerate, email } = req.body;
+  let shouldRegenerate = Boolean(regenerate);
 
-  if (regenerate) {
+  if (typeof email === 'string' && email.trim()) {
+    const cr = await getCreatorById(item.creatorId);
+    if (!cr) return res.status(404).json({ success: false, message: 'Không tìm thấy creator trong CRM' });
+    cr.email = email.trim();
+    cr.updatedAt = new Date().toISOString();
+    await saveCreator(cr);
+    item.email = cr.email;
+    // Was skipped for missing email, so no draft was ever generated for it — un-skip and
+    // generate content now that the operator has supplied one.
+    if (item.status === 'skipped_no_email') {
+      item.status = 'draft';
+      item.skipReason = undefined;
+      shouldRegenerate = true;
+    }
+  }
+
+  if (shouldRegenerate) {
     try {
       const cr = await getCreatorById(item.creatorId);
       if (!cr) return res.status(404).json({ success: false, message: 'Không tìm thấy creator trong CRM' });
@@ -1472,8 +1489,11 @@ async function sendNextBulkOutreachItem(jobId: string) {
 
   const kpis = await getKpis(INITIAL_KPIS);
   if (kpis.todayEmailsSent >= job.dailyCap) {
-    console.warn(`Bulk outreach job ${jobId}: daily cap (${job.dailyCap}) reached, stopping — remaining items left as draft.`);
-    job.status = 'done';
+    // 'paused_cap', not 'done' — items left as draft still need to go out once the
+    // operator raises dailyCap and resumes; 'done' would permanently block /send (see the
+    // 409 guard below) and strand them.
+    console.warn(`Bulk outreach job ${jobId}: daily cap (${job.dailyCap}) reached, pausing — remaining items left as draft.`);
+    job.status = 'paused_cap';
     await saveBulkOutreachJob(job);
     return;
   }
