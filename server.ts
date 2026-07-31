@@ -447,6 +447,33 @@ app.patch('/api/creators/:id', async (req, res) => {
 // trạng thái không làm lộ/ảnh hưởng tới cách creator này hiện ra ở các workspace khác.
 // Chỉ fallback về Creator.status chung khi creator không có assignment nào ở workspace đó
 // (vd workspace Agency xem 1 creator chưa từng chạy campaign với brand nào).
+// Dùng chung cho cả thao tác kéo-thả tay (route dưới) lẫn trigger tự động từ Google Sheet
+// (route /api/creators/sheet-approval) để 2 đường đi luôn cho kết quả nhất quán.
+async function setCreatorWorkspaceStatus(
+  creator: Creator,
+  workspaceId: string | undefined,
+  status: string,
+  actor: string
+): Promise<{ assignment?: CreatorCampaignAssignment; creator?: Creator }> {
+  const scoped = workspaceId
+    ? (await getAllAssignments({ creatorId: creator.id })).filter(a => a.workspaceId === workspaceId)
+    : [];
+
+  if (scoped.length > 0) {
+    const latest = [...scoped].sort((a, b) => new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime())[0];
+    latest.status = status as CreatorCampaignAssignment['status'];
+    await saveAssignment(latest);
+    await addActivity(actor, `updated status to ${status}`, `@${creator.handle}`, 'creator', creator.id);
+    return { assignment: latest };
+  }
+
+  creator.status = status as Creator['status'];
+  creator.updatedAt = new Date().toISOString();
+  await saveCreator(creator);
+  await addActivity(actor, `updated status to ${status}`, `@${creator.handle}`, 'creator', creator.id);
+  return { creator };
+}
+
 app.post('/api/creators/:id/workspace-status', async (req, res) => {
   const { workspaceId, status } = req.body;
   const creator = await getCreatorById(req.params.id);
@@ -457,23 +484,38 @@ app.post('/api/creators/:id/workspace-status', async (req, res) => {
     return res.status(400).json({ success: false, message: 'status là bắt buộc' });
   }
 
-  const scoped = workspaceId
-    ? (await getAllAssignments({ creatorId: creator.id })).filter(a => a.workspaceId === workspaceId)
-    : [];
+  const result = await setCreatorWorkspaceStatus(creator, workspaceId, status, 'Anh Tuan');
+  res.json({ success: true, data: result });
+});
 
-  if (scoped.length > 0) {
-    const latest = [...scoped].sort((a, b) => new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime())[0];
-    latest.status = status;
-    await saveAssignment(latest);
-    await addActivity('Anh Tuan', `updated status to ${status}`, `@${creator.handle}`, 'creator', creator.id);
-    return res.json({ success: true, data: { assignment: latest } });
+// D'Alba's TCM creator-approval reviewer không có tài khoản trong hệ thống — họ chỉ duyệt
+// creator qua Google Sheet dùng chung (cột "O/X", giá trị "O" = duyệt). 1 Apps Script gắn
+// vào Sheet đó (onEdit trigger) POST vào đây mỗi khi cột đó đổi thành "O", để tự động đẩy
+// creator sang Qualified — CÙNG logic với kéo-thả kanban tay ở route trên, không phải 1
+// đường đi riêng. "X" (từ chối) và handle không khớp creator nào đều bị bỏ qua có chủ đích
+// (an toàn hơn tự archive/tự tạo creator rác — quyết định của user 2026-07-31).
+const DALBA_SHEET_WORKSPACE_ID = process.env.DALBA_SHEET_WORKSPACE_ID || 'ws-1785364956726';
+
+app.post('/api/creators/sheet-approval', async (req, res) => {
+  const handle = typeof req.body.handle === 'string' ? req.body.handle.trim() : '';
+  if (!handle) {
+    return res.status(400).json({ success: false, message: 'handle là bắt buộc' });
   }
 
-  creator.status = status;
-  creator.updatedAt = new Date().toISOString();
-  await saveCreator(creator);
-  await addActivity('Anh Tuan', `updated status to ${status}`, `@${creator.handle}`, 'creator', creator.id);
-  res.json({ success: true, data: { creator } });
+  const creator = await getCreatorByHandle(handle);
+  if (!creator) {
+    return res
+      .status(404)
+      .json({ success: false, message: `Không tìm thấy creator với handle @${handle} — bỏ qua` });
+  }
+
+  const result = await setCreatorWorkspaceStatus(
+    creator,
+    DALBA_SHEET_WORKSPACE_ID,
+    'Qualified',
+    "Google Sheet (d'Alba reviewer)"
+  );
+  res.json({ success: true, data: { handle: creator.handle, ...result } });
 });
 
 app.delete('/api/creators/:id', async (req, res) => {
