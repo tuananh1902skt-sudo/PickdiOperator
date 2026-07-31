@@ -8,7 +8,8 @@ import {
   Bookmark,
   HelpCircle,
   Play,
-  ArrowDown
+  ArrowDown,
+  AlertTriangle
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -416,6 +417,40 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 </div>
               )}
 
+              {/* Metrics platform badge — nguồn dữ liệu metrics (Kalodata/TCM/Cruva/Manual), khác với
+                  badge "source" ở trên (kiểu creator vào CRM). Cruva chưa có luồng scrape riêng, chỉ
+                  vào qua import file giống Kalodata (xem ImportWizardModal). */}
+              {creator.metricsSource && (
+                <div
+                  className={`mt-1.5 px-3 py-1 rounded-full border text-[11px] font-bold flex items-center justify-center gap-1.5 ${
+                    creator.metricsSource === 'kalodata'
+                      ? 'bg-violet-50 dark:bg-violet-950/50 border-violet-200 dark:border-violet-800 text-violet-700 dark:text-violet-300'
+                      : creator.metricsSource === 'tcm'
+                      ? 'bg-sky-50 dark:bg-sky-950/50 border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-300'
+                      : creator.metricsSource === 'cruva'
+                      ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300'
+                      : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  <span>
+                    Nguồn:{' '}
+                    {creator.metricsSource === 'kalodata'
+                      ? 'Kalodata'
+                      : creator.metricsSource === 'tcm'
+                      ? 'TCM'
+                      : creator.metricsSource === 'cruva'
+                      ? 'Cruva'
+                      : 'Manual'}
+                  </span>
+                </div>
+              )}
+              {(creator.importedAt || creator.metricsSyncedAt) && (
+                <div className="mt-1 flex flex-col items-center gap-0.5 text-[10.5px] text-slate-400 dark:text-slate-500">
+                  {creator.importedAt && <span>Ngày import: {new Date(creator.importedAt).toLocaleDateString()}</span>}
+                  {creator.metricsSyncedAt && <span>Ngày cào: {new Date(creator.metricsSyncedAt).toLocaleDateString()}</span>}
+                </div>
+              )}
+
               <div className="mt-2 flex flex-col items-center gap-1">
                 <a
                   href={creator.profileUrl || `https://www.tiktok.com/@${(creator.handle || '').replace(/^@/, '')}`}
@@ -436,6 +471,16 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                   >
                     View TCM creator profile <ExternalLink className="w-3 h-3" />
                   </a>
+                )}
+                {/* Lần search-cid gần nhất (extension) không khớp handle này trên TCM — xem
+                    POST /api/creators/tcm-not-found (server.ts). Xoá ngay khi tìm thấy cid. */}
+                {!creator.tcmCreatorOecuid && creator.tcmNotFoundAt && (
+                  <span
+                    title={`Lần tìm gần nhất: ${new Date(creator.tcmNotFoundAt).toLocaleDateString()}`}
+                    className="text-[10.5px] font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1"
+                  >
+                    <AlertTriangle className="w-3 h-3" /> Không tìm thấy trên TCM
+                  </span>
                 )}
               </div>
 

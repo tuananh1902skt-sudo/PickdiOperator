@@ -192,7 +192,9 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
 }) => {
   // --- File import (CSV/Excel Kalodata) state ---
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [importMode, setImportMode] = useState<'kalodata' | 'generic'>('kalodata');
+  // 'cruva' chưa có preset cột riêng (Cruva chưa xác nhận tên cột export chuẩn) — dùng chung UI
+  // map cột tay như Generic CSV, chỉ khác nhãn metricsSource gắn vào khi import (xem handleFileImport).
+  const [importMode, setImportMode] = useState<'kalodata' | 'cruva' | 'generic'>('kalodata');
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileHeaders, setFileHeaders] = useState<string[]>([]);
   const [fileRows, setFileRows] = useState<any[][]>([]);
@@ -270,7 +272,11 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   const mappedFileItems = (
     importMode === 'kalodata'
       ? fileRows.map(row => buildKalodataRowObject(fileHeaders, row))
-      : fileRows.map(row => buildRowObject(fileHeaders, row, columnMap))
+      : fileRows.map(row => {
+          const obj: Record<string, any> = buildRowObject(fileHeaders, row, columnMap);
+          if (importMode === 'cruva') obj.metricsSource = 'cruva';
+          return obj;
+        })
   )
     .map(item => (item.handle ? { ...item, handle: String(item.handle).replace(/^@/, '').trim() } : item))
     .filter(item => item.handle);
@@ -289,7 +295,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
         body: JSON.stringify({
           workspaceId: activeWorkspaceId,
           source: `File Import${fileName ? ` (${fileName})` : ''}`,
-          metricsSource: importMode === 'kalodata' ? 'kalodata' : undefined,
+          metricsSource: importMode === 'kalodata' ? 'kalodata' : importMode === 'cruva' ? 'cruva' : undefined,
           creators: mappedFileItems
         })
       });
@@ -330,7 +336,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                 Import Creator (File CSV/Excel)
               </h3>
               <p className="text-xs text-slate-500">
-                Nhập creator hàng loạt từ file Kalodata/TCM/CSV vào workspace {activeWorkspaceId}
+                Nhập creator hàng loạt từ file Kalodata/Cruva/CSV vào workspace {activeWorkspaceId}
               </p>
             </div>
           </div>
@@ -356,6 +362,17 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
             </button>
             <button
               type="button"
+              onClick={() => setImportMode('cruva')}
+              className={`px-3.5 py-1.5 rounded-lg font-bold text-[11px] transition-colors ${
+                importMode === 'cruva'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              Cruva
+            </button>
+            <button
+              type="button"
               onClick={() => setImportMode('generic')}
               className={`px-3.5 py-1.5 rounded-lg font-bold text-[11px] transition-colors ${
                 importMode === 'generic'
@@ -371,7 +388,11 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
             <div className="flex items-center gap-2">
               <FileSpreadsheet className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
               <span className="font-bold text-slate-900 dark:text-white text-xs">
-                {importMode === 'kalodata' ? 'Import file export từ Kalodata' : 'Import file CSV/Excel bất kỳ'}
+                {importMode === 'kalodata'
+                  ? 'Import file export từ Kalodata'
+                  : importMode === 'cruva'
+                  ? 'Import file export từ Cruva'
+                  : 'Import file CSV/Excel bất kỳ'}
               </span>
             </div>
             <p className="text-slate-600 dark:text-slate-400 text-[11px]">
@@ -382,6 +403,12 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                   Followers, Revenue($), Engagement Rate, Views, VideoNum, TikTokUrl). Kalodata không export
                   GPM/beauty ratio/demographics nên các field đó phải điền tay sau. Cột nào file không có sẽ
                   bị bỏ qua, không tự bịa số.
+                </>
+              ) : importMode === 'cruva' ? (
+                <>
+                  Chọn file export từ Cruva — Cruva chưa có preset cột cố định như Kalodata nên bạn tự map
+                  mỗi cột trong file khớp với field nào của CRM (giống tab Generic CSV). Creator nhập ở đây sẽ
+                  được gắn nhãn nguồn "Cruva" để phân biệt với Kalodata/TCM.
                 </>
               ) : (
                 <>
@@ -490,7 +517,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
             </>
           )}
 
-          {fileHeaders.length > 0 && importMode === 'generic' && (
+          {fileHeaders.length > 0 && (importMode === 'generic' || importMode === 'cruva') && (
             <>
               {/* Column mapping */}
               <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2.5">

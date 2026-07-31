@@ -287,6 +287,17 @@ async function processOneSearchCidItem(state) {
       const message =
         (outcome && errorMessages[outcome.error]) ||
         'Không thao tác được ô search TCM (giao diện TCM có thể đã thay đổi).';
+      // no_match = TCM đã trả kết quả search rõ ràng, không khớp handle nào (khác các lỗi khác
+      // là do UI/giao diện) — báo về webapp để gắn nhãn cảnh báo persistent trên creator, tránh
+      // lặp lại tìm kiếm vô ích ở lượt kế tiếp. Best-effort — lỗi report không nên chặn kết quả
+      // trả về cho popup.
+      if (outcome && outcome.error === 'no_match') {
+        fetch(`${state.webappUrl}/api/creators/tcm-not-found`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ handles: [item.handle] }),
+        }).catch(() => {});
+      }
       return { ok: false, handle: item.handle, message };
     }
 

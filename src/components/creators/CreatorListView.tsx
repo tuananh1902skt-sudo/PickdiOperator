@@ -17,7 +17,8 @@ import {
   Bot,
   Settings2,
   SlidersHorizontal,
-  X
+  X,
+  AlertTriangle
 } from 'lucide-react';
 import { Creator, Campaign, Workspace, CreatorCampaignAssignment } from '../../types';
 import { WorkspaceBanner } from '../layout/WorkspaceBanner';
@@ -223,7 +224,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   // chỉ số sourcing hay dùng nhất (d'Alba Fit, ER%, Avg Views, Followers) thay vì phải lướt cả
   // bảng để tìm bằng mắt.
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [tcmScrapeFilter, setTcmScrapeFilter] = useState<'ALL' | 'NO_CID' | 'HAS_CID_NO_DETAIL' | 'HAS_DETAIL'>('ALL');
+  const [tcmScrapeFilter, setTcmScrapeFilter] = useState<'ALL' | 'NO_CID' | 'HAS_CID_NO_DETAIL' | 'HAS_DETAIL' | 'NOT_FOUND'>('ALL');
   const [minScore, setMinScore] = useState('');
   const [maxScore, setMaxScore] = useState('');
   const [minEr, setMinEr] = useState('');
@@ -435,6 +436,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     if (tcmScrapeFilter === 'NO_CID' && c.tcmCreatorOecuid) return false;
     if (tcmScrapeFilter === 'HAS_CID_NO_DETAIL' && !(c.tcmCreatorOecuid && !c.sampleScore)) return false;
     if (tcmScrapeFilter === 'HAS_DETAIL' && !(c.tcmCreatorOecuid && !!c.sampleScore)) return false;
+    if (tcmScrapeFilter === 'NOT_FOUND' && !(!c.tcmCreatorOecuid && c.tcmNotFoundAt)) return false;
 
     const scoreVal = getScoreValue(c);
     if (minScore !== '' && (scoreVal === undefined || scoreVal < Number(minScore))) return false;
@@ -514,6 +516,49 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
     if (num >= 1000) return (num / 1000).toFixed(0) + 'K';
     return num.toString();
+  };
+
+  // Nhãn nguồn dữ liệu metrics (Kalodata/TCM/Cruva/Manual) — badge nhỏ kèm tooltip ngày
+  // import/cào, để phân biệt creator nào tới từ platform nào (xem Creator.metricsSource trong
+  // src/types.ts). Không hiển thị gì nếu chưa có metricsSource (creator cũ trước khi có field này).
+  const METRICS_SOURCE_META: Record<string, { label: string; className: string }> = {
+    kalodata: { label: 'KD', className: 'bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300' },
+    tcm: { label: 'TCM', className: 'bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300' },
+    cruva: { label: 'CV', className: 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300' },
+    manual: { label: 'MAN', className: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' }
+  };
+
+  const renderSourceBadge = (cr: Creator) => {
+    if (!cr.metricsSource) return null;
+    const meta = METRICS_SOURCE_META[cr.metricsSource];
+    if (!meta) return null;
+    const fullLabel = cr.metricsSource === 'kalodata' ? 'Kalodata' : cr.metricsSource === 'tcm' ? 'TCM' : cr.metricsSource === 'cruva' ? 'Cruva' : 'Manual';
+    const tooltipParts = [`Nguồn: ${fullLabel}`];
+    if (cr.importedAt) tooltipParts.push(`Import: ${new Date(cr.importedAt).toLocaleDateString()}`);
+    if (cr.metricsSyncedAt) tooltipParts.push(`Cào: ${new Date(cr.metricsSyncedAt).toLocaleDateString()}`);
+    return (
+      <span
+        className={`shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold leading-none ${meta.className}`}
+        title={tooltipParts.join(' • ')}
+      >
+        {meta.label}
+      </span>
+    );
+  };
+
+  // Nhãn cảnh báo "không tìm thấy trên TCM" — chỉ hiện khi vẫn chưa có tcmCreatorOecuid (nếu đã
+  // tìm thấy ở lượt sau, batch-import xoá tcmNotFoundAt, xem server.ts).
+  const renderTcmNotFoundBadge = (cr: Creator) => {
+    if (cr.tcmCreatorOecuid || !cr.tcmNotFoundAt) return null;
+    return (
+      <span
+        title={`Lần tìm gần nhất (${new Date(cr.tcmNotFoundAt).toLocaleDateString()}) không khớp handle này trên TCM.`}
+        className="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold leading-none flex items-center gap-0.5 bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
+      >
+        <AlertTriangle className="w-2.5 h-2.5" />
+        Không thấy trên TCM
+      </span>
+    );
   };
 
   return (
@@ -767,6 +812,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                   <option value="NO_CID">Chưa có cid TCM</option>
                   <option value="HAS_CID_NO_DETAIL">Có cid, chưa cào chi tiết</option>
                   <option value="HAS_DETAIL">Đã cào chi tiết TCM</option>
+                  <option value="NOT_FOUND">Không tìm thấy trên TCM</option>
                 </select>
               </div>
 
@@ -1052,6 +1098,8 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                             </span>
                             <span className="text-[11px] text-slate-400 truncate flex items-center gap-1">
                               @{cr.handle} • {cr.country}
+                              {renderSourceBadge(cr)}
+                              {renderTcmNotFoundBadge(cr)}
                             </span>
                           </div>
                         </div>

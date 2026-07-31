@@ -595,6 +595,12 @@ app.post('/api/creators/batch-import', async (req, res) => {
     const rawAvatar = item.avatar || item.avatar_thumb || item.head_url;
     // d'Alba sourcing criteria (Kalodata import) — chỉ có khi import từ tab Kalodata.
     const itemMetricsSource = metricsSource || item.metricsSource || undefined;
+    // TCM extension luôn gửi metricsSource: 'tcm' (xem extension/background.js) — đây là scrape
+    // event thật (ngày cào). Mọi request khác đi qua endpoint này đều là file/sheet import
+    // (Kalodata/Cruva/Generic CSV từ ImportWizardModal) — ngày import, không phải ngày cào.
+    const isTcmScrape = itemMetricsSource === 'tcm';
+    const isFileImport = !isTcmScrape;
+    const nowIso = new Date().toISOString();
 
     if (existing) {
       if (rawAvatar && typeof rawAvatar === 'string' && rawAvatar.startsWith('http')) {
@@ -636,8 +642,12 @@ app.post('/api/creators/batch-import', async (req, res) => {
         videoMetrics: item.videoMetrics || existing.videoMetrics,
         liveMetrics: item.liveMetrics || existing.liveMetrics,
         metricsSource: itemMetricsSource || existing.metricsSource,
-        metricsSyncedAt: itemMetricsSource ? new Date().toISOString() : existing.metricsSyncedAt,
+        metricsSyncedAt: isTcmScrape ? nowIso : existing.metricsSyncedAt,
+        importedAt: isFileImport ? nowIso : existing.importedAt,
         tcmCreatorOecuid: item.tcmCreatorOecuid || existing.tcmCreatorOecuid,
+        // Tìm thấy trên TCM ở lượt sync này (có tcmCreatorOecuid) — xoá nhãn "không tìm thấy"
+        // đã đánh dấu trước đó, nếu có.
+        tcmNotFoundAt: item.tcmCreatorOecuid ? undefined : existing.tcmNotFoundAt,
         tags: Array.from(new Set([...(existing.tags || []), 'Scraper Enriched', source || 'Pickdi Extension'])),
         updatedAt: new Date().toISOString()
       };
@@ -689,8 +699,9 @@ app.post('/api/creators/batch-import', async (req, res) => {
         collabMetrics: item.collabMetrics || undefined,
         videoMetrics: item.videoMetrics || undefined,
         liveMetrics: item.liveMetrics || undefined,
-        metricsSource: itemMetricsSource,
-        metricsSyncedAt: itemMetricsSource ? new Date().toISOString() : undefined,
+        metricsSource: itemMetricsSource || (isFileImport ? 'manual' : undefined),
+        metricsSyncedAt: isTcmScrape ? nowIso : undefined,
+        importedAt: isFileImport ? nowIso : undefined,
         tcmCreatorOecuid: item.tcmCreatorOecuid || undefined
       };
       await applyScore(newCr, undefined);
@@ -751,6 +762,32 @@ app.post('/api/creators/batch-import', async (req, res) => {
       }
     });
   }
+});
+
+// Extension search-cid queue (background.js processOneSearchCidItem) báo về đây khi TCM "Find
+// Creators" search theo handle trả về no_match — khác batch-import (chỉ gọi khi search THÀNH
+// CÔNG), route này ghi nhận thất bại để hiện nhãn cảnh báo trong CreatorListView, tránh operator
+// lặp lại tìm kiếm vô ích. Không tạo creator mới — chỉ đánh dấu creator đã tồn tại trong CRM.
+app.post('/api/creators/tcm-not-found', async (req, res) => {
+  const { handles } = req.body;
+  if (!Array.isArray(handles) || handles.length === 0) {
+    return res.status(400).json({ success: false, message: 'No handles provided' });
+  }
+
+  const nowIso = new Date().toISOString();
+  let markedCount = 0;
+  for (const rawHandle of handles) {
+    const handle = String(rawHandle || '').replace(/^@/, '').trim();
+    if (!handle) continue;
+    const existing = await getCreatorByHandle(handle);
+    // Đã có tcmCreatorOecuid nghĩa là đã tìm thấy ở lượt khác sau lượt search này — không ghi đè
+    // thành "không tìm thấy" nữa.
+    if (!existing || existing.tcmCreatorOecuid) continue;
+    await saveCreator({ ...existing, tcmNotFoundAt: nowIso });
+    markedCount++;
+  }
+
+  res.json({ success: true, markedCount, totalProcessed: handles.length });
 });
 
 // Download the Chrome Extension source as a .zip for "Load unpacked" — team chưa đăng
@@ -1248,6 +1285,7 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
       tone,
       workspaceId,
       cc,
+      contentSource = 'ai',
     }: {
       creatorIds: string[];
       campaignId?: string;
@@ -1255,6 +1293,7 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
       tone?: string;
       workspaceId?: string;
       cc?: string;
+      contentSource?: 'ai' | 'template';
     } = req.body;
 
     if (!Array.isArray(creatorIds) || creatorIds.length === 0) {
@@ -1302,6 +1341,19 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
 
       const originalOutreach = allOutreach.find(o => o.creatorId === cr.id); // most recent first (getAllOutreach is ordered desc)
 
+      // Operator explicitly picked "use the template" — no AI call. For first-contact,
+      // "the template" is the fixed Piedmont Ethereal HTML design (greeting/product/offer/
+      // next-steps/signature are already baked into renderFirstContactEmailHtml — see
+      // src/lib/emailTemplate.ts), so body stays empty and only the subject + per-creator
+      // name/handle need filling. Reminders have no equivalent fixed HTML copy, so they
+      // still mail-merge the saved text template (Settings > Mẫu Email).
+      if (contentSource === 'template') {
+        const filled = await fillOutreachTemplate(sequenceStage, cr, campaign);
+        const body = sequenceStage === 'first' ? '' : filled.body;
+        items.push({ ...baseItem, subject: filled.subject, body, source: 'template', status: 'draft' });
+        continue;
+      }
+
       try {
         const { data } = await runAgent(agent, {
           creator: cr,
@@ -1331,6 +1383,7 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
       campaignId,
       campaignName: campaign?.name,
       sequenceStage,
+      contentSource,
       cc,
       status: 'ready',
       pacingMinSeconds: DEFAULT_PACING_MIN_SECONDS,
@@ -1371,23 +1424,35 @@ app.patch('/api/outreach/bulk/:jobId/items/:creatorId', async (req, res) => {
       const cr = await getCreatorById(item.creatorId);
       if (!cr) return res.status(404).json({ success: false, message: 'Không tìm thấy creator trong CRM' });
       const campaign = job.campaignId ? await getCampaignById(job.campaignId) : undefined;
-      const agent = OUTREACH_SEQUENCE_AGENTS[job.sequenceStage] || OUTREACH_SEQUENCE_AGENTS.first;
-      const avoidPhrasings = job.items
-        .filter(i => i.creatorId !== item.creatorId && i.body)
-        .map(i => extractOpeningPhrasing(i.body));
-      const allOutreach = await getAllOutreach();
-      const originalOutreach = allOutreach.find(o => o.creatorId === cr.id);
 
-      const { data } = await runAgent(agent, {
-        creator: cr,
-        campaign,
-        avoidPhrasings,
-        originalOutreach,
-        daysSinceLastContact: daysSince(cr.lastContactAt),
-      });
-      item.subject = data.subject || item.subject;
-      item.body = data.body || item.body;
-      item.source = 'ai';
+      if (job.contentSource === 'template') {
+        // Job was generated from the saved template — "Viết lại" here means re-fill it
+        // (e.g. after the operator edited the item and wants to revert to the template,
+        // or after they updated the saved template in Settings), not switch to AI. Same
+        // first-contact-stays-empty rule as the initial generate loop above.
+        const filled = await fillOutreachTemplate(job.sequenceStage, cr, campaign);
+        item.subject = filled.subject;
+        item.body = job.sequenceStage === 'first' ? '' : filled.body;
+        item.source = 'template';
+      } else {
+        const agent = OUTREACH_SEQUENCE_AGENTS[job.sequenceStage] || OUTREACH_SEQUENCE_AGENTS.first;
+        const avoidPhrasings = job.items
+          .filter(i => i.creatorId !== item.creatorId && i.body)
+          .map(i => extractOpeningPhrasing(i.body));
+        const allOutreach = await getAllOutreach();
+        const originalOutreach = allOutreach.find(o => o.creatorId === cr.id);
+
+        const { data } = await runAgent(agent, {
+          creator: cr,
+          campaign,
+          avoidPhrasings,
+          originalOutreach,
+          daysSinceLastContact: daysSince(cr.lastContactAt),
+        });
+        item.subject = data.subject || item.subject;
+        item.body = data.body || item.body;
+        item.source = 'ai';
+      }
     } catch (error: any) {
       return await handleAiRouteError(error, res);
     }

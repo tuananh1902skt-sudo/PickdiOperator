@@ -72,6 +72,7 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
 }) => {
   const [campaignId, setCampaignId] = useState(defaultCampaignId || campaigns[0]?.id || '');
   const [sequenceStage, setSequenceStage] = useState<SequenceStage>(defaultSequenceStage);
+  const [contentSource, setContentSource] = useState<'ai' | 'template'>('ai');
   const [cc, setCc] = useState('');
   const [job, setJob] = useState<BulkOutreachJob | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -90,6 +91,7 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
       setError('');
       setCampaignId(defaultCampaignId || campaigns[0]?.id || '');
       setSequenceStage(defaultSequenceStage);
+      setContentSource('ai');
       setPreviewCreatorId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -126,7 +128,10 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
 
   if (!isOpen) return null;
 
-  const similarPairs = job ? findSimilarPairs(job.items) : new Set<string>();
+  // Template-mode drafts are expected to share nearly identical wording by design (same
+  // mail-merge template for every creator) — the similarity check only makes sense for AI
+  // drafts, which are supposed to be distinct per creator.
+  const similarPairs = job && job.contentSource !== 'template' ? findSimilarPairs(job.items) : new Set<string>();
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -135,7 +140,7 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
       const res = await fetch('/api/outreach/bulk/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ creatorIds, campaignId, sequenceStage, workspaceId, cc: cc.trim() || undefined }),
+        body: JSON.stringify({ creatorIds, campaignId, sequenceStage, contentSource, workspaceId, cc: cc.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.message || 'Tạo bản nháp thất bại');
@@ -265,6 +270,36 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
               </div>
 
               <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Nguồn nội dung</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setContentSource('ai')}
+                    className={`px-3 py-2 rounded-lg border font-bold text-left ${
+                      contentSource === 'ai'
+                        ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5" /> AI viết riêng</span>
+                    <span className="block font-normal text-[10px] mt-0.5 opacity-80">1 email khác nhau cho mỗi creator</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setContentSource('template')}
+                    className={`px-3 py-2 rounded-lg border font-bold text-left ${
+                      contentSource === 'template'
+                        ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5">Dùng mẫu (Template)</span>
+                    <span className="block font-normal text-[10px] mt-0.5 opacity-80">Dùng nguyên mẫu HTML có sẵn, không cần AI</span>
+                  </button>
+                </div>
+              </div>
+
+              <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">CC (tùy chọn, áp dụng cho cả đợt)</label>
                 <input
                   type="text"
@@ -276,8 +311,19 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
               </div>
 
               <div className="p-2.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-[11px] text-indigo-700 dark:text-indigo-300">
-                AI sẽ viết 1 email riêng cho từng creator (dựa trên niche, follower, tương tác...),
-                tự tránh lặp văn phong giữa các email trong cùng đợt. Creator không có email, đã đánh dấu
+                {contentSource === 'template' ? (
+                  sequenceStage === 'first' ? (
+                    <>Email đầu tiên sẽ dùng nguyên mẫu thiết kế HTML có sẵn (chào hỏi, sản phẩm, offer, next-steps,
+                    chữ ký) — không có đoạn AI, chỉ tên/handle được điền đúng theo từng creator. Vẫn xem lại và thêm
+                    ghi chú riêng cho từng người trước khi gửi nếu muốn.</>
+                  ) : (
+                    <>Email nhắc sẽ điền từ mẫu chữ đã lưu trong Cài đặt &gt; Mẫu Email, với tên, handle... đúng theo
+                    từng creator (không dùng AI). Vẫn xem lại và sửa được từng email trước khi gửi.</>
+                  )
+                ) : (
+                  <>AI sẽ viết 1 email riêng cho từng creator (dựa trên niche, follower, tương tác...),
+                  tự tránh lặp văn phong giữa các email trong cùng đợt.</>
+                )} Creator không có email, đã đánh dấu
                 "Không liên hệ nữa", hoặc mới liên hệ &lt;3 ngày sẽ tự động bị loại — bạn sẽ thấy rõ lý do ở bước sau.
               </div>
 
@@ -325,7 +371,7 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
                           className="px-2 py-1 text-[10px] font-bold text-indigo-600 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/40 flex items-center gap-1"
                         >
                           {regeneratingId === item.creatorId ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                          Viết lại
+                          {job?.contentSource === 'template' ? 'Điền lại từ mẫu' : 'Viết lại'}
                         </button>
                       </div>
                     </div>
@@ -387,6 +433,9 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
                         value={item.body}
                         onChange={e => updateItem(item.creatorId, { body: e.target.value })}
                         onBlur={() => handleSaveEdit(item)}
+                        placeholder={item.source === 'template' && sequenceStage === 'first'
+                          ? 'Để trống nếu không cần — chào hỏi, sản phẩm, offer, next-steps và chữ ký đã được mẫu HTML xử lý sẵn. Gõ vào đây nếu muốn thêm 1 câu cá nhân hoá riêng cho creator này.'
+                          : undefined}
                         className="w-full p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white leading-relaxed"
                       />
                     )}

@@ -188,11 +188,23 @@ export interface Creator {
   gpm?: number;
   beautyCategoryRatio?: number; // % 0-100
   hasAffiliateGmv?: boolean;
-  metricsSource?: 'kalodata' | 'tcm' | 'manual';
+  // Nhãn nguồn dữ liệu metrics — Kalodata/Cruva là platform sourcing tương tự nhau (import file/sheet
+  // thủ công), TCM là cào trực tiếp qua extension. 'cruva' chưa có luồng import riêng, tạm dùng qua
+  // tab Generic CSV của ImportWizardModal với metricsSource gán cứng 'cruva'.
+  metricsSource?: 'kalodata' | 'tcm' | 'cruva' | 'manual';
+  // Ngày cào — set khi có scrape event thật (hiện chỉ TCM extension), KHÔNG set khi import file.
   metricsSyncedAt?: string;
+  // Ngày import — set khi creator được nhập từ file/sheet (Kalodata/Cruva/Generic CSV) qua
+  // ImportWizardModal, KHÔNG set khi enrich qua TCM extension.
+  importedAt?: string;
   // creator_oecuid thật của TCM — dùng để dựng link "Xem trên TCM" trong CreatorDetailDrawer
   // (affiliate-us.tiktok.com/connection/creator/detail?cid=<tcmCreatorOecuid>).
   tcmCreatorOecuid?: string;
+  // Lần gần nhất extension search "Find Creators" theo handle KHÔNG khớp được creator này trên
+  // TCM (no_match — xem extension/background.js processOneSearchCidItem). Dùng để hiện nhãn cảnh
+  // báo trong CreatorListView thay vì để operator lặp lại tìm kiếm vô ích mỗi lần. Bị xoá (set
+  // undefined) ngay khi tcmCreatorOecuid được set — nghĩa là đã tìm thấy.
+  tcmNotFoundAt?: string;
   // Chi tiết theo đúng layout tab thật của TCM creator detail — chỉ có khi metricsSource
   // là 'tcm' và extension đã cào được (xem tcm-scraper-endpoints memory). KHÔNG áp dụng cho
   // creator nhập từ Kalodata/manual.
@@ -515,8 +527,9 @@ export interface BulkOutreachItem {
   body: string;
   // 'ai' = written by a configured AI provider; 'template_fallback' = every configured
   // provider failed, filled from data/outreach-templates.json instead — surfaced to the
-  // operator as a warning in the review step, never sent silently.
-  source: 'ai' | 'template_fallback';
+  // operator as a warning in the review step, never sent silently; 'template' = operator
+  // explicitly chose to mail-merge the saved template instead of using AI.
+  source: 'ai' | 'template_fallback' | 'template';
   status:
     | 'pending'
     | 'skipped_no_email'
@@ -538,6 +551,9 @@ export interface BulkOutreachJob {
   campaignId?: string;
   campaignName?: string;
   sequenceStage: 'first' | 'reminder_1' | 'reminder_2' | 'reminder_3';
+  // How drafts in this job were produced — kept so "Viết lại" (regenerate) on a single
+  // item stays consistent with how the rest of the batch was generated.
+  contentSource: 'ai' | 'template';
   cc?: string;
   status: 'generating' | 'ready' | 'sending' | 'done';
   pacingMinSeconds: number;

@@ -98,6 +98,9 @@ alter table creators add column if not exists "beautyCategoryRatio" double preci
 alter table creators add column if not exists "hasAffiliateGmv" boolean;
 alter table creators add column if not exists "metricsSource" text;
 alter table creators add column if not exists "metricsSyncedAt" text;
+-- Ngày import file/sheet (Kalodata/Cruva/Generic CSV) — tách biệt với metricsSyncedAt (ngày cào
+-- qua TCM extension), xem comment Creator.importedAt trong src/types.ts.
+alter table creators add column if not exists "importedAt" text;
 
 -- Chi tiết theo đúng tab thật của TikTok Creator Marketplace creator detail (PPS/Sample
 -- score/Sales/Collaboration metrics/Video/LIVE) — thêm sau Session 5 UI redesign.
@@ -111,6 +114,11 @@ alter table creators add column if not exists "liveMetrics" jsonb;
 -- creator_oecuid từ TCM (affiliate-us.tiktok.com) — dùng để dựng link thẳng tới trang
 -- creator detail thật trên TCM, hiển thị cạnh link profile TikTok trong CreatorDetailDrawer.
 alter table creators add column if not exists "tcmCreatorOecuid" text;
+
+-- Đánh dấu lần gần nhất extension search "Find Creators" theo handle KHÔNG khớp được creator
+-- này trên TCM — dùng cho nhãn cảnh báo "Không tìm thấy trên TCM" trong CreatorListView.
+-- Xem POST /api/creators/tcm-not-found (server.ts) và extension/background.js (no_match).
+alter table creators add column if not exists "tcmNotFoundAt" text;
 
 create table if not exists campaigns (
   id text primary key,
@@ -164,6 +172,8 @@ create table if not exists bulk_outreach_jobs (
   "campaignId" text,
   "campaignName" text,
   "sequenceStage" text,
+  "contentSource" text,
+  cc text,
   status text,
   "pacingMinSeconds" integer,
   "pacingMaxSeconds" integer,
@@ -362,3 +372,9 @@ create table if not exists unmatched_inbound_emails (
 insert into storage.buckets (id, name, public)
 values ('avatars', 'avatars', true)
 on conflict (id) do nothing;
+
+-- Migration: bulk_outreach_jobs gained "contentSource" (ai | template, records how a job's
+-- drafts were produced so per-item "Viết lại" stays consistent) and "cc" (was previously
+-- accepted by the API but never actually persisted). Safe to re-run.
+alter table bulk_outreach_jobs add column if not exists "contentSource" text;
+alter table bulk_outreach_jobs add column if not exists cc text;
