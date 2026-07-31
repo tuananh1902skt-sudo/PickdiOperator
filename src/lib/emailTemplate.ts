@@ -53,7 +53,7 @@ const GOLD_PRIMARY_COLOR = '#735c00'; // Piedmont Ethereal "primary" — first-c
 const GOLD_ACCENT_COLOR = '#d4af37'; // Piedmont Ethereal "primary-container", gradient end
 const DEFAULT_CTA_LABEL = 'Trả lời email này để hợp tác';
 const DEFAULT_PRODUCT_CTA_LABEL = 'View on TikTok Shop';
-const DEFAULT_SENDER_TITLE = 'TikTok Shop Manager';
+export const DEFAULT_SENDER_TITLE = 'TikTok Shop Manager';
 
 function escapeHtml(input: string): string {
   return input
