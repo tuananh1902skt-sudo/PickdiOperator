@@ -18,7 +18,8 @@ import {
   Settings2,
   SlidersHorizontal,
   X,
-  AlertTriangle
+  AlertTriangle,
+  Image as ImageIcon
 } from 'lucide-react';
 import { Creator, Campaign, Workspace, CreatorCampaignAssignment } from '../../types';
 import { WorkspaceBanner } from '../layout/WorkspaceBanner';
@@ -45,6 +46,8 @@ interface TcmActionsMenuProps {
   onFindCid: () => void;
   scrapeDetailCount: number;
   onScrapeDetail: () => void;
+  missingAvatarCount: number;
+  onScrapeMissingAvatar: () => void;
   onConfigureExtension?: () => void;
   extensionId?: string;
   align?: 'left' | 'right';
@@ -57,6 +60,8 @@ const TcmActionsMenu: React.FC<TcmActionsMenuProps> = ({
   onFindCid,
   scrapeDetailCount,
   onScrapeDetail,
+  missingAvatarCount,
+  onScrapeMissingAvatar,
   onConfigureExtension,
   extensionId,
   align = 'right'
@@ -96,6 +101,17 @@ const TcmActionsMenu: React.FC<TcmActionsMenuProps> = ({
             >
               <Bot className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
               Cào chi tiết TCM ({scrapeDetailCount} thiếu)
+            </button>
+            <button
+              onClick={() => {
+                onScrapeMissingAvatar();
+                setOpen(false);
+              }}
+              disabled={missingAvatarCount === 0}
+              className="w-full text-left px-3 py-2 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              <ImageIcon className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+              Cào lại avatar thiếu ({missingAvatarCount} thiếu)
             </button>
             {onConfigureExtension && (
               <>
@@ -224,7 +240,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   // chỉ số sourcing hay dùng nhất (d'Alba Fit, ER%, Avg Views, Followers) thay vì phải lướt cả
   // bảng để tìm bằng mắt.
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [tcmScrapeFilter, setTcmScrapeFilter] = useState<'ALL' | 'NO_CID' | 'HAS_CID_NO_DETAIL' | 'HAS_DETAIL' | 'NOT_FOUND'>('ALL');
+  const [tcmScrapeFilter, setTcmScrapeFilter] = useState<'ALL' | 'NO_CID' | 'HAS_CID_NO_DETAIL' | 'HAS_DETAIL' | 'NOT_FOUND' | 'MISSING_AVATAR'>('ALL');
   const [minScore, setMinScore] = useState('');
   const [maxScore, setMaxScore] = useState('');
   const [minEr, setMinEr] = useState('');
@@ -407,6 +423,12 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   // Creator chỉ có TikTok handle, chưa từng khớp với TCM (Kalodata/manual/file import) — ứng
   // viên cho hàng đợi "tìm cid theo handle".
   const creatorsMissingTcmCid = creators.filter(c => !c.tcmCreatorOecuid);
+  // "Thiếu avatar" khác với "thiếu detail": avatar được tải NGẦM sau khi cào (server.ts
+  // batch-import), có thể fail âm thầm (CDN hết hạn, content-type lạ, quá dung lượng) mà không
+  // để lại dấu vết nào trên sampleScore — nên 1 creator đã cào chi tiết xong vẫn có thể trắng
+  // avatar mãi mãi nếu không có cách chủ động cào lại. Chỉ tính creator đã có cid TCM vì đó là
+  // điều kiện duy nhất để mở lại trang chi tiết qua extension.
+  const creatorsMissingAvatar = creators.filter(c => !!c.tcmCreatorOecuid && !c.avatar);
 
   const sourceCreators = creators;
 
@@ -439,6 +461,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     if (tcmScrapeFilter === 'HAS_CID_NO_DETAIL' && !(c.tcmCreatorOecuid && !c.sampleScore)) return false;
     if (tcmScrapeFilter === 'HAS_DETAIL' && !(c.tcmCreatorOecuid && !!c.sampleScore)) return false;
     if (tcmScrapeFilter === 'NOT_FOUND' && !(!c.tcmCreatorOecuid && c.tcmNotFoundAt)) return false;
+    if (tcmScrapeFilter === 'MISSING_AVATAR' && !(c.tcmCreatorOecuid && !c.avatar)) return false;
 
     const scoreVal = getScoreValue(c);
     if (minScore !== '' && (scoreVal === undefined || scoreVal < Number(minScore))) return false;
@@ -600,6 +623,8 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
             onFindCid={() => handleFindTcmCid(creatorsMissingTcmCid)}
             scrapeDetailCount={creatorsMissingTcmDetail.length}
             onScrapeDetail={() => handleAutoScrapeDetail(creatorsMissingTcmDetail)}
+            missingAvatarCount={creatorsMissingAvatar.length}
+            onScrapeMissingAvatar={() => handleAutoScrapeDetail(creatorsMissingAvatar)}
             onConfigureExtension={handleConfigureExtensionId}
             extensionId={extensionId}
           />
@@ -816,6 +841,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                   <option value="HAS_CID_NO_DETAIL">Có cid, chưa cào chi tiết</option>
                   <option value="HAS_DETAIL">Đã cào chi tiết TCM</option>
                   <option value="NOT_FOUND">Không tìm thấy trên TCM</option>
+                  <option value="MISSING_AVATAR">Thiếu avatar</option>
                 </select>
               </div>
 
@@ -994,6 +1020,8 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                     onFindCid={() => handleFindTcmCid(selectedCreators)}
                     scrapeDetailCount={selectedCreators.filter(c => !!c.tcmCreatorOecuid && !c.sampleScore).length}
                     onScrapeDetail={() => handleAutoScrapeDetail(selectedCreators)}
+                    missingAvatarCount={selectedCreators.filter(c => !!c.tcmCreatorOecuid && !c.avatar).length}
+                    onScrapeMissingAvatar={() => handleAutoScrapeDetail(selectedCreators.filter(c => !!c.tcmCreatorOecuid && !c.avatar))}
                   />
                 );
               })()}

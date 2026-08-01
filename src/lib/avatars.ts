@@ -71,6 +71,7 @@ export async function downloadAvatar(url: string, creatorId: string): Promise<st
     });
 
     if (!response.ok) {
+      console.error(`Avatar fetch for ${creatorId} returned ${response.status} ${response.statusText}: ${url}`);
       return null;
     }
 
@@ -94,6 +95,7 @@ export async function downloadAvatar(url: string, creatorId: string): Promise<st
     }
 
     if (!ext) {
+      console.error(`Avatar for ${creatorId} has unsupported content-type "${contentType}", skipping: ${url}`);
       return null;
     }
 
