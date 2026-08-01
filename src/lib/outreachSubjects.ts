@@ -1,0 +1,61 @@
+// Pool of first-contact subject lines, all rotating around the same "Paid Collaboration
+// Opportunity | d'Alba Global" theme. Rotating through varied but professional-sounding
+// subjects (rather than sending one identical line to every creator) reduces the
+// identical-content fingerprint that spam filters key off of in bulk sends — see the
+// deliverability discussion that motivated this file.
+export const FIRST_CONTACT_SUBJECT_POOL: string[] = [
+  "Paid Collaboration Opportunity | d'Alba Global",
+  "Paid Partnership Opportunity | d'Alba Global",
+  "Collaboration Opportunity | d'Alba Global",
+  "Paid Collaboration Invite | d'Alba Global",
+  "d'Alba Global | Paid Collaboration Opportunity",
+  "d'Alba Global Partnership Opportunity",
+  "Paid Collab Opportunity — d'Alba Global",
+  "Paid Collaboration Offer | d'Alba Global",
+  "d'Alba Global x You — Paid Collaboration",
+  "Partnership Opportunity | d'Alba Global",
+  "Paid Collaboration Opportunity — d'Alba Global Skincare",
+  "d'Alba Global | Creator Partnership Opportunity",
+  "Paid Collaboration Opportunity: d'Alba Global",
+  "d'Alba Global Paid Collaboration Invite",
+  "Collaboration Invite | d'Alba Global",
+  "Paid Content Collaboration | d'Alba Global",
+  "d'Alba Global | Paid Content Partnership",
+  "Brand Collaboration Opportunity | d'Alba Global",
+  "Paid Collaboration Opportunity | d'Alba Global Skincare",
+  "d'Alba Global Affiliate Collaboration Opportunity",
+  "Paid Collaboration Opportunity - d'Alba",
+  "d'Alba x Creators — Paid Collaboration",
+  "Paid Collaboration Proposal | d'Alba Global",
+  "d'Alba Global | Paid Collaboration Opportunity for You",
+  "Creator Collaboration Opportunity | d'Alba Global",
+  "Paid Collaboration Opportunity | d'Alba Global Beauty",
+  "d'Alba Global Invites You — Paid Collaboration",
+  "Paid Collaboration | d'Alba Global Team",
+  "d'Alba Global Partnership Invite",
+  "Sponsored Collaboration Opportunity | d'Alba Global",
+  "Paid Collaboration Opportunity — d'Alba Global Team",
+  "d'Alba Global | Paid Collaboration",
+  "Paid Collaboration Opportunity, d'Alba Global",
+  "d'Alba Global Seeking Creator Partners — Paid Collaboration",
+  "Paid Collaboration Opportunity || d'Alba Global",
+  "d'Alba Global Collaboration Offer",
+  "Paid Collaboration Opportunity • d'Alba Global",
+  "d'Alba Global | Paid Creator Collaboration",
+  "Paid Collaboration Opportunity w/ d'Alba Global",
+  "d'Alba Global Brand Partnership Opportunity",
+  "Paid Collaboration Opportunity | d'Alba Global Team",
+  "d'Alba Global | Collaboration Opportunity (Paid)",
+  "Paid Collaboration Opportunity from d'Alba Global",
+  "d'Alba Global Creator Program — Paid Collaboration",
+  "Paid Collaboration Opportunity | d'Alba Global Official",
+  "d'Alba Global | Let's Collaborate (Paid)",
+  "Paid Collaboration Opportunity | Team d'Alba Global",
+  "d'Alba Global x Creators — Collaboration Opportunity",
+  "Paid Collaboration Opportunity | d'Alba Global Partnerships",
+  "d'Alba Global | Paid Collaboration Opportunity Awaits",
+];
+
+export function pickRandomFirstContactSubject(): string {
+  return FIRST_CONTACT_SUBJECT_POOL[Math.floor(Math.random() * FIRST_CONTACT_SUBJECT_POOL.length)];
+}

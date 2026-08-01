@@ -11,6 +11,7 @@ import { downloadAvatar } from './src/lib/avatars';
 import { Client as QStashClient, Receiver as QStashReceiver } from '@upstash/qstash';
 import { getAiConfig, saveAiConfig, defaultModelFor, AiProviderName } from './src/lib/aiConfig';
 import { getOutreachTemplates, saveOutreachTemplates, fillOutreachTemplate, SequenceStage } from './src/lib/outreachTemplates';
+import { pickRandomFirstContactSubject } from './src/lib/outreachSubjects';
 import {
   runAgent,
   runTextAgent,
@@ -1359,7 +1360,11 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
       if (contentSource === 'template') {
         const filled = await fillOutreachTemplate(sequenceStage, cr, campaign);
         const body = sequenceStage === 'first' ? '' : filled.body;
-        items.push({ ...baseItem, subject: filled.subject, body, source: 'template', status: 'draft' });
+        // First-contact subjects rotate through a pool of varied phrasings instead of the
+        // one fixed template line — sending the same subject to every creator in a batch is
+        // an easy fingerprint for spam filters to key off of.
+        const subject = sequenceStage === 'first' ? pickRandomFirstContactSubject() : filled.subject;
+        items.push({ ...baseItem, subject, body, source: 'template', status: 'draft' });
         continue;
       }
 
@@ -1372,7 +1377,9 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
           originalOutreach,
           daysSinceLastContact: sinceContact,
         });
-        const subject = data.subject || `Collaboration Offer: ${campaign?.name || 'Partnership'}`;
+        const subject = sequenceStage === 'first'
+          ? pickRandomFirstContactSubject()
+          : (data.subject || `Collaboration Offer: ${campaign?.name || 'Partnership'}`);
         const body = data.body || '';
         items.push({ ...baseItem, subject, body, source: 'ai', status: 'draft' });
         avoidPhrasings.push(extractOpeningPhrasing(body));
@@ -1382,7 +1389,8 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
         // the review UI can warn the operator before they send it.
         console.warn(`Bulk outreach: AI generation failed for creator ${cr.id}, using template fallback:`, err?.message);
         const filled = await fillOutreachTemplate(sequenceStage, cr, campaign);
-        items.push({ ...baseItem, subject: filled.subject, body: filled.body, source: 'template_fallback', status: 'draft' });
+        const subject = sequenceStage === 'first' ? pickRandomFirstContactSubject() : filled.subject;
+        items.push({ ...baseItem, subject, body: filled.body, source: 'template_fallback', status: 'draft' });
       }
     }
 
@@ -1457,7 +1465,7 @@ app.patch('/api/outreach/bulk/:jobId/items/:creatorId', async (req, res) => {
         // or after they updated the saved template in Settings), not switch to AI. Same
         // first-contact-stays-empty rule as the initial generate loop above.
         const filled = await fillOutreachTemplate(job.sequenceStage, cr, campaign);
-        item.subject = filled.subject;
+        item.subject = job.sequenceStage === 'first' ? pickRandomFirstContactSubject() : filled.subject;
         item.body = job.sequenceStage === 'first' ? '' : filled.body;
         item.source = 'template';
       } else {
@@ -1475,7 +1483,7 @@ app.patch('/api/outreach/bulk/:jobId/items/:creatorId', async (req, res) => {
           originalOutreach,
           daysSinceLastContact: daysSince(cr.lastContactAt),
         });
-        item.subject = data.subject || item.subject;
+        item.subject = job.sequenceStage === 'first' ? pickRandomFirstContactSubject() : (data.subject || item.subject);
         item.body = data.body || item.body;
         item.source = 'ai';
       }
@@ -1976,7 +1984,10 @@ app.post('/api/ai/email', async (req, res) => {
   try {
     const { creator, campaign, tone = 'friendly and professional' } = req.body;
     const { data, cached } = await runAgent(OUTREACH_SEQUENCE_AGENTS.first, { creator, campaign, tone });
-    res.json({ success: true, data: { ...data, cached } });
+    // First-contact subject rotates through a pool of varied phrasings rather than
+    // whatever the AI picks — keeps subjects diverse across creators, avoiding the
+    // identical-subject spam fingerprint.
+    res.json({ success: true, data: { ...data, subject: pickRandomFirstContactSubject(), cached } });
   } catch (error: any) {
     await handleAiRouteError(error, res);
   }

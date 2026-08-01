@@ -78,12 +78,20 @@ export const OutreachTemplateSettings: React.FC = () => {
         {STAGE_ORDER.map(stage => (
           <div key={stage} className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
             <p className="font-bold text-slate-800 dark:text-slate-200">{STAGE_LABELS[stage]}</p>
-            <input
-              value={templates[stage]?.subject || ''}
-              onChange={e => updateTemplate(stage, { subject: e.target.value })}
-              placeholder="Subject"
-              className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
-            />
+            {stage === 'first' ? (
+              <p className="text-[11px] text-slate-400 italic">
+                Subject không dùng ô này nữa — email đầu tiên tự chọn random từ bộ tiêu đề
+                "Paid Collaboration Opportunity | d'Alba Global" (xem src/lib/outreachSubjects.ts) để tránh gửi
+                cùng 1 subject cho mọi creator.
+              </p>
+            ) : (
+              <input
+                value={templates[stage]?.subject || ''}
+                onChange={e => updateTemplate(stage, { subject: e.target.value })}
+                placeholder="Subject"
+                className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
+              />
+            )}
             <textarea
               rows={4}
               value={templates[stage]?.body || ''}
