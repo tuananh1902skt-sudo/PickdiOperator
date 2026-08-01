@@ -179,7 +179,7 @@ async function runLoop() {
 }
 
 async function startAutoDetailQueueInternal(items, webappUrl, shopId, shopRegion, maxCount, autoContinue, cooldownMs) {
-  const chunkSize = maxCount || 20;
+  const chunkSize = maxCount || items.length;
   const queued = items.slice(0, chunkSize);
   const pending = items.slice(chunkSize);
   await setState({
@@ -215,7 +215,7 @@ async function continueAutoDetailQueueInternal() {
   const state = await getState();
   if (!state || !state.pending || state.pending.length === 0) return { continued: false, pending: 0 };
   if (state.status === 'running') return { continued: false, pending: state.pending.length }; // đang chạy rồi, không cần nạp tay
-  const chunkSize = state.chunkSize || 20;
+  const chunkSize = state.chunkSize || state.pending.length;
   const nextQueue = state.pending.slice(0, chunkSize);
   const nextPending = state.pending.slice(chunkSize);
   await patchState({ status: 'running', queue: nextQueue, pending: nextPending, index: 0, currentHandle: null });
@@ -369,7 +369,7 @@ async function runSearchCidLoop() {
 }
 
 async function startSearchCidQueueInternal(items, webappUrl, shopId, shopRegion, maxCount) {
-  const chunkSize = maxCount || 20;
+  const chunkSize = maxCount || items.length;
   const queued = items.slice(0, chunkSize);
   const pending = items.slice(chunkSize);
   await setSearchCidState({

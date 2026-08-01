@@ -369,7 +369,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
       return;
     }
     try {
-      const res = await startAutoDetailQueue(items, { maxCount: 20 });
+      const res = await startAutoDetailQueue(items);
       if (!res || res.ok === false) {
         setQueueError((res && res.message) || 'Không khởi động được hàng đợi.');
         return;
@@ -397,7 +397,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
       return;
     }
     try {
-      const res = await startSearchCidQueue(handles, { maxCount: 20 });
+      const res = await startSearchCidQueue(handles);
       if (!res || res.ok === false) {
         setSearchCidError((res && res.message) || 'Không khởi động được hàng đợi.');
         return;

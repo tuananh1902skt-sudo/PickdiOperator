@@ -177,7 +177,7 @@ document.getElementById('findCreatorsBtn').addEventListener('click', async () =>
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const autoDetail = document.getElementById('autoDetailCheckbox').checked;
-  const autoDetailMax = Number(document.getElementById('autoDetailMax').value) || 20;
+  const autoDetailMax = Number(document.getElementById('autoDetailMax').value) || 0; // 0 = không giới hạn, background.js xử lý toàn bộ list trong 1 đợt
   const autoDetailContinue = document.getElementById('autoDetailContinueCheckbox').checked;
   const autoDetailCooldownMs = (Number(document.getElementById('autoDetailCooldownMin').value) || 1) * 60000;
 
