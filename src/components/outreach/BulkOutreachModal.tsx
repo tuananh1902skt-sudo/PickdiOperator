@@ -241,13 +241,13 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
   };
 
   const currentCampaign = campaigns.find(c => c.id === campaignId);
-  const draftItems = job?.items.filter(i => i.status !== 'skipped_no_email' && i.status !== 'skipped_do_not_contact' && i.status !== 'skipped_cooldown') || [];
+  const draftItems = job?.items.filter(i => i.status !== 'skipped_no_email' && i.status !== 'skipped_do_not_contact') || [];
   // Only the still-unsent items — what the review/edit list and the send button should
   // count. Distinct from draftItems (which includes already-sent/failed items too, needed
   // for the sending/done progress view) so a resumed paused_cap job doesn't re-show
   // already-sent emails as editable drafts.
   const remainingItems = job?.items.filter(i => i.status === 'draft') || [];
-  const skippedItems = job?.items.filter(i => i.status === 'skipped_no_email' || i.status === 'skipped_do_not_contact' || i.status === 'skipped_cooldown') || [];
+  const skippedItems = job?.items.filter(i => i.status === 'skipped_no_email' || i.status === 'skipped_do_not_contact') || [];
   const sentCount = job?.items.filter(i => i.status === 'sent').length || 0;
   const failedCount = job?.items.filter(i => i.status === 'failed').length || 0;
   const isSendingOrDone = job?.status === 'sending' || job?.status === 'done';
@@ -360,8 +360,8 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
                 ) : (
                   <>AI sẽ viết 1 email riêng cho từng creator (dựa trên niche, follower, tương tác...),
                   tự tránh lặp văn phong giữa các email trong cùng đợt.</>
-                )} Creator không có email, đã đánh dấu
-                "Không liên hệ nữa", hoặc mới liên hệ &lt;3 ngày sẽ tự động bị loại — bạn sẽ thấy rõ lý do ở bước sau.
+                )} Creator không có email hoặc đã đánh dấu
+                "Không liên hệ nữa" sẽ tự động bị loại — bạn sẽ thấy rõ lý do ở bước sau.
               </div>
 
               <button

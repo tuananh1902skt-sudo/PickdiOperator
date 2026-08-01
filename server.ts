@@ -1266,10 +1266,6 @@ app.post('/api/outreach/send', async (req, res) => {
 });
 
 // --- Bulk Outreach API ---
-// Anti-spam cooldown: never auto-include a creator contacted within this many days in a
-// bulk batch (they still show up in the job as "skipped_cooldown" so the operator can see
-// why, and can hand-send to them individually if they really want to override it).
-const BULK_OUTREACH_COOLDOWN_DAYS = 3;
 const DEFAULT_PACING_MIN_SECONDS = 45;
 const DEFAULT_PACING_MAX_SECONDS = 120;
 const DEFAULT_DAILY_CAP = 80;
@@ -1337,17 +1333,6 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
         continue;
       }
       const sinceContact = daysSince(cr.lastContactAt);
-      if (sinceContact !== undefined && sinceContact < BULK_OUTREACH_COOLDOWN_DAYS) {
-        items.push({
-          ...baseItem,
-          subject: '',
-          body: '',
-          source: 'ai',
-          status: 'skipped_cooldown',
-          skipReason: `Đã liên hệ ${sinceContact} ngày trước (dưới ${BULK_OUTREACH_COOLDOWN_DAYS} ngày)`,
-        });
-        continue;
-      }
 
       const originalOutreach = allOutreach.find(o => o.creatorId === cr.id); // most recent first (getAllOutreach is ordered desc)
 

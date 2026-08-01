@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
-import { getEmailConfig } from './emailConfig';
+import { getEmailConfig, DEFAULT_SENDER_NAME } from './emailConfig';
+import { DEFAULT_SENDER_TITLE } from './emailTemplate';
 
 export async function sendEmail(opts: {
   to: string;
@@ -27,12 +28,19 @@ export async function sendEmail(opts: {
     },
   });
 
-  // Deliberately no display name here: dalbausa.com has no SPF/DKIM alignment for this
-  // SMTP relay, so a custom From name gets flagged as unverified and Gmail shows the raw
-  // address instead — worse than the bare-address fallback, where Gmail just shows the
-  // local part ("juan"). Revisit once SPF/DKIM is fixed (see mailer.ts git history).
+  // SMTP account profile name (set at the mail provider, e.g. Naver Works admin console)
+  // controls the From display name whenever nodemailer isn't given one explicitly — that's
+  // why outreach emails were showing the raw account name instead of a professional title.
+  // This is a plain RFC5322 From-header string and has no bearing on SPF/DKIM: those check
+  // the sending domain and the DKIM signing key, not the display name — a prior revert here
+  // conflated the two. The actual SPF/DKIM alignment gap for dalbausa.com is a DNS/mail
+  // provider config issue and needs to be fixed there, independently of this.
+  const senderName = (config.senderName || DEFAULT_SENDER_NAME).replace(/[\r\n"]/g, '').trim();
+  const brand = config.brand?.replace(/[\r\n"]/g, '').trim();
+  const fromName = brand ? `${senderName} – ${brand} ${DEFAULT_SENDER_TITLE}` : senderName;
+
   const mailOptions: nodemailer.SendMailOptions = {
-    from: config.email,
+    from: { name: fromName, address: config.email },
     to: opts.to,
     subject: opts.subject,
     text: opts.text,
