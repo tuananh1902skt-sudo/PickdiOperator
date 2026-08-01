@@ -767,7 +767,9 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
               <option value="New Lead">New Lead</option>
               <option value="Researching">Researching</option>
               <option value="Qualified">Qualified</option>
-              <option value="Contacted">Contacted</option>
+              <option value="Contact lần 1">Contact lần 1</option>
+              <option value="Contact lần 2">Contact lần 2</option>
+              <option value="Contact lần 3">Contact lần 3</option>
               <option value="Negotiating">Negotiating</option>
               <option value="Approved">Approved</option>
               <option value="Draft Submitted">Draft Submitted</option>
@@ -1288,7 +1290,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                               : cr.status === 'Draft Submitted' || cr.status === 'Negotiating'
                               ? 'bg-amber-50 text-amber-700 border-amber-200'
-                              : cr.status === 'Contacted'
+                              : cr.status === 'Contact lần 1' || cr.status === 'Contact lần 2' || cr.status === 'Contact lần 3'
                               ? 'bg-blue-50 text-blue-700 border-blue-200'
                               : 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
                           }`}

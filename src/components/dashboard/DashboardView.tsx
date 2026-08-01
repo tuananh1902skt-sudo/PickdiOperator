@@ -93,7 +93,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const pipelineFunnel = [
     { label: 'New Leads', count: creators.filter(c => c.status === 'New Lead').length, color: 'bg-slate-500' },
-    { label: 'Contacted', count: creators.filter(c => c.status === 'Contacted').length, color: 'bg-blue-500' },
+    { label: 'Contact lần 1', count: creators.filter(c => c.status === 'Contact lần 1').length, color: 'bg-blue-500' },
+    { label: 'Contact lần 2', count: creators.filter(c => c.status === 'Contact lần 2').length, color: 'bg-blue-600' },
+    { label: 'Contact lần 3', count: creators.filter(c => c.status === 'Contact lần 3').length, color: 'bg-blue-700' },
     { label: 'Negotiating', count: creators.filter(c => c.status === 'Negotiating').length, color: 'bg-purple-500' },
     { label: 'Approved', count: creators.filter(c => c.status === 'Approved').length, color: 'bg-indigo-500' },
     { label: 'Draft Submitted', count: creators.filter(c => c.status === 'Draft Submitted').length, color: 'bg-amber-500' },

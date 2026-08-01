@@ -77,7 +77,9 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
       case 'Draft Submitted':
       case 'Negotiating':
         return 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300';
-      case 'Contacted':
+      case 'Contact lần 1':
+      case 'Contact lần 2':
+      case 'Contact lần 3':
         return 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300';
       default:
         return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';

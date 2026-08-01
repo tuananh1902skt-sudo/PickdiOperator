@@ -32,6 +32,7 @@ import {
 import {
   Workspace,
   Creator,
+  CreatorStatus,
   Campaign,
   OutreachEmail,
   Conversation,
@@ -339,7 +340,9 @@ app.get('/api/dashboard', async (req, res) => {
         NewLead: creators.filter(c => c.status === 'New Lead').length,
         Researching: creators.filter(c => c.status === 'Researching').length,
         Qualified: creators.filter(c => c.status === 'Qualified').length,
-        Contacted: creators.filter(c => c.status === 'Contacted').length,
+        ContactLan1: creators.filter(c => c.status === 'Contact lần 1').length,
+        ContactLan2: creators.filter(c => c.status === 'Contact lần 2').length,
+        ContactLan3: creators.filter(c => c.status === 'Contact lần 3').length,
         Negotiating: creators.filter(c => c.status === 'Negotiating').length,
         Approved: creators.filter(c => c.status === 'Approved').length,
         DraftSubmitted: creators.filter(c => c.status === 'Draft Submitted').length,
@@ -1185,15 +1188,25 @@ async function deliverOutreachEmail(payload: {
   kpis.todayEmailsSent += 1;
   await setKpis(kpis);
 
-  // "Contacted" là trạng thái của LẦN HỢP TÁC này (creator ↔ campaign ↔ workspace cụ thể),
+  // "Contact lần N" là trạng thái của LẦN HỢP TÁC này (creator ↔ campaign ↔ workspace cụ thể),
   // không phải trạng thái chung của creator — nếu không, workspace khác đang chạy campaign
   // khác với cùng creator này sẽ vô tình thấy "Đã liên hệ" dù chưa từng nói chuyện.
   // Chỉ có thể ghi đúng phạm vi khi request có campaignId; nếu gửi outreach không gắn
   // campaign nào (workspace chưa có campaign) thì bỏ qua — KHÔNG fallback về ghi status
   // toàn cục nữa.
+  // sequenceStage đánh dấu email này là lần liên hệ thứ mấy trong chuỗi outreach —
+  // map trực tiếp sang cột Kanban tương ứng (reminder_2/3 đều dồn về "lần 3" vì board chỉ có 3 cột).
+  const contactStageBySequence: Record<string, CreatorStatus> = {
+    first: 'Contact lần 1',
+    reminder_1: 'Contact lần 2',
+    reminder_2: 'Contact lần 3',
+    reminder_3: 'Contact lần 3',
+  };
+  const contactStage = contactStageBySequence[payload.sequenceStage || 'first'] || 'Contact lần 1';
+
   let updatedAssignment = null;
   if (campaignId) {
-    const assignResult = await assignCreatorToCampaign(creatorId, campaignId, 'Contacted');
+    const assignResult = await assignCreatorToCampaign(creatorId, campaignId, contactStage);
     updatedAssignment = assignResult?.assignment ?? null;
   }
   cr.lastContactAt = new Date().toISOString();

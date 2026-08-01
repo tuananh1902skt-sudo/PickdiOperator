@@ -109,7 +109,7 @@ export function App() {
 
   // Trạng thái hiển thị của creator trong workspace đang mở PHẢI lấy từ assignment riêng
   // của workspace đó (nếu có) — không phải Creator.status chung — vì cùng 1 creator có thể
-  // đang "Contacted" ở brand A nhưng chưa từng liên hệ ở brand B. Workspace Agency xem toàn
+  // đang "Contact lần 1/2/3" ở brand A nhưng chưa từng liên hệ ở brand B. Workspace Agency xem toàn
   // bộ creator ở nhiều brand cùng lúc nên không có 1 "trạng thái đang mở" duy nhất để lấy —
   // giữ nguyên Creator.status chung cho trường hợp đó.
   const resolveWorkspaceStatus = (creator: Creator): Creator => {
@@ -481,7 +481,7 @@ export function App() {
       setCreators(prev =>
         prev.map(c => (c.id === payload.creatorId ? { ...c, lastContactAt: new Date().toISOString() } : c))
       );
-      // "Contacted" được ghi vào assignment (riêng cho workspace+campaign này), không phải
+      // "Contact lần N" được ghi vào assignment (riêng cho workspace+campaign này), không phải
       // Creator.status chung — xem server.ts /api/outreach/send.
       if (data.assignment) {
         setAssignments(prev => [data.assignment, ...prev.filter((a: CreatorCampaignAssignment) => a.id !== data.assignment.id)]);
