@@ -565,4 +565,13 @@ export interface BulkOutreachJob {
   dailyCap: number;
   createdAt: string;
   items: BulkOutreachItem[];
+  // When the next item is due to send — used by the resume-on-poll fallback (see
+  // sendNextBulkOutreachItem in server.ts) to detect a job whose scheduled continuation
+  // (QStash message or in-process setTimeout) never fired, e.g. a Vercel function that was
+  // torn down between sends.
+  nextSendAt?: string;
+  // Short-lived claim so only one caller advances a given job at a time (the QStash
+  // callback, the local setTimeout fallback, and the resume-on-poll check can all fire for
+  // the same job around the same moment).
+  sendLockUntil?: string;
 }

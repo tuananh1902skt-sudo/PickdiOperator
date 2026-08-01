@@ -200,6 +200,8 @@ export function rowToBulkOutreachJob(row: any): BulkOutreachJob {
     dailyCap: Number(row.dailyCap) || 80,
     createdAt: row.createdAt,
     items: parseJson(row.items, []),
+    nextSendAt: row.nextSendAt || undefined,
+    sendLockUntil: row.sendLockUntil || undefined,
   };
 }
 
@@ -508,6 +510,8 @@ export async function saveBulkOutreachJob(job: BulkOutreachJob): Promise<void> {
     dailyCap: job.dailyCap,
     createdAt: job.createdAt,
     items: job.items ?? null,
+    nextSendAt: job.nextSendAt ?? null,
+    sendLockUntil: job.sendLockUntil ?? null,
     created_at_ts: new Date(job.createdAt).getTime() || Date.now(),
   }));
 }
@@ -517,6 +521,30 @@ export async function getBulkOutreachJobById(id: string): Promise<BulkOutreachJo
   const { data, error } = await db.from('bulk_outreach_jobs').select('*').eq('id', id).maybeSingle();
   if (error) throw error;
   return data ? rowToBulkOutreachJob(data) : null;
+}
+
+export async function getSendingBulkOutreachJobs(): Promise<BulkOutreachJob[]> {
+  const db = getDb();
+  const { data, error } = await db.from('bulk_outreach_jobs').select('*').eq('status', 'sending');
+  if (error) throw error;
+  return (data || []).map(rowToBulkOutreachJob);
+}
+
+// Claims the short-lived send lock on a job so only one caller (QStash callback, local
+// setTimeout fallback, or the resume-on-poll check) advances it at a time. Optimistic
+// concurrency: the update only takes effect if sendLockUntil in the DB still matches what
+// the caller last read, so a concurrent claim attempt naturally loses instead of racing.
+// Returns the new lock timestamp on success, or null if someone else holds/just claimed it.
+export async function tryClaimBulkOutreachSendLock(job: BulkOutreachJob): Promise<string | null> {
+  const db = getDb();
+  const now = Date.now();
+  if (job.sendLockUntil && Date.parse(job.sendLockUntil) > now) return null;
+  const newLock = new Date(now + 30_000).toISOString();
+  let query = db.from('bulk_outreach_jobs').update({ sendLockUntil: newLock }).eq('id', job.id).eq('status', 'sending');
+  query = job.sendLockUntil ? query.eq('sendLockUntil', job.sendLockUntil) : query.is('sendLockUntil', null);
+  const { data, error } = await query.select('id');
+  if (error) throw error;
+  return Array.isArray(data) && data.length > 0 ? newLock : null;
 }
 
 export async function saveConversation(c: Conversation): Promise<void> {

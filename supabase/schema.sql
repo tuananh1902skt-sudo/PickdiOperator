@@ -378,3 +378,11 @@ on conflict (id) do nothing;
 -- accepted by the API but never actually persisted). Safe to re-run.
 alter table bulk_outreach_jobs add column if not exists "contentSource" text;
 alter table bulk_outreach_jobs add column if not exists cc text;
+
+-- Migration: bulk_outreach_jobs gained "nextSendAt" (when the next item is due, so a stuck
+-- job can be detected) and "sendLockUntil" (short-lived claim so only one caller advances a
+-- job at a time). Backs the resume-on-poll fallback for when QStash isn't configured — on
+-- Vercel the in-process setTimeout pacing chain dies with the serverless function, so
+-- without this a job silently stalls forever after its first item. Safe to re-run.
+alter table bulk_outreach_jobs add column if not exists "nextSendAt" text;
+alter table bulk_outreach_jobs add column if not exists "sendLockUntil" text;

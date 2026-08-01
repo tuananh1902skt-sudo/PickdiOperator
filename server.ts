@@ -105,6 +105,8 @@ import {
   unassignCreatorFromCampaign,
   saveBulkOutreachJob,
   getBulkOutreachJobById,
+  getSendingBulkOutreachJobs,
+  tryClaimBulkOutreachSendLock,
   getAllPostedVideos,
   getPostedVideoById,
   savePostedVideo,
@@ -321,6 +323,13 @@ app.get('/api/health', async (req, res) => {
 
 // Dashboard & KPIs
 app.get('/api/dashboard', async (req, res) => {
+  // Safety net beyond the bulk-job modal's own polling: if the operator closed that modal
+  // and comes back later via the dashboard, any job stalled past its nextSendAt still gets
+  // nudged forward here instead of staying stuck until someone reopens that exact job.
+  getSendingBulkOutreachJobs()
+    .then(jobs => jobs.forEach(job => maybeResumeBulkJob(job).catch(err => console.error(`Bulk outreach job ${job.id} resume-on-poll failed:`, err))))
+    .catch(err => console.error('Bulk outreach resume sweep failed:', err));
+
   const kpis = await getKpis(INITIAL_KPIS);
   const tasks = (await getAllTasks()).filter(t => t.status !== 'Completed').slice(0, 5);
   const notifications = (await getAllNotifications()).slice(0, 5);
@@ -1404,6 +1413,7 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
 app.get('/api/outreach/bulk/:jobId', async (req, res) => {
   const job = await getBulkOutreachJobById(req.params.jobId);
   if (!job) return res.status(404).json({ success: false, message: 'Không tìm thấy job' });
+  maybeResumeBulkJob(job).catch(err => console.error(`Bulk outreach job ${job.id} resume-on-poll failed:`, err));
   res.json({ success: true, data: job });
 });
 
@@ -1493,6 +1503,14 @@ async function sendNextBulkOutreachItem(jobId: string) {
   const job = await getBulkOutreachJobById(jobId);
   if (!job || job.status !== 'sending') return;
 
+  // Claim an exclusive short-lived lock before doing any real work — the QStash callback,
+  // the local setTimeout fallback, and the resume-on-poll check (see maybeResumeBulkJob)
+  // can all fire for the same job around the same moment. Losing this race just means
+  // another caller is already handling this job's next item; that's expected, not an error.
+  const claimedLock = await tryClaimBulkOutreachSendLock(job);
+  if (!claimedLock) return;
+  job.sendLockUntil = claimedLock;
+
   const kpis = await getKpis(INITIAL_KPIS);
   if (kpis.todayEmailsSent >= job.dailyCap) {
     // 'paused_cap', not 'done' — items left as draft still need to go out once the
@@ -1500,6 +1518,7 @@ async function sendNextBulkOutreachItem(jobId: string) {
     // 409 guard below) and strand them.
     console.warn(`Bulk outreach job ${jobId}: daily cap (${job.dailyCap}) reached, pausing — remaining items left as draft.`);
     job.status = 'paused_cap';
+    job.sendLockUntil = undefined;
     await saveBulkOutreachJob(job);
     return;
   }
@@ -1507,6 +1526,7 @@ async function sendNextBulkOutreachItem(jobId: string) {
   const item = job.items.find(i => i.status === 'draft');
   if (!item) {
     job.status = 'done';
+    job.sendLockUntil = undefined;
     await saveBulkOutreachJob(job);
     return;
   }
@@ -1534,9 +1554,14 @@ async function sendNextBulkOutreachItem(jobId: string) {
     item.status = 'failed';
     item.error = err?.message || 'Gửi thất bại';
   }
-  await saveBulkOutreachJob(job);
 
   const pacingSeconds = Math.round(job.pacingMinSeconds + Math.random() * (job.pacingMaxSeconds - job.pacingMinSeconds));
+  // Marks when the next item is due and releases the lock — the resume-on-poll fallback
+  // (maybeResumeBulkJob) uses nextSendAt to tell "still pacing normally" apart from "the
+  // scheduled continuation never fired" once this deadline passes.
+  job.nextSendAt = new Date(Date.now() + pacingSeconds * 1000).toISOString();
+  job.sendLockUntil = undefined;
+  await saveBulkOutreachJob(job);
 
   if (qstashClient) {
     await qstashClient.publishJSON({
@@ -1550,6 +1575,24 @@ async function sendNextBulkOutreachItem(jobId: string) {
     setTimeout(() => {
       sendNextBulkOutreachItem(jobId).catch(err => console.error(`Bulk outreach job ${jobId} crashed:`, err));
     }, pacingSeconds * 1000);
+  }
+}
+
+// Fallback for when QStash isn't configured (e.g. deployed to Vercel without it): the
+// in-process setTimeout above is lost whenever the serverless function instance that set it
+// gets torn down, silently stranding the job on its first item forever ("Đang chờ" with no
+// progress). Called from spots the operator's browser hits anyway (bulk job polling,
+// dashboard load) so a stalled job self-heals the next time anyone is looking at the app,
+// without needing a real background worker. No-op once QStash is configured — that path's
+// own retry/delivery guarantees make this unnecessary.
+async function maybeResumeBulkJob(job: BulkOutreachJob) {
+  if (qstashClient) return;
+  if (job.status !== 'sending') return;
+  if (!job.nextSendAt || Date.parse(job.nextSendAt) > Date.now()) return;
+  try {
+    sendNextBulkOutreachItem(job.id).catch(err => console.error(`Bulk outreach job ${job.id} resume crashed:`, err));
+  } catch (err) {
+    console.error(`Bulk outreach job ${job.id} resume check failed:`, err);
   }
 }
 
