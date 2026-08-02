@@ -58,8 +58,84 @@ import {
   INITIAL_ACTIVITIES
 } from './data/initialData';
 
+// Đồng bộ activeTab với URL (pathname) để reload/back-forward/bookmark giữ đúng trang thay
+// vì luôn rơi về Dashboard — mỗi tab ứng với 1 path riêng, path lạ/không khớp mặc định về
+// Dashboard.
+const TAB_PATHS: Record<ActiveTab, string> = {
+  dashboard: '/dashboard',
+  creators: '/creators',
+  outreach: '/outreach',
+  inbox: '/inbox',
+  campaigns: '/campaigns',
+  reviews: '/reviews',
+  tasks: '/tasks',
+  reports: '/reports',
+  export: '/export',
+  ai: '/ai',
+  notifications: '/notifications',
+  settings: '/settings'
+};
+const PATH_TO_TAB: Record<string, ActiveTab> = Object.fromEntries(
+  Object.entries(TAB_PATHS).map(([tab, path]) => [path, tab as ActiveTab])
+) as Record<string, ActiveTab>;
+
+// 1 lớp sâu hơn cho 3 chi tiết hay mở nhất — /creators/:id, /reviews/:id,
+// /campaigns/:id/edit — parse trực tiếp từ pathname thay vì tra bảng cố định như trên.
+type RouteParams = { creatorId?: string; reviewId?: string; campaignEditId?: string };
+type ParsedRoute = { tab: ActiveTab } & RouteParams;
+
+const parseRoute = (pathname: string): ParsedRoute => {
+  const parts = pathname.split('/').filter(Boolean);
+  if (parts[0] === 'creators' && parts[1]) return { tab: 'creators', creatorId: parts[1] };
+  if (parts[0] === 'reviews' && parts[1]) return { tab: 'reviews', reviewId: parts[1] };
+  if (parts[0] === 'campaigns' && parts[1] && parts[2] === 'edit') return { tab: 'campaigns', campaignEditId: parts[1] };
+  return { tab: PATH_TO_TAB['/' + (parts[0] || 'dashboard')] || 'dashboard' };
+};
+
 export function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  const initialRoute = parseRoute(window.location.pathname);
+  const [activeTab, setActiveTabState] = useState<ActiveTab>(initialRoute.tab);
+  // Id lấy từ URL lúc mount/back-forward nhưng CHƯA chắc đã có sẵn trong data (creators/
+  // reviews/campaigns fetch bất đồng bộ) — giữ tạm ở đây, effect riêng theo từng data
+  // collection sẽ resolve thành object thật + tự dọn khi data đã load xong.
+  const [pendingCreatorId, setPendingCreatorId] = useState<string | null>(initialRoute.creatorId || null);
+  const [pendingReviewId, setPendingReviewId] = useState<string | null>(initialRoute.reviewId || null);
+  const [pendingCampaignEditId, setPendingCampaignEditId] = useState<string | null>(initialRoute.campaignEditId || null);
+
+  const navigateTo = (path: string) => {
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, '', path);
+    }
+  };
+
+  // setActiveTab đẩy path tương ứng vào history (thay vì chỉ đổi state trong bộ nhớ) để
+  // F5/mở tab mới bằng đúng URL đó, hoặc bấm back/forward, đều ra đúng trang.
+  const setActiveTab = (tab: ActiveTab) => {
+    setActiveTabState(tab);
+    navigateTo(TAB_PATHS[tab]);
+  };
+
+  useEffect(() => {
+    if (window.location.pathname === '/') {
+      window.history.replaceState(null, '', TAB_PATHS.dashboard);
+    }
+    // Back/forward không tự resolve object — chỉ đặt lại tab + id đang chờ, các effect
+    // theo dõi creators/reviews/campaigns bên dưới sẽ tìm đúng object (gần như ngay lập
+    // tức vì data thường đã có sẵn trong state).
+    const handlePopState = () => {
+      const route = parseRoute(window.location.pathname);
+      setActiveTabState(route.tab);
+      setSelectedCreatorDetail(null);
+      setPendingCreatorId(route.creatorId || null);
+      setSelectedReviewDetail(null);
+      setPendingReviewId(route.reviewId || null);
+      setEditingCampaign(null);
+      setPendingCampaignEditId(route.campaignEditId || null);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   const [collapsed, setCollapsed] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
 
@@ -154,6 +230,69 @@ export function App() {
   const [preselectCampaignId, setPreselectCampaignId] = useState<string | null>(null);
   const [selectedReviewDetail, setSelectedReviewDetail] = useState<DraftReview | null>(null);
   const [reviewForPostedVideo, setReviewForPostedVideo] = useState<DraftReview | null>(null);
+
+  // Resolve id lấy từ URL (mount hoặc back/forward) thành object thật ngay khi data
+  // collection tương ứng có sẵn — chạy lại mỗi khi creators/reviews/campaigns đổi vì lúc
+  // mount data initial (mock) có thể chưa chứa id thật, phải chờ fetch xong mới tìm ra.
+  useEffect(() => {
+    if (!pendingCreatorId) return;
+    const found = creators.find(c => c.id === pendingCreatorId);
+    if (found) {
+      setSelectedCreatorDetail(found);
+      setPendingCreatorId(null);
+    }
+  }, [pendingCreatorId, creators]);
+
+  useEffect(() => {
+    if (!pendingReviewId) return;
+    const found = reviews.find(r => r.id === pendingReviewId);
+    if (found) {
+      setSelectedReviewDetail(found);
+      setPendingReviewId(null);
+    }
+  }, [pendingReviewId, reviews]);
+
+  useEffect(() => {
+    if (!pendingCampaignEditId) return;
+    const found = campaigns.find(c => c.id === pendingCampaignEditId);
+    if (found) {
+      setEditingCampaign(found);
+      setPendingCampaignEditId(null);
+    }
+  }, [pendingCampaignEditId, campaigns]);
+
+  // Mở/đóng 3 drawer/modal chi tiết này luôn đi kèm đổi URL — đây là nơi duy nhất nên gọi
+  // setSelectedCreatorDetail/setSelectedReviewDetail/setEditingCampaign để MỞ hay ĐÓNG;
+  // các chỗ khác (đồng bộ data cho drawer đang mở) vẫn set thẳng state như cũ.
+  const openCreatorDetail = (cr: Creator) => {
+    setActiveTabState('creators');
+    setSelectedCreatorDetail(cr);
+    navigateTo(`/creators/${cr.id}`);
+  };
+  const closeCreatorDetail = () => {
+    setSelectedCreatorDetail(null);
+    navigateTo(TAB_PATHS.creators);
+  };
+
+  const openReviewDetail = (r: DraftReview) => {
+    setActiveTabState('reviews');
+    setSelectedReviewDetail(r);
+    navigateTo(`/reviews/${r.id}`);
+  };
+  const closeReviewDetail = () => {
+    setSelectedReviewDetail(null);
+    navigateTo(TAB_PATHS.reviews);
+  };
+
+  const openCampaignEdit = (c: Campaign) => {
+    setActiveTabState('campaigns');
+    setEditingCampaign(c);
+    navigateTo(`/campaigns/${c.id}/edit`);
+  };
+  const closeCampaignEdit = () => {
+    setEditingCampaign(null);
+    navigateTo(TAB_PATHS.campaigns);
+  };
 
   // Fetch state from backend & poll periodically for background script syncs
   const refreshCreators = async (opts: { skipIfHidden?: boolean } = {}) => {
@@ -855,7 +994,7 @@ export function App() {
     feedback?: string,
     checklist?: DraftReview['checklist']
   ) => {
-    setSelectedReviewDetail(null);
+    closeReviewDetail();
     try {
       const res = await fetch(`/api/reviews/${reviewId}`, {
         method: 'PATCH',
@@ -1018,7 +1157,7 @@ export function App() {
               onOpenSettings={() => setActiveTab('settings')}
               activeCampaignCount={workspaceCampaigns.length}
               onSelectTab={setActiveTab}
-              onSelectCreator={setSelectedCreatorDetail}
+              onSelectCreator={openCreatorDetail}
               onOpenQuickAdd={() => setIsQuickAddModalOpen(true)}
               onOpenAi={() => setIsAiDrawerOpen(true)}
               onCompleteTask={handleToggleTask}
@@ -1034,7 +1173,7 @@ export function App() {
               activeWorkspace={activeWorkspace}
               onSelectWorkspace={id => setActiveWorkspaceId(id)}
               onOpenSettings={() => setActiveTab('settings')}
-              onSelectCreator={setSelectedCreatorDetail}
+              onSelectCreator={openCreatorDetail}
               onOpenImport={() => setIsImportModalOpen(true)}
               onOpenEmailComposer={cr => {
                 setSelectedCreatorForEmail(cr);
@@ -1058,7 +1197,7 @@ export function App() {
                 setIsEmailComposerOpen(true);
               }}
               onUpdateCreatorStatus={handleUpdateCreatorStatus}
-              onSelectCreator={setSelectedCreatorDetail}
+              onSelectCreator={openCreatorDetail}
               onOpenBulkOutreach={(creatorIds, defaultSequenceStage) =>
                 setBulkOutreachConfig({ creatorIds, defaultSequenceStage })
               }
@@ -1086,9 +1225,9 @@ export function App() {
               onSelectWorkspace={id => setActiveWorkspaceId(id)}
               onOpenSettings={() => setActiveTab('settings')}
               onOpenCreateCampaign={() => setIsCreateCampaignModalOpen(true)}
-              onEditCampaign={setEditingCampaign}
+              onEditCampaign={openCampaignEdit}
               onArchiveCampaign={handleArchiveCampaign}
-              onSelectCreator={setSelectedCreatorDetail}
+              onSelectCreator={openCreatorDetail}
               onScoreCreator={handleScoreCreatorForCampaign}
               preselectCampaignId={preselectCampaignId}
               onOpenBulkOutreach={(creatorIds, campaignId) => setBulkOutreachConfig({ creatorIds, defaultCampaignId: campaignId })}
@@ -1099,7 +1238,7 @@ export function App() {
             <ReviewsView
               reviews={workspaceReviews}
               postedVideos={workspacePostedVideos}
-              onSelectReview={setSelectedReviewDetail}
+              onSelectReview={openReviewDetail}
               onMarkAsPosted={setReviewForPostedVideo}
             />
           )}
@@ -1172,10 +1311,7 @@ export function App() {
         creators={workspaceCreators}
         campaigns={workspaceCampaigns}
         tasks={workspaceTasks}
-        onSelectCreator={cr => {
-          setSelectedCreatorDetail(cr);
-          setActiveTab('creators');
-        }}
+        onSelectCreator={openCreatorDetail}
         onSelectCampaign={cmp => {
           setPreselectCampaignId(cmp.id);
           setActiveTab('campaigns');
@@ -1208,7 +1344,7 @@ export function App() {
         key={editingCampaign?.id || 'edit-campaign-empty'}
         isOpen={!!editingCampaign}
         campaign={editingCampaign}
-        onClose={() => setEditingCampaign(null)}
+        onClose={closeCampaignEdit}
         onSubmit={campData => {
           if (editingCampaign) handleUpdateCampaign(editingCampaign.id, campData);
         }}
@@ -1247,7 +1383,7 @@ export function App() {
         workspaces={workspaces}
         assignments={assignments}
         scoringCriteria={activeWorkspace?.scoringCriteria}
-        onClose={() => setSelectedCreatorDetail(null)}
+        onClose={closeCreatorDetail}
         onOpenEmailComposer={cr => {
           setSelectedCreatorForEmail(cr);
           setIsEmailComposerOpen(true);
@@ -1263,7 +1399,7 @@ export function App() {
 
       <ReviewDetailModal
         review={selectedReviewDetail}
-        onClose={() => setSelectedReviewDetail(null)}
+        onClose={closeReviewDetail}
         onUpdateStatus={handleUpdateReviewStatus}
       />
 
