@@ -234,7 +234,21 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   const [selectedCountry, setSelectedCountry] = useState('ALL');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
   const [selectedOwner, setSelectedOwner] = useState('ALL');
-  const [sortOrder, setSortOrder] = useState<'NONE' | 'AZ' | 'ZA'>('NONE');
+
+  // Sort theo cột — bấm vào tiêu đề cột trong bảng (Creator, Category & Niche, Email,
+  // Followers, Avg Views, ER %, d'Alba Fit, Brands, Campaigns, Status) để sort tăng/giảm,
+  // bấm lại lần nữa trên cùng cột để đảo chiều. null = giữ nguyên thứ tự gốc.
+  type SortKey = 'creator' | 'category' | 'email' | 'followers' | 'avgViews' | 'er' | 'score' | 'brands' | 'campaigns' | 'status';
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
 
   // Bộ lọc nâng cao — gắn trực tiếp với 2 chức năng quét data TCM (tìm cid / cào chi tiết) để
   // operator lọc ra đúng nhóm creator cần chạy hàng đợi tiếp theo, cộng thêm range lọc theo các
@@ -487,12 +501,49 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     return true;
   });
 
-  // Sort A-Z / Z-A theo tên hiển thị — giữ nguyên thứ tự gốc khi sortOrder = NONE.
-  const sortedCreators = sortOrder === 'NONE'
+  // Brands/Campaigns không phải field trực tiếp trên Creator — đếm từ assignments, cùng cách
+  // tính với cột hiển thị bên dưới, để sort theo đúng số lượng đang thấy trên bảng.
+  const getBrandCount = (cr: Creator) =>
+    new Set(assignments.filter(a => a.creatorId === cr.id).map(a => a.workspaceId).filter(Boolean)).size;
+  const getCampaignCount = (cr: Creator) => assignments.filter(a => a.creatorId === cr.id).length;
+
+  const sortedCreators = !sortKey
     ? filteredCreators
     : [...filteredCreators].sort((a, b) => {
-        const cmp = a.displayName.localeCompare(b.displayName);
-        return sortOrder === 'AZ' ? cmp : -cmp;
+        let cmp = 0;
+        switch (sortKey) {
+          case 'creator':
+            cmp = a.displayName.localeCompare(b.displayName);
+            break;
+          case 'category':
+            cmp = (a.category || '').localeCompare(b.category || '');
+            break;
+          case 'email':
+            cmp = (a.email || '').localeCompare(b.email || '');
+            break;
+          case 'followers':
+            cmp = (a.followers ?? -1) - (b.followers ?? -1);
+            break;
+          case 'avgViews':
+            cmp = (a.avgViews ?? -1) - (b.avgViews ?? -1);
+            break;
+          case 'er':
+            cmp = (a.engagementRate ?? -1) - (b.engagementRate ?? -1);
+            break;
+          case 'score':
+            cmp = (getScoreValue(a) ?? -1) - (getScoreValue(b) ?? -1);
+            break;
+          case 'brands':
+            cmp = getBrandCount(a) - getBrandCount(b);
+            break;
+          case 'campaigns':
+            cmp = getCampaignCount(a) - getCampaignCount(b);
+            break;
+          case 'status':
+            cmp = a.status.localeCompare(b.status);
+            break;
+        }
+        return sortDir === 'asc' ? cmp : -cmp;
       });
 
   // Drop selections that fell out of view (e.g. filter changed) so bulk actions
@@ -516,7 +567,8 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     selectedCountry,
     selectedCategory,
     selectedOwner,
-    sortOrder,
+    sortKey,
+    sortDir,
     tcmScrapeFilter,
     minScore,
     maxScore,
@@ -600,6 +652,30 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
         <AlertTriangle className="w-2.5 h-2.5" />
         Không thấy trên TCM
       </span>
+    );
+  };
+
+  // Tiêu đề cột bấm được để sort — dùng chung cho mọi cột sortable trong bảng, tự hiện mũi tên
+  // theo hướng đang sort, còn lại mờ đi để gợi ý "bấm để sort" mà không làm rối header.
+  const renderSortableTh = (label: string, key: SortKey, className: string) => {
+    const active = sortKey === key;
+    return (
+      <th className={className}>
+        <button
+          type="button"
+          onClick={() => toggleSort(key)}
+          className={`inline-flex items-center gap-1 hover:text-slate-700 dark:hover:text-slate-200 transition-colors ${
+            active ? 'text-indigo-600 dark:text-indigo-400' : ''
+          }`}
+        >
+          <span>{label}</span>
+          {active ? (
+            sortDir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+          ) : (
+            <ChevronDown className="w-3 h-3 opacity-25" />
+          )}
+        </button>
+      </th>
     );
   };
 
@@ -815,15 +891,16 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
               ))}
             </select>
 
-            <select
-              value={sortOrder}
-              onChange={e => setSortOrder(e.target.value as typeof sortOrder)}
-              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-medium"
-            >
-              <option value="NONE">Sort: Default</option>
-              <option value="AZ">Sort: A → Z</option>
-              <option value="ZA">Sort: Z → A</option>
-            </select>
+            {sortKey && (
+              <button
+                onClick={() => setSortKey(null)}
+                className="p-2 rounded-xl border border-indigo-300 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-semibold flex items-center gap-1 shrink-0"
+                title="Bỏ sort, quay về thứ tự mặc định"
+              >
+                <X className="w-3.5 h-3.5" />
+                Bỏ sort
+              </button>
+            )}
 
             <button
               onClick={() => setShowAdvancedFilters(o => !o)}
@@ -1100,16 +1177,16 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                     className="rounded text-indigo-600 focus:ring-indigo-500"
                   />
                 </th>
-                <th className="py-3 px-4 min-w-[180px]">Creator</th>
-                <th className="py-3 px-4 min-w-[140px]">Category & Niche</th>
-                <th className="py-3 px-4 min-w-[160px]">Email</th>
-                <th className="py-3 px-4 text-right whitespace-nowrap">Followers</th>
-                <th className="py-3 px-4 text-right whitespace-nowrap">Avg Views</th>
-                <th className="py-3 px-4 text-center whitespace-nowrap">ER %</th>
-                <th className="py-3 px-4 text-center whitespace-nowrap">{scoreColumnLabel}</th>
-                <th className="py-3 px-4 min-w-[110px]">Brands</th>
-                <th className="py-3 px-4 min-w-[200px]">Campaigns</th>
-                <th className="py-3 px-4 whitespace-nowrap">Status</th>
+                {renderSortableTh('Creator', 'creator', 'py-3 px-4 min-w-[180px]')}
+                {renderSortableTh('Category & Niche', 'category', 'py-3 px-4 min-w-[140px]')}
+                {renderSortableTh('Email', 'email', 'py-3 px-4 min-w-[160px]')}
+                {renderSortableTh('Followers', 'followers', 'py-3 px-4 text-right whitespace-nowrap')}
+                {renderSortableTh('Avg Views', 'avgViews', 'py-3 px-4 text-right whitespace-nowrap')}
+                {renderSortableTh('ER %', 'er', 'py-3 px-4 text-center whitespace-nowrap')}
+                {renderSortableTh(scoreColumnLabel, 'score', 'py-3 px-4 text-center whitespace-nowrap')}
+                {renderSortableTh('Brands', 'brands', 'py-3 px-4 min-w-[110px]')}
+                {renderSortableTh('Campaigns', 'campaigns', 'py-3 px-4 min-w-[200px]')}
+                {renderSortableTh('Status', 'status', 'py-3 px-4 whitespace-nowrap')}
                 <th className="py-3 px-4 text-right whitespace-nowrap">Actions</th>
               </tr>
             </thead>
