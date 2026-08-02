@@ -65,6 +65,11 @@ import {
   getKpis,
   setKpis,
   getAllCreators,
+  getCreatorsForList,
+  getCreatorStatusCounts,
+  getAllCreatorHandles,
+  getCreatorsCount,
+  getFirstCreator,
   getCreatorById,
   getCreatorByHandle,
   saveCreator,
@@ -330,13 +335,20 @@ app.get('/api/dashboard', async (req, res) => {
     .then(jobs => jobs.forEach(job => maybeResumeBulkJob(job).catch(err => console.error(`Bulk outreach job ${job.id} resume-on-poll failed:`, err))))
     .catch(err => console.error('Bulk outreach resume sweep failed:', err));
 
-  const kpis = await getKpis(INITIAL_KPIS);
-  const tasks = (await getAllTasks()).filter(t => t.status !== 'Completed').slice(0, 5);
-  const notifications = (await getAllNotifications()).slice(0, 5);
-  const activities = (await getAllActivities()).slice(0, 8);
-  const conversations = await getAllConversations();
+  // Không phụ thuộc lẫn nhau — chạy song song thay vì 6 round-trip Supabase nối tiếp
+  // (mỗi round-trip ~0.5-1s, tuần tự cộng dồn là nguyên nhân chính khiến dashboard chậm).
+  const [kpis, allTasks, allNotifications, allActivities, conversations, statusCounts] = await Promise.all([
+    getKpis(INITIAL_KPIS),
+    getAllTasks(),
+    getAllNotifications(),
+    getAllActivities(),
+    getAllConversations(),
+    getCreatorStatusCounts(),
+  ]);
+  const tasks = allTasks.filter(t => t.status !== 'Completed').slice(0, 5);
+  const notifications = allNotifications.slice(0, 5);
+  const activities = allActivities.slice(0, 8);
   const recentReplies = conversations.filter(c => c.unread || c.status === 'Negotiating').slice(0, 5);
-  const creators = await getAllCreators();
 
   res.json({
     success: true,
@@ -347,16 +359,16 @@ app.get('/api/dashboard', async (req, res) => {
       activities,
       recentReplies,
       creatorsByStatus: {
-        NewLead: creators.filter(c => c.status === 'New Lead').length,
-        Researching: creators.filter(c => c.status === 'Researching').length,
-        Qualified: creators.filter(c => c.status === 'Qualified').length,
-        ContactLan1: creators.filter(c => c.status === 'Contact lần 1').length,
-        ContactLan2: creators.filter(c => c.status === 'Contact lần 2').length,
-        ContactLan3: creators.filter(c => c.status === 'Contact lần 3').length,
-        Negotiating: creators.filter(c => c.status === 'Negotiating').length,
-        Approved: creators.filter(c => c.status === 'Approved').length,
-        DraftSubmitted: creators.filter(c => c.status === 'Draft Submitted').length,
-        Completed: creators.filter(c => c.status === 'Completed').length,
+        NewLead: statusCounts['New Lead'] || 0,
+        Researching: statusCounts['Researching'] || 0,
+        Qualified: statusCounts['Qualified'] || 0,
+        ContactLan1: statusCounts['Contact lần 1'] || 0,
+        ContactLan2: statusCounts['Contact lần 2'] || 0,
+        ContactLan3: statusCounts['Contact lần 3'] || 0,
+        Negotiating: statusCounts['Negotiating'] || 0,
+        Approved: statusCounts['Approved'] || 0,
+        DraftSubmitted: statusCounts['Draft Submitted'] || 0,
+        Completed: statusCounts['Completed'] || 0,
       }
     }
   });
@@ -365,7 +377,7 @@ app.get('/api/dashboard', async (req, res) => {
 // Creators API
 app.get('/api/creators', async (req, res) => {
   const { keyword, status, country, category, search } = req.query;
-  const filtered = await getAllCreators({
+  const filtered = await getCreatorsForList({
     keyword: keyword ? String(keyword) : undefined,
     search: search ? String(search) : undefined,
     status: status ? String(status) : undefined,
@@ -2053,7 +2065,7 @@ app.post('/api/ai/chat', async (req, res) => {
       messages,
       creator,
       campaign,
-      totalCreators: (await getAllCreators()).length,
+      totalCreators: await getCreatorsCount(),
       totalCampaigns: (await getAllCampaigns()).length,
     });
 
@@ -2067,7 +2079,11 @@ app.post('/api/ai/chat', async (req, res) => {
 // handled by /api/ai/outreach-agent, which picks the right agent by sequence stage.
 app.post('/api/ai/email', async (req, res) => {
   try {
-    const { creator, campaign, tone = 'friendly and professional' } = req.body;
+    const { creator: creatorInput, campaign, tone = 'friendly and professional' } = req.body;
+    // creatorInput có thể là bản đã trim cột (từ list state client) — nạp lại full row từ DB để
+    // agent có đủ niche/recentVideos cho creatorLine()/recentContentLine(), fallback về input gốc
+    // nếu không tìm thấy (vd creator chưa lưu DB).
+    const creator = creatorInput?.id ? ((await getCreatorById(creatorInput.id)) || creatorInput) : creatorInput;
     const { data, cached } = await runAgent(OUTREACH_SEQUENCE_AGENTS.first, { creator, campaign, tone });
     // First-contact subject rotates through a pool of varied phrasings rather than
     // whatever the AI picks — keeps subjects diverse across creators, avoiding the
@@ -2082,7 +2098,9 @@ app.post('/api/ai/email', async (req, res) => {
 // OutreachEmail record based on its sequenceStage.
 app.post('/api/ai/outreach-agent', async (req, res) => {
   try {
-    const { outreachId, creator, campaign, tone } = req.body;
+    const { outreachId, creator: creatorInput, campaign, tone } = req.body;
+    // Cùng lý do refetch như /api/ai/email — creatorInput có thể là bản list đã trim cột.
+    const creator = creatorInput?.id ? ((await getCreatorById(creatorInput.id)) || creatorInput) : creatorInput;
     const outreach = outreachId ? (await getAllOutreach()).find(o => o.id === outreachId) : undefined;
     const stage = outreach?.sequenceStage || 'first';
     const agent = OUTREACH_SEQUENCE_AGENTS[stage] || OUTREACH_SEQUENCE_AGENTS.first;
@@ -2241,13 +2259,13 @@ app.delete('/api/agent-prompts/:agentId', async (req, res) => {
 // Builds reasonable sample data (from whatever is actually in the CRM) so the Test button
 // works with zero setup — the operator can still pass their own `context` in the body.
 async function buildSampleAgentContext(agentId: string) {
-  const [creators, campaigns, conversations, outreachList] = await Promise.all([
-    getAllCreators(),
+  const [creator, totalCreatorsCount, campaigns, conversations, outreachList] = await Promise.all([
+    getFirstCreator(),
+    getCreatorsCount(),
     getAllCampaigns(),
     getAllConversations(),
     getAllOutreach(),
   ]);
-  const creator = creators[0];
   const campaign = campaigns[0];
   const conversation = conversations[0];
   const outreach = outreachList[0];
@@ -2292,7 +2310,7 @@ async function buildSampleAgentContext(agentId: string) {
         messages: [],
         creator,
         campaign,
-        totalCreators: creators.length,
+        totalCreators: totalCreatorsCount,
         totalCampaigns: campaigns.length,
       };
     default:

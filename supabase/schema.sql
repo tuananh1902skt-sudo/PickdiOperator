@@ -90,6 +90,14 @@ create table if not exists creators (
 create index if not exists creators_handle_idx on creators (lower(handle));
 -- create index if not exists creators_tiktok_one_id_idx on creators ("tiktokOneId"); -- column commented above
 
+-- getAllCreators() (src/db.ts) luôn order theo created_at_ts + rowid để phân trang .range() — không
+-- có index thì mỗi trang phải sort toàn bảng. status/country/category giờ cũng được lọc bằng .eq()
+-- ngay trong SQL (thay vì kéo hết bảng rồi lọc ở JS) nên cần index để tránh sequential scan.
+create index if not exists creators_created_at_ts_idx on creators (created_at_ts desc, rowid desc);
+create index if not exists creators_status_idx on creators (status);
+create index if not exists creators_country_idx on creators (country);
+create index if not exists creators_category_idx on creators (category);
+
 -- d'Alba sourcing criteria fields added after initial launch (Kalodata import) — "add column
 -- if not exists" so this file stays safe to re-run against a project that already has this table.
 alter table creators add column if not exists "gmvTier" text;

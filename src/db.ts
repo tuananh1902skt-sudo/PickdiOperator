@@ -871,55 +871,156 @@ export async function deleteAgentPromptOverride(agentId: string): Promise<void> 
 
 // Getters
 
-export async function getAllCreators(filters?: { search?: string; keyword?: string; status?: string; country?: string; category?: string }): Promise<Creator[]> {
+type CreatorListFilters = { search?: string; keyword?: string; status?: string; country?: string; category?: string };
+
+// Chạy 1 query creators (với select cột tuỳ chỉnh + filter status/country/category/search đẩy
+// xuống SQL) phân trang bằng .range() — trang đầu tuần tự để biết còn trang tiếp theo hay không,
+// các trang sau chạy song song (Promise.all) thay vì tuần tự, gộp N round-trip nối tiếp thành
+// ~1 round-trip. PostgREST mặc định trả tối đa 1000 dòng/query dù không có .limit(), nên bắt
+// buộc phải phân trang để lấy hết bảng (đã vượt mốc 1000 dòng sau các đợt import Kalodata).
+async function queryAllCreatorRows(selectColumns: string, filters?: CreatorListFilters): Promise<{ rows: any[]; q: string }> {
   const db = getDb();
-  // PostgREST mặc định trả tối đa 1000 dòng/query dù không có .limit() — bảng creators đã vượt
-  // mốc này (sau các đợt import Kalodata hàng nghìn dòng), nên phải phân trang bằng .range() để
-  // lấy hết, nếu không toàn bộ list (kể cả dedup-map trong batch-import) sẽ bị cắt cụt ở 1000.
   const PAGE_SIZE = 1000;
-  const rows: any[] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await db
-      .from('creators')
-      .select('*')
+
+  const { search, keyword, status, country, category } = filters ?? {};
+  const q = (search || keyword || '').toLowerCase().trim();
+
+  // status/country/category đẩy xuống SQL (.eq) để Postgres lọc trước khi trả về, thay vì kéo
+  // hết bảng rồi lọc ở JS — giảm số dòng/băng thông đúng bằng độ chọn lọc của filter đó.
+  const buildQuery = (from: number) => {
+    let query = db.from('creators').select(selectColumns);
+    if (status && status !== 'ALL') query = query.eq('status', status);
+    if (country && country !== 'ALL') query = query.eq('country', country);
+    if (category && category !== 'ALL') query = query.eq('category', category);
+    // Search dàn trải nhiều cột (handle/displayName/email) qua ilike OR — niche (jsonb) không
+    // đẩy xuống được bằng ilike thường nên vẫn lọc riêng ở JS bên dưới cho phần đó.
+    if (q) {
+      const escaped = q.replace(/[%_]/g, m => `\\${m}`);
+      query = query.or(`handle.ilike.%${escaped}%,displayName.ilike.%${escaped}%,email.ilike.%${escaped}%,category.ilike.%${escaped}%`);
+    }
+    return query
       .order('created_at_ts', { ascending: false })
       .order('rowid', { ascending: false })
       .range(from, from + PAGE_SIZE - 1);
+  };
+
+  const { data: firstPage, error: firstError } = await buildQuery(0);
+  if (firstError) throw firstError;
+  const rows: any[] = [...(firstPage ?? [])];
+
+  if (firstPage && firstPage.length === PAGE_SIZE) {
+    const extraPages: Promise<{ data: any[] | null; error: any }>[] = [];
+    for (let from = PAGE_SIZE; ; from += PAGE_SIZE) {
+      extraPages.push(Promise.resolve(buildQuery(from)));
+      // Không biết trước tổng số dòng nên vẫn cần dừng vòng lặp khai báo request ở đâu đó — cap
+      // hào phóng (50 trang = 50k dòng) đủ dư so với quy mô bảng hiện tại, tránh vòng lặp vô hạn
+      // nếu logic dừng dựa trên length bị lệch.
+      if (extraPages.length >= 49) break;
+    }
+    const results = await Promise.all(extraPages);
+    for (const { data, error } of results) {
+      if (error) throw error;
+      if (data) rows.push(...data);
+      if (!data || data.length < PAGE_SIZE) break;
+    }
+  }
+
+  return { rows, q };
+}
+
+// niche (jsonb array) không lọc được bằng ilike ở SQL nên vẫn cần match ở JS — nhưng chỉ trên
+// tập đã được SQL lọc trước theo status/country/category/handle/displayName/email/category.
+function filterCreatorsByNicheSearch(list: Creator[], q: string): Creator[] {
+  if (!q) return list;
+  return list.filter(
+    c =>
+      c.displayName.toLowerCase().includes(q) ||
+      c.handle.toLowerCase().includes(q) ||
+      (c.category || '').toLowerCase().includes(q) ||
+      (c.niche || []).some((n: string) => n.toLowerCase().includes(q)) ||
+      (c.email || '').toLowerCase().includes(q)
+  );
+}
+
+export async function getAllCreators(filters?: CreatorListFilters): Promise<Creator[]> {
+  const { rows, q } = await queryAllCreatorRows('*', filters);
+  return filterCreatorsByNicheSearch(rows.map(rowToCreator), q);
+}
+
+// Select trơn hơn cho trang danh sách CRM (/api/creators, App.tsx global `creators` state) —
+// bỏ các cột JSONB nặng chỉ dùng ở CreatorDetailDrawer (notes/tags/recentVideos/demographics/
+// scoreBreakdown/pps/salesMetrics/collabMetrics/videoMetrics/liveMetrics), vốn được fetch riêng
+// qua getCreatorById khi operator mở chi tiết 1 creator (xem CreatorDetailDrawer + App.tsx).
+// Giữ lại niche (dùng cho search + cột Category trong bảng), sampleScore (cờ hiện badge "đã cào
+// TCM"), campaignScores (badge điểm theo từng campaign ở CampaignsView) vì list-level UI đọc
+// thẳng các field này mà không fetch lại — xem báo cáo audit trước khi trim.
+const CREATOR_LIST_COLUMNS = [
+  'id', '"workspaceId"', 'source', 'handle', '"displayName"', 'avatar', 'platform', 'country', 'language',
+  'bio', '"profileUrl"', 'followers', '"avgViews"', '"engagementRate"', 'gmv30d', 'category', 'niche',
+  '"brandFitScore"', '"commercialScore"', '"riskScore"', 'status', 'owner', 'email', 'phone', 'instagram',
+  '"rateCard"', '"lastContactAt"', '"createdAt"', '"updatedAt"', '"followerGrowthRate"', '"postingFrequency30d"',
+  '"maxMinRatio"', '"lastVideoDate"', '"erFollower"', '"medianViews"', '"isMock"', '"campaignScores"',
+  '"gmvTier"', 'gpm', '"beautyCategoryRatio"', '"hasAffiliateGmv"', '"metricsSource"', '"metricsSyncedAt"',
+  '"importedAt"', '"tcmCreatorOecuid"', '"tcmNotFoundAt"', '"sampleScore"',
+].join(', ');
+
+export async function getCreatorsForList(filters?: CreatorListFilters): Promise<Creator[]> {
+  const { rows, q } = await queryAllCreatorRows(CREATOR_LIST_COLUMNS, filters);
+  return filterCreatorsByNicheSearch(rows.map(rowToCreator), q);
+}
+
+// Chỉ lấy status của mọi creator (1 cột thay vì toàn bộ ~40 cột + JSONB blobs) — dùng cho
+// /api/dashboard vốn chỉ cần đếm theo status, không cần dữ liệu đầy đủ của từng creator.
+export async function getCreatorStatusCounts(): Promise<Record<string, number>> {
+  const db = getDb();
+  const PAGE_SIZE = 1000;
+  const counts: Record<string, number> = {};
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await db.from('creators').select('status').range(from, from + PAGE_SIZE - 1);
     if (error) throw error;
-    rows.push(...(data ?? []));
+    for (const row of data ?? []) {
+      const key = row.status || 'Unknown';
+      counts[key] = (counts[key] || 0) + 1;
+    }
     if (!data || data.length < PAGE_SIZE) break;
   }
-  let list = rows.map(rowToCreator);
+  return counts;
+}
 
-  if (!filters) return list;
-
-  const { search, keyword, status, country, category } = filters;
-  const q = (search || keyword || '').toLowerCase().trim();
-
-  if (q) {
-    list = list.filter(
-      c =>
-        c.displayName.toLowerCase().includes(q) ||
-        c.handle.toLowerCase().includes(q) ||
-        (c.category || '').toLowerCase().includes(q) ||
-        (c.niche || []).some((n: string) => n.toLowerCase().includes(q)) ||
-        (c.email || '').toLowerCase().includes(q)
-    );
+// Chỉ lấy id + handle (dùng cho dedup-map khi batch-import) — tránh kéo toàn bộ row (kể cả
+// JSONB blobs) chỉ để tra cứu theo handle.
+export async function getAllCreatorHandles(): Promise<{ id: string; handle: string }[]> {
+  const db = getDb();
+  const PAGE_SIZE = 1000;
+  const rows: { id: string; handle: string }[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await db.from('creators').select('id, handle').range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    rows.push(...((data as any[]) ?? []));
+    if (!data || data.length < PAGE_SIZE) break;
   }
+  return rows;
+}
 
-  if (status && status !== 'ALL') {
-    list = list.filter(c => c.status === status);
-  }
+export async function getCreatorsCount(): Promise<number> {
+  const db = getDb();
+  const { count, error } = await db.from('creators').select('id', { count: 'exact', head: true });
+  if (error) throw error;
+  return count ?? 0;
+}
 
-  if (country && country !== 'ALL') {
-    list = list.filter(c => c.country === country);
-  }
-
-  if (category && category !== 'ALL') {
-    list = list.filter(c => c.category === category);
-  }
-
-  return list;
+// 1 dòng bất kỳ — dùng để dựng sample context cho agent test button, không cần cả bảng.
+export async function getFirstCreator(): Promise<Creator | null> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('creators')
+    .select('*')
+    .order('created_at_ts', { ascending: false })
+    .order('rowid', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? rowToCreator(data) : null;
 }
 
 export async function getCreatorById(id: string): Promise<Creator | null> {

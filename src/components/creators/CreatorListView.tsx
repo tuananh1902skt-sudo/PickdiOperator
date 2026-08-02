@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Users,
   Search,
@@ -440,49 +440,62 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
 
   // "Thiếu detail" = đã có cid TCM (đủ điều kiện mở trang chi tiết) nhưng chưa từng cào — dùng
   // sampleScore làm cờ đại diện vì field này CHỈ có ở detail-endpoint, không có ở list-endpoint.
-  const creatorsMissingTcmDetail = creators.filter(c => !!c.tcmCreatorOecuid && !c.sampleScore);
+  const creatorsMissingTcmDetail = useMemo(() => creators.filter(c => !!c.tcmCreatorOecuid && !c.sampleScore), [creators]);
   // Creator chỉ có TikTok handle, chưa từng khớp với TCM (Kalodata/manual/file import) — ứng
   // viên cho hàng đợi "tìm cid theo handle".
-  const creatorsMissingTcmCid = creators.filter(c => !c.tcmCreatorOecuid);
+  const creatorsMissingTcmCid = useMemo(() => creators.filter(c => !c.tcmCreatorOecuid), [creators]);
   // "Thiếu avatar" khác với "thiếu detail": avatar được tải NGẦM sau khi cào (server.ts
   // batch-import), có thể fail âm thầm (CDN hết hạn, content-type lạ, quá dung lượng) mà không
   // để lại dấu vết nào trên sampleScore — nên 1 creator đã cào chi tiết xong vẫn có thể trắng
   // avatar mãi mãi nếu không có cách chủ động cào lại. Chỉ tính creator đã có cid TCM vì đó là
   // điều kiện duy nhất để mở lại trang chi tiết qua extension.
-  const creatorsMissingAvatar = creators.filter(c => !!c.tcmCreatorOecuid && !c.avatar);
+  const creatorsMissingAvatar = useMemo(() => creators.filter(c => !!c.tcmCreatorOecuid && !c.avatar), [creators]);
 
   const sourceCreators = creators;
 
   // Danh sách category cho dropdown filter — lấy trực tiếp từ category thực tế của các creator
   // đang có (thay vì 3 giá trị hardcode cũ), để filter luôn khớp với data thật, kể cả khi
   // creator được import với category mới lạ (TCM/Kalodata trả về nhiều category hơn 3 giá trị cũ).
-  const availableCategories = Array.from(
-    new Set(sourceCreators.map(c => c.category).filter((cat): cat is string => !!cat))
-  ).sort((a, b) => a.localeCompare(b));
+  // useMemo vì với vài nghìn creator (sau các đợt import) và component re-render mỗi 10s (poll
+  // ở App.tsx) hoặc mỗi keystroke filter khác, việc build lại toàn bộ Set/sort này ở mọi render
+  // (kể cả khi creators không đổi) là chi phí O(n) lãng phí và cộng dồn với các pass filter/sort khác.
+  const availableCategories = useMemo(
+    () =>
+      Array.from(new Set(sourceCreators.map(c => c.category).filter((cat): cat is string => !!cat))).sort((a, b) =>
+        a.localeCompare(b)
+      ),
+    [sourceCreators]
+  );
 
   // Danh sách các đợt import theo ngày — key là YYYY-MM-DD (giờ local) rút từ importedAt, kèm
   // số lượng creator mỗi ngày để operator biết chọn đúng đợt (vd "02/08/2026 (2.000)"). Sắp xếp
   // ngày gần nhất lên đầu vì đó là đợt vừa import, thứ operator cần lọc ngay sau khi cào xong.
-  const importDateCounts = new Map<string, number>();
-  let creatorsWithoutImportDate = 0;
-  sourceCreators.forEach(c => {
-    if (!c.importedAt) {
-      creatorsWithoutImportDate++;
-      return;
-    }
-    const d = new Date(c.importedAt);
-    if (isNaN(d.getTime())) return;
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    importDateCounts.set(key, (importDateCounts.get(key) || 0) + 1);
-  });
-  const availableImportDates = Array.from(importDateCounts.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  const { importDateCounts, creatorsWithoutImportDate } = useMemo(() => {
+    const counts = new Map<string, number>();
+    let withoutDate = 0;
+    sourceCreators.forEach(c => {
+      if (!c.importedAt) {
+        withoutDate++;
+        return;
+      }
+      const d = new Date(c.importedAt);
+      if (isNaN(d.getTime())) return;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    return { importDateCounts: counts, creatorsWithoutImportDate: withoutDate };
+  }, [sourceCreators]);
+  const availableImportDates = useMemo(
+    () => Array.from(importDateCounts.entries()).sort((a, b) => b[0].localeCompare(a[0])),
+    [importDateCounts]
+  );
   const formatImportDateLabel = (key: string) => {
     const [y, m, d] = key.split('-').map(Number);
     return new Date(y, m - 1, d).toLocaleDateString('vi-VN');
   };
 
   // Filtering logic
-  const filteredCreators = sourceCreators.filter(c => {
+  const filteredCreators = useMemo(() => sourceCreators.filter(c => {
     // Ẩn mặc định creator đã archive/bị từ chối khỏi mọi view — trừ khi operator chủ động
     // lọc đúng "Archived" để tra lại danh sách đã từ chối (vd rejected bởi d'Alba qua Sheet).
     if (c.status === 'Archived' && selectedStatus !== 'Archived') return false;
@@ -537,7 +550,24 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     if (maxFollowers !== '' && (c.followers === undefined || c.followers > Number(maxFollowers))) return false;
 
     return true;
-  });
+  }), [
+    sourceCreators,
+    search,
+    selectedStatus,
+    selectedCountry,
+    selectedCategory,
+    selectedOwner,
+    selectedImportDate,
+    tcmScrapeFilter,
+    minScore,
+    maxScore,
+    minEr,
+    maxEr,
+    minAvgViews,
+    maxAvgViews,
+    minFollowers,
+    maxFollowers,
+  ]);
 
   // Brands/Campaigns không phải field trực tiếp trên Creator — đếm từ assignments, cùng cách
   // tính với cột hiển thị bên dưới, để sort theo đúng số lượng đang thấy trên bảng.
@@ -545,44 +575,49 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     new Set(assignments.filter(a => a.creatorId === cr.id).map(a => a.workspaceId).filter(Boolean)).size;
   const getCampaignCount = (cr: Creator) => assignments.filter(a => a.creatorId === cr.id).length;
 
-  const sortedCreators = !sortKey
-    ? filteredCreators
-    : [...filteredCreators].sort((a, b) => {
-        let cmp = 0;
-        switch (sortKey) {
-          case 'creator':
-            cmp = a.displayName.localeCompare(b.displayName);
-            break;
-          case 'category':
-            cmp = (a.category || '').localeCompare(b.category || '');
-            break;
-          case 'email':
-            cmp = (a.email || '').localeCompare(b.email || '');
-            break;
-          case 'followers':
-            cmp = (a.followers ?? -1) - (b.followers ?? -1);
-            break;
-          case 'avgViews':
-            cmp = (a.avgViews ?? -1) - (b.avgViews ?? -1);
-            break;
-          case 'er':
-            cmp = (a.engagementRate ?? -1) - (b.engagementRate ?? -1);
-            break;
-          case 'score':
-            cmp = (getScoreValue(a) ?? -1) - (getScoreValue(b) ?? -1);
-            break;
-          case 'brands':
-            cmp = getBrandCount(a) - getBrandCount(b);
-            break;
-          case 'campaigns':
-            cmp = getCampaignCount(a) - getCampaignCount(b);
-            break;
-          case 'status':
-            cmp = a.status.localeCompare(b.status);
-            break;
-        }
-        return sortDir === 'asc' ? cmp : -cmp;
-      });
+  const sortedCreators = useMemo(
+    () =>
+      !sortKey
+        ? filteredCreators
+        : [...filteredCreators].sort((a, b) => {
+            let cmp = 0;
+            switch (sortKey) {
+              case 'creator':
+                cmp = a.displayName.localeCompare(b.displayName);
+                break;
+              case 'category':
+                cmp = (a.category || '').localeCompare(b.category || '');
+                break;
+              case 'email':
+                cmp = (a.email || '').localeCompare(b.email || '');
+                break;
+              case 'followers':
+                cmp = (a.followers ?? -1) - (b.followers ?? -1);
+                break;
+              case 'avgViews':
+                cmp = (a.avgViews ?? -1) - (b.avgViews ?? -1);
+                break;
+              case 'er':
+                cmp = (a.engagementRate ?? -1) - (b.engagementRate ?? -1);
+                break;
+              case 'score':
+                cmp = (getScoreValue(a) ?? -1) - (getScoreValue(b) ?? -1);
+                break;
+              case 'brands':
+                cmp = getBrandCount(a) - getBrandCount(b);
+                break;
+              case 'campaigns':
+                cmp = getCampaignCount(a) - getCampaignCount(b);
+                break;
+              case 'status':
+                cmp = a.status.localeCompare(b.status);
+                break;
+            }
+            return sortDir === 'asc' ? cmp : -cmp;
+          }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredCreators, sortKey, sortDir, assignments]
+  );
 
   // Drop selections that fell out of view (e.g. filter changed) so bulk actions
   // never silently apply to creators no longer visible in the table.

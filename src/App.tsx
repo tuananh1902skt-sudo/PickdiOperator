@@ -231,6 +231,22 @@ export function App() {
   const [selectedReviewDetail, setSelectedReviewDetail] = useState<DraftReview | null>(null);
   const [reviewForPostedVideo, setReviewForPostedVideo] = useState<DraftReview | null>(null);
 
+  // /api/creators (state `creators`) chỉ trả cột nhẹ cho bảng danh sách — bio/recentVideos/
+  // demographics/scoreBreakdown/pps/sampleScore đầy đủ/salesMetrics/collabMetrics/videoMetrics/
+  // liveMetrics/notes/tags CHỈ có khi fetch riêng /api/creators/:id (getCreatorById, full row).
+  // Gọi hàm này mỗi khi mở CreatorDetailDrawer để nạp đủ dữ liệu cho các field đó.
+  const fetchFullCreatorDetail = async (id: string) => {
+    try {
+      const res = await fetch(`/api/creators/${id}`);
+      const data = await res.json();
+      if (data.success && data.data) {
+        setSelectedCreatorDetail(prev => (prev?.id === id ? data.data : prev));
+      }
+    } catch (err) {
+      console.error('Failed to fetch full creator detail:', err);
+    }
+  };
+
   // Resolve id lấy từ URL (mount hoặc back/forward) thành object thật ngay khi data
   // collection tương ứng có sẵn — chạy lại mỗi khi creators/reviews/campaigns đổi vì lúc
   // mount data initial (mock) có thể chưa chứa id thật, phải chờ fetch xong mới tìm ra.
@@ -240,6 +256,7 @@ export function App() {
     if (found) {
       setSelectedCreatorDetail(found);
       setPendingCreatorId(null);
+      fetchFullCreatorDetail(found.id);
     }
   }, [pendingCreatorId, creators]);
 
@@ -268,6 +285,9 @@ export function App() {
     setActiveTabState('creators');
     setSelectedCreatorDetail(cr);
     navigateTo(`/creators/${cr.id}`);
+    // cr thường tới từ list state đã trim cột nặng (xem fetchFullCreatorDetail) — nạp lại đầy
+    // đủ dữ liệu ngay khi mở, drawer hiện tạm với dữ liệu nhẹ trong lúc chờ.
+    fetchFullCreatorDetail(cr.id);
   };
   const closeCreatorDetail = () => {
     setSelectedCreatorDetail(null);
