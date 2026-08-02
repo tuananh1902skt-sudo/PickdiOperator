@@ -873,13 +873,23 @@ export async function deleteAgentPromptOverride(agentId: string): Promise<void> 
 
 export async function getAllCreators(filters?: { search?: string; keyword?: string; status?: string; country?: string; category?: string }): Promise<Creator[]> {
   const db = getDb();
-  const { data, error } = await db
-    .from('creators')
-    .select('*')
-    .order('created_at_ts', { ascending: false })
-    .order('rowid', { ascending: false });
-  if (error) throw error;
-  let list = (data ?? []).map(rowToCreator);
+  // PostgREST mặc định trả tối đa 1000 dòng/query dù không có .limit() — bảng creators đã vượt
+  // mốc này (sau các đợt import Kalodata hàng nghìn dòng), nên phải phân trang bằng .range() để
+  // lấy hết, nếu không toàn bộ list (kể cả dedup-map trong batch-import) sẽ bị cắt cụt ở 1000.
+  const PAGE_SIZE = 1000;
+  const rows: any[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await db
+      .from('creators')
+      .select('*')
+      .order('created_at_ts', { ascending: false })
+      .order('rowid', { ascending: false })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  let list = rows.map(rowToCreator);
 
   if (!filters) return list;
 
@@ -1136,9 +1146,7 @@ export async function normalizeCreatorStoreInDb(
   sanitizeCreatorDisplayName: (d: string, h: string) => string
 ): Promise<void> {
   const db = getDb();
-  const { data, error } = await db.from('creators').select('*');
-  if (error) throw error;
-  const creators = (data ?? []).map(rowToCreator);
+  const creators = await getAllCreators();
 
   // No client-side multi-statement transaction with supabase-js — these updates aren't
   // concurrency-sensitive (one-time cleanup pass), so sequential awaits are fine.
