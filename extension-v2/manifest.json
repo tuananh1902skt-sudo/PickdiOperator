@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Pickdi TCM Creator Scraper",
+  "name": "Pickdi TCM Creator Scraper (v2 - Human Sim)",
   "version": "3.8.6",
   "description": "Cào creator thật từ TikTok Shop Affiliate Center (Creator Marketplace) và tiktok.com, đẩy vào Pickdi Operator CRM.",
   "permissions": [

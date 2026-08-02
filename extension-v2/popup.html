@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { width: 280px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 14px; margin: 0; background: #f9fafb; }
+    h3 { margin: 0 0 10px 0; font-size: 14px; color: #111827; }
+    label { font-size: 11px; color: #4b5563; font-weight: bold; }
+    input { width: 100%; padding: 6px; margin: 4px 0 10px 0; border: 1px solid #d1d5db; border-radius: 4px; box-sizing: border-box; font-size: 11px; }
+    .row { display: flex; gap: 6px; }
+    .row input { flex: 1; }
+    button { width: 100%; padding: 10px; background: #4f46e5; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 12px; }
+    button:hover { background: #4338ca; }
+    button.secondary { background: #111827; margin-top: 6px; }
+    button.secondary:hover { background: #000; }
+    #findStatus, #detailStatus, #autoScanStatus, #engagementStatus { margin-top: 8px; font-size: 11px; color: #374151; word-break: break-word; }
+    button.accent { background: #059669; }
+    button.accent:hover { background: #047857; }
+    hr { border: none; border-top: 1px solid #e5e7eb; margin: 14px 0; }
+  </style>
+</head>
+<body>
+  <h3>⚡ Pickdi TCM Creator Scraper</h3>
+
+  <label>Webapp URL:</label>
+  <input type="text" id="webappUrl" placeholder="http://localhost:3000">
+
+  <label>Shop ID (điền tay nếu extension không tự nhớ được):</label>
+  <div class="row">
+    <input type="text" id="manualShopId" placeholder="shop_id">
+    <input type="text" id="manualShopRegion" placeholder="US" style="flex:0 0 60px;">
+  </div>
+  <button id="saveShopIdBtn" class="secondary" style="margin-top:0;">💾 Lưu Shop ID</button>
+  <div id="shopIdStatus" style="font-size:11px; color:#374151; margin:6px 0 4px 0;"></div>
+
+  <label>⏱️ Delay chống bị TCM phát hiện (áp dụng cho cả nút trong webapp)</label>
+  <p style="font-size:10px; color:#9ca3af; margin:2px 0 6px 0; line-height:1.3;">Giữa 2 creator: đa số delay ngắn, thỉnh thoảng delay dài. Sau mỗi N creator: nghỉ dài hẳn. Lỗi liên tiếp nhiều: tự dừng.</p>
+  <div class="row">
+    <input type="number" id="delayShortMin" placeholder="Ngắn min(s)">
+    <input type="number" id="delayShortMax" placeholder="Ngắn max(s)">
+  </div>
+  <div class="row">
+    <input type="number" id="delayLongMin" placeholder="Dài min(s)">
+    <input type="number" id="delayLongMax" placeholder="Dài max(s)">
+    <input type="number" id="delayLongChancePct" placeholder="%dài" style="flex:0 0 55px;">
+  </div>
+  <div class="row">
+    <input type="number" id="breakEveryMin" placeholder="Nghỉ sau ≥N creator">
+    <input type="number" id="breakEveryMax" placeholder="…≤N creator">
+  </div>
+  <div class="row">
+    <input type="number" id="breakDurationMinMin" placeholder="Nghỉ dài min(phút)">
+    <input type="number" id="breakDurationMaxMin" placeholder="Nghỉ dài max(phút)">
+  </div>
+  <input type="number" id="maxConsecutiveFailures" placeholder="Số lỗi liên tiếp để tự dừng (0 = tắt)">
+  <button id="saveDelayConfigBtn" class="secondary" style="margin-top:0;">💾 Lưu cấu hình delay</button>
+  <div id="delayConfigStatus" style="font-size:11px; color:#374151; margin:6px 0 4px 0;"></div>
+
+  <hr>
+
+  <label>🔍 Import creator từ TCM (Affiliate Center)</label>
+  <p style="font-size:11px; color:#6b7280; margin:2px 0 8px 0; line-height:1.4;">
+    Mở trang Find Creators, cuộn qua danh sách rồi bấm nút bên dưới để đẩy lên Pickdi (kèm PPS, GMV, Video/LIVE GPM).
+  </p>
+  <div class="row">
+    <input type="number" id="followerMin" placeholder="Follower min">
+    <input type="number" id="followerMax" placeholder="Follower max">
+  </div>
+  <input type="text" id="keyword" placeholder="Lọc theo handle/nickname/ngành hàng">
+  <button id="findCreatorsBtn">⬆️ Import creator đã bắt được</button>
+  <div id="findStatus"></div>
+  <button id="stopListImportBtn" class="secondary" style="display:none;">⏹ Dừng</button>
+
+  <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin-top:10px; cursor:pointer;">
+    <input type="checkbox" id="autoDetailCheckbox" style="width:auto; margin:0;">
+    🤖 Sau khi import, tự mở tab ẩn lấy chi tiết từng creator (chạy nền, chậm rãi)
+  </label>
+  <p style="font-size:10px; color:#9ca3af; margin:4px 0 8px 0; line-height:1.4;">
+    Tự mở từng trang chi tiết ở tab ẩn theo delay đã cấu hình ở trên, mỗi đợt <input type="number" id="autoDetailMax" placeholder="không giới hạn" min="1" style="width:70px; display:inline; padding:2px 4px; margin:0 2px;"> creator (trống = hết 1 lượt). Dùng thận trọng, dừng được bất kỳ lúc nào.
+  </p>
+  <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin:0 0 8px 0; cursor:pointer; font-size:11px; color:#4b5563;">
+    <input type="checkbox" id="autoDetailContinueCheckbox" style="width:auto; margin:0;">
+    Tự lấy tiếp đợt kế sau khi nghỉ
+    <input type="number" id="autoDetailCooldownMin" value="1" min="0.5" max="30" step="0.5" style="width:44px; display:inline; padding:2px 4px; margin:0 2px;"> phút
+  </label>
+  <div id="autoDetailQueueStatus" style="font-size:11px; color:#374151; word-break:break-word; margin-bottom:6px;"></div>
+  <button id="continueAutoDetailBtn" class="accent" style="display:none;">▶️ Lấy tiếp</button>
+  <button id="stopAutoDetailBtn" class="secondary" style="display:none;">⏹ Dừng hàng đợi</button>
+
+  <hr>
+
+  <label>📋 Lấy chi tiết creator (khuyên dùng)</label>
+  <p style="font-size:11px; color:#6b7280; margin:2px 0 8px 0; line-height:1.4;">
+    Mở trang chi tiết 1 creator, đợi ~1-2s cho load xong rồi bấm nút này — không cần click qua tab nào.
+  </p>
+  <button id="pushDetailBtn" class="accent">📋 Lấy chi tiết trang này</button>
+  <div id="detailStatus"></div>
+  <button id="stopDetailSingleBtn" class="secondary" style="display:none;">⏹ Dừng</button>
+
+  <p style="font-size:11px; color:#6b7280; margin:10px 0 8px 0; line-height:1.4;">
+    Nếu nút trên chưa bắt được demographics, thử nút dưới trước khi bấm lại nút trên.
+  </p>
+  <button id="autoScanBtn" class="secondary">🚀 Auto quét qua các tab (dự phòng)</button>
+  <div id="autoScanStatus"></div>
+  <button id="stopAutoScanBtn" class="secondary" style="display:none;">⏹ Dừng</button>
+
+  <button id="pushEngagementBtn" class="secondary">📊 Lấy engagement (tiktok.com)</button>
+  <div id="engagementStatus"></div>
+  <button id="stopEngagementBtn" class="secondary" style="display:none;">⏹ Dừng</button>
+
+  <script src="shared.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

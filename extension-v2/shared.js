@@ -445,7 +445,108 @@ function readTcmCapturedList() {
 
 // HÀM CHẠY BÊN TRONG TAB TCM ĐANG MỞ — chỉ trả raw profile, việc chuẩn hoá field làm ở ngoài
 // trang (normalizeTcmProfileDetail) để tái dùng helper chung.
-function readTcmLastProfile() {
+//
+// Lưu ý: hàm này được chrome.scripting.executeScript({ func: readTcmLastProfile }) inject
+// NGUYÊN VĂN vào trang TCM — nó KHÔNG thể gọi các hàm khác định nghĩa ở top-level của
+// shared.js (findAllRetryButtons/humanLikeScrollDown/autoRetryLoadErrors bên dưới trong
+// autoScanAndReadTcmProfile) vì executeScript chỉ mang theo đúng 1 hàm được trỏ tới, không
+// mang cả file. Vì vậy phần cuộn + tự bấm Retry phải viết lại local ở đây.
+async function readTcmLastProfile() {
+  function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+  function looksClickable(el) {
+    if (!el) return false;
+    if (el.tagName === 'BUTTON' || el.tagName === 'A') return true;
+    if (el.getAttribute && (el.getAttribute('role') === 'tab' || el.getAttribute('role') === 'button')) return true;
+    try { return window.getComputedStyle(el).cursor === 'pointer'; } catch (e) { return false; }
+  }
+
+  function pickClickableAncestor(el) {
+    let node = el;
+    for (let depth = 0; depth < 4 && node; depth++) {
+      if (looksClickable(node)) return node;
+      node = node.parentElement;
+    }
+    return el;
+  }
+
+  function isNearViewport(el, margin) {
+    const r = el.getBoundingClientRect();
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    return r.bottom >= -margin && r.top <= vh + margin;
+  }
+
+  // skipScroll: bỏ qua bước scrollIntoView vì đã biết chắc el đang nằm trong/gần khung nhìn rồi
+  // (dùng khi bấm Retry vừa lộ ra lúc đang cuộn dần — không cần "nhảy" tới, chỉ bấm tại chỗ).
+  async function fireClick(el, opts) {
+    opts = opts || {};
+    if (!opts.skipScroll && !isNearViewport(el, 0)) {
+      try { el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' }); } catch (e) {}
+      await sleep(320 + Math.random() * 220);
+    }
+    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
+      try { el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window })); } catch (e) {}
+    });
+    try { el.click(); } catch (e) {}
+  }
+
+  function findAllRetryButtons() {
+    const all = document.querySelectorAll('body *');
+    const seen = new Set();
+    const buttons = [];
+    for (const el of all) {
+      if (el.children.length > 0) continue;
+      if ((el.textContent || '').trim() !== 'Retry') continue;
+      const target = pickClickableAncestor(el);
+      if (seen.has(target)) continue;
+      seen.add(target);
+      buttons.push(target);
+    }
+    return buttons;
+  }
+
+  // onlyVisible: chỉ bấm những nút Retry đang trong/gần khung nhìn NGAY LÚC NÀY — dùng trong lúc
+  // cuộn dần để mô phỏng đúng thứ tự "đọc tới đâu xử lý tới đó" từ trên xuống, tránh nhảy thẳng
+  // tới 1 nút Retry còn nằm sâu bên dưới (đã có trong DOM nhưng mắt người chưa "thấy" tới).
+  async function clickAllRetryButtons(onlyVisible) {
+    const buttons = findAllRetryButtons();
+    const targets = onlyVisible ? buttons.filter((b) => isNearViewport(b, 150)) : buttons;
+    for (const btn of targets) {
+      await fireClick(btn, { skipScroll: true });
+    }
+    return targets.length;
+  }
+
+  async function humanLikeScrollDown() {
+    let lastY = -1;
+    for (let i = 0; i < 12; i++) {
+      window.scrollBy(0, 220 + Math.random() * 360);
+      await sleep(160 + Math.random() * 260);
+      await clickAllRetryButtons(true);
+      const y = window.scrollY;
+      const atBottom = Math.ceil(y + window.innerHeight) >= document.documentElement.scrollHeight;
+      if (atBottom || y === lastY) break;
+      lastY = y;
+    }
+    await sleep(200 + Math.random() * 200);
+    window.scrollTo(0, 0);
+    await sleep(150);
+  }
+
+  async function autoRetryLoadErrors(maxAttempts) {
+    let attempt = 0;
+    while (attempt < maxAttempts) {
+      const clickedCount = await clickAllRetryButtons();
+      if (clickedCount === 0) return true;
+      attempt++;
+      await sleep(1000 + attempt * 400 + Math.random() * 500);
+    }
+    return findAllRetryButtons().length === 0;
+  }
+
+  await humanLikeScrollDown();
+  await autoRetryLoadErrors(6);
+
   const id = window.__pickdi_tcm_last_profile_id;
   if (!id) {
     return { error: 'Chưa bắt được data creator nào — hãy mở chi tiết 1 creator trên TCM, đợi vài giây cho các tab Sales/Video/Audience tự load, rồi bấm lại nút này.' };
@@ -522,14 +623,93 @@ async function autoScanAndReadTcmProfile() {
     return candidates[0];
   }
 
-  function fireClick(el) {
-    try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
+  function isNearViewport(el, margin) {
+    const r = el.getBoundingClientRect();
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    return r.bottom >= -margin && r.top <= vh + margin;
+  }
+
+  // skipScroll: bỏ qua scrollIntoView vì đã biết chắc el đang nằm trong/gần khung nhìn rồi
+  // (dùng khi bấm Retry vừa lộ ra lúc đang cuộn dần — không cần "nhảy" tới, chỉ bấm tại chỗ).
+  async function fireClick(el, opts) {
+    opts = opts || {};
+    if (!opts.skipScroll && !isNearViewport(el, 0)) {
+      try { el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' }); } catch (e) {}
+      await sleep(320 + Math.random() * 220);
+    }
     ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
       try {
         el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
       } catch (e) {}
     });
     try { el.click(); } catch (e) {}
+  }
+
+  // Trang creator details là 1 trang dài (PPS/Sample score/Sales/Collaboration/Video/LIVE/...
+  // xếp chồng theo chiều dọc), nên nhiều mục có thể lỗi "Failed to load data" và hiện nút Retry
+  // CÙNG LÚC — không chỉ 1 nút duy nhất ở đầu trang. Tìm và trả về TẤT CẢ nút Retry đang có.
+  function findAllRetryButtons() {
+    const all = document.querySelectorAll('body *');
+    const seen = new Set();
+    const buttons = [];
+    for (const el of all) {
+      if (el.children.length > 0) continue;
+      const text = (el.textContent || '').trim();
+      if (text !== 'Retry') continue;
+      const target = pickClickableAncestor(el);
+      if (seen.has(target)) continue;
+      seen.add(target);
+      buttons.push(target);
+    }
+    return buttons;
+  }
+
+  function hasLoadError() {
+    return findAllRetryButtons().length > 0 || /Failed to load data/i.test(document.body.innerText || '');
+  }
+
+  // onlyVisible: chỉ bấm những nút Retry đang trong/gần khung nhìn NGAY LÚC NÀY — dùng trong lúc
+  // cuộn dần để mô phỏng đúng thứ tự "đọc tới đâu xử lý tới đó" từ trên xuống, tránh nhảy thẳng
+  // tới 1 nút Retry còn nằm sâu bên dưới (đã có trong DOM nhưng mắt người chưa "thấy" tới).
+  async function clickAllRetryButtons(onlyVisible) {
+    const buttons = findAllRetryButtons();
+    const targets = onlyVisible ? buttons.filter((b) => isNearViewport(b, 150)) : buttons;
+    for (const btn of targets) {
+      await fireClick(btn, { skipScroll: true });
+    }
+    return targets.length;
+  }
+
+  // Cuộn dần xuống cuối trang theo từng đoạn ngẫu nhiên (thay vì scrollTo tức thì) để giống
+  // thao tác cuộn chuột người thật, đồng thời bấm ngay mọi nút Retry lộ ra ở mỗi đoạn cuộn
+  // (mục nào lỗi load sẽ hiện Retry đúng lúc cuộn tới, không đợi cuộn hết mới quay lại tìm).
+  async function humanLikeScrollDown() {
+    let lastY = -1;
+    for (let i = 0; i < 12; i++) {
+      window.scrollBy(0, 220 + Math.random() * 360);
+      await sleep(160 + Math.random() * 260);
+      await clickAllRetryButtons(true);
+      const y = window.scrollY;
+      const atBottom = Math.ceil(y + window.innerHeight) >= document.documentElement.scrollHeight;
+      if (atBottom || y === lastY) break;
+      lastY = y;
+    }
+    await sleep(200 + Math.random() * 200);
+    window.scrollTo(0, 0);
+    await sleep(150);
+  }
+
+  // Nếu trang vẫn còn (bất kỳ) nút Retry nào, tự bấm HẾT TẤT CẢ trong mỗi lượt, lặp lại (có
+  // backoff) tới khi hết lỗi hoặc hết số lần thử. Trả về true nếu không còn lỗi khi kết thúc.
+  async function autoRetryLoadErrors(maxAttempts) {
+    let attempt = 0;
+    while (attempt < maxAttempts) {
+      const clickedCount = await clickAllRetryButtons();
+      if (clickedCount === 0) return true;
+      attempt++;
+      await sleep(1000 + attempt * 400 + Math.random() * 500);
+    }
+    return !hasLoadError();
   }
 
   function currentProfile() {
@@ -554,6 +734,17 @@ async function autoScanAndReadTcmProfile() {
   const confirmed = [];
   const clickedButNoData = [];
 
+  // Cuộn trang như người thật trước khi thao tác, rồi tự bấm Retry nếu trang mở lên
+  // đã báo lỗi "Failed to load data" (xảy ra khá thường xuyên trên Creator details).
+  await humanLikeScrollDown();
+  const recoveredInitially = await autoRetryLoadErrors(6);
+  if (!recoveredInitially) {
+    return {
+      error: 'Trang creator details báo lỗi "Failed to load data" và đã tự bấm Retry nhiều lần nhưng vẫn không load được — thử lại sau hoặc bỏ qua creator này.',
+      clicked, notFound, confirmed, clickedButNoData,
+    };
+  }
+
   for (const tab of TAB_LABELS) {
     let el = findTabElement(tab.label);
     if (!el) {
@@ -565,10 +756,35 @@ async function autoScanAndReadTcmProfile() {
       notFound.push(tab.label);
       continue;
     }
-    fireClick(el);
+    await fireClick(el);
     clicked.push(tab.label);
+    // Mỗi tab con (Sales, Video, LIVE...) có thể tự báo lỗi load riêng — retry tại chỗ
+    // trước khi kiểm tra field, tránh bỏ sót data chỉ vì 1 lần load lỗi thoáng qua.
+    await autoRetryLoadErrors(3);
     const gotField = await waitForField(tab.checkField);
     if (tab.checkField) {
+      if (gotField) confirmed.push(tab.label);
+      else clickedButNoData.push(tab.label);
+    }
+  }
+
+  // Vài chỉ số bị thiếu sau lượt đầu không có nghĩa là hết hy vọng — click lại đúng những tab
+  // đó thêm tối đa 2 lượt (kèm retry lỗi load) trước khi chấp nhận là thật sự thiếu, tránh báo
+  // "quét đủ" trong khi chỉ là load chậm/lỗi thoáng qua ở 1 tab.
+  for (let pass = 0; pass < 2 && clickedButNoData.length > 0; pass++) {
+    const stillMissing = clickedButNoData.splice(0, clickedButNoData.length);
+    await humanLikeScrollDown();
+    for (const label of stillMissing) {
+      const tab = TAB_LABELS.find((t) => t.label === label);
+      if (!tab) continue;
+      let el = findTabElement(tab.label);
+      if (!el) {
+        notFound.push(tab.label);
+        continue;
+      }
+      await fireClick(el);
+      await autoRetryLoadErrors(3);
+      const gotField = await waitForField(tab.checkField);
       if (gotField) confirmed.push(tab.label);
       else clickedButNoData.push(tab.label);
     }
