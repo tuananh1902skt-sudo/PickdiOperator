@@ -417,7 +417,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1 -mr-1">
             {recentReplies.length === 0 ? (
               <p className="text-xs text-slate-400 py-4">No unread replies</p>
             ) : (
