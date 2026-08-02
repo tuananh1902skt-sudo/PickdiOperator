@@ -874,10 +874,10 @@ export async function deleteAgentPromptOverride(agentId: string): Promise<void> 
 type CreatorListFilters = { search?: string; keyword?: string; status?: string; country?: string; category?: string };
 
 // Chạy 1 query creators (với select cột tuỳ chỉnh + filter status/country/category/search đẩy
-// xuống SQL) phân trang bằng .range() — trang đầu tuần tự để biết còn trang tiếp theo hay không,
-// các trang sau chạy song song (Promise.all) thay vì tuần tự, gộp N round-trip nối tiếp thành
-// ~1 round-trip. PostgREST mặc định trả tối đa 1000 dòng/query dù không có .limit(), nên bắt
-// buộc phải phân trang để lấy hết bảng (đã vượt mốc 1000 dòng sau các đợt import Kalodata).
+// xuống SQL) phân trang bằng .range(), bắn cả batch trang song song (Promise.all) ngay từ đầu
+// thay vì chờ trang đầu xong mới quyết định có cần trang tiếp không — gộp N round-trip tuần tự
+// thành ~1 round-trip. PostgREST mặc định trả tối đa 1000 dòng/query dù không có .limit(), nên
+// bắt buộc phải phân trang để lấy hết bảng (đã vượt mốc 1000 dòng sau các đợt import Kalodata).
 async function queryAllCreatorRows(selectColumns: string, filters?: CreatorListFilters): Promise<{ rows: any[]; q: string }> {
   const db = getDb();
   const PAGE_SIZE = 1000;
@@ -904,25 +904,25 @@ async function queryAllCreatorRows(selectColumns: string, filters?: CreatorListF
       .range(from, from + PAGE_SIZE - 1);
   };
 
-  const { data: firstPage, error: firstError } = await buildQuery(0);
-  if (firstError) throw firstError;
-  const rows: any[] = [...(firstPage ?? [])];
-
-  if (firstPage && firstPage.length === PAGE_SIZE) {
-    const extraPages: Promise<{ data: any[] | null; error: any }>[] = [];
-    for (let from = PAGE_SIZE; ; from += PAGE_SIZE) {
-      extraPages.push(Promise.resolve(buildQuery(from)));
-      // Không biết trước tổng số dòng nên vẫn cần dừng vòng lặp khai báo request ở đâu đó — cap
-      // hào phóng (50 trang = 50k dòng) đủ dư so với quy mô bảng hiện tại, tránh vòng lặp vô hạn
-      // nếu logic dừng dựa trên length bị lệch.
-      if (extraPages.length >= 49) break;
-    }
-    const results = await Promise.all(extraPages);
+  // Bắn cả loạt trang cùng lúc (Promise.all) thay vì chờ trang đầu xong mới biết có cần trang
+  // tiếp hay không — mỗi round-trip tới Supabase tốn ~1s do độ trễ mạng bất kể query nhẹ hay
+  // nặng (đã benchmark), nên gộp N round-trip *tuần tự* thành 1 round-trip *song song* mới thực
+  // sự nhanh hơn. Bắt đầu với 1 batch 4 trang (~4000 dòng, dư so với quy mô bảng hiện tại); nếu
+  // trang cuối batch vẫn đầy (còn dữ liệu chưa lấy hết) thì bắn tiếp batch kế, tối đa 50 trang.
+  const BATCH_SIZE = 4;
+  const rows: any[] = [];
+  let nextFrom = 0;
+  let done = false;
+  while (!done && nextFrom < PAGE_SIZE * 49) {
+    const batchStarts: number[] = [];
+    for (let i = 0; i < BATCH_SIZE; i++) batchStarts.push(nextFrom + i * PAGE_SIZE);
+    const results = await Promise.all(batchStarts.map(from => buildQuery(from)));
     for (const { data, error } of results) {
       if (error) throw error;
       if (data) rows.push(...data);
-      if (!data || data.length < PAGE_SIZE) break;
+      if (!data || data.length < PAGE_SIZE) { done = true; break; }
     }
+    nextFrom += BATCH_SIZE * PAGE_SIZE;
   }
 
   return { rows, q };
