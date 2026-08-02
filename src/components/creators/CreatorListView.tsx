@@ -234,6 +234,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   const [selectedCountry, setSelectedCountry] = useState('ALL');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
   const [selectedOwner, setSelectedOwner] = useState('ALL');
+  const [sortOrder, setSortOrder] = useState<'NONE' | 'AZ' | 'ZA'>('NONE');
 
   // Bộ lọc nâng cao — gắn trực tiếp với 2 chức năng quét data TCM (tìm cid / cào chi tiết) để
   // operator lọc ra đúng nhóm creator cần chạy hàng đợi tiếp theo, cộng thêm range lọc theo các
@@ -432,6 +433,13 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
 
   const sourceCreators = creators;
 
+  // Danh sách category cho dropdown filter — lấy trực tiếp từ category thực tế của các creator
+  // đang có (thay vì 3 giá trị hardcode cũ), để filter luôn khớp với data thật, kể cả khi
+  // creator được import với category mới lạ (TCM/Kalodata trả về nhiều category hơn 3 giá trị cũ).
+  const availableCategories = Array.from(
+    new Set(sourceCreators.map(c => c.category).filter((cat): cat is string => !!cat))
+  ).sort((a, b) => a.localeCompare(b));
+
   // Filtering logic
   const filteredCreators = sourceCreators.filter(c => {
     // Ẩn mặc định creator đã archive/bị từ chối khỏi mọi view — trừ khi operator chủ động
@@ -479,16 +487,24 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     return true;
   });
 
+  // Sort A-Z / Z-A theo tên hiển thị — giữ nguyên thứ tự gốc khi sortOrder = NONE.
+  const sortedCreators = sortOrder === 'NONE'
+    ? filteredCreators
+    : [...filteredCreators].sort((a, b) => {
+        const cmp = a.displayName.localeCompare(b.displayName);
+        return sortOrder === 'AZ' ? cmp : -cmp;
+      });
+
   // Drop selections that fell out of view (e.g. filter changed) so bulk actions
   // never silently apply to creators no longer visible in the table.
   useEffect(() => {
     setSelectedIds(prev => {
-      const visibleIds = new Set(filteredCreators.map(c => c.id));
+      const visibleIds = new Set(sortedCreators.map(c => c.id));
       const next = prev.filter(id => visibleIds.has(id));
       return next.length === prev.length ? prev : next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredCreators]);
+  }, [sortedCreators]);
 
   // Search/filter changes reshuffle the result set — always land back on page 1
   // so the user isn't stranded on a page that no longer has any rows.
@@ -500,6 +516,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     selectedCountry,
     selectedCategory,
     selectedOwner,
+    sortOrder,
     tcmScrapeFilter,
     minScore,
     maxScore,
@@ -511,10 +528,10 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     maxFollowers
   ]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredCreators.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(sortedCreators.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
   const pageStart = (safePage - 1) * PAGE_SIZE;
-  const paginatedCreators = filteredCreators.slice(pageStart, pageStart + PAGE_SIZE);
+  const paginatedCreators = sortedCreators.slice(pageStart, pageStart + PAGE_SIZE);
 
   // Select-all only applies to the rows currently on screen (this page of the
   // filtered/paginated set), not every creator matching the filter across all pages.
@@ -793,9 +810,19 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
               className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-medium"
             >
               <option value="ALL">Category: All</option>
-              <option value="Beauty & Skincare">Beauty & Skincare</option>
-              <option value="Makeup">Makeup</option>
-              <option value="Beauty & Lifestyle">Beauty & Lifestyle</option>
+              {availableCategories.map(cat => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+
+            <select
+              value={sortOrder}
+              onChange={e => setSortOrder(e.target.value as typeof sortOrder)}
+              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-medium"
+            >
+              <option value="NONE">Sort: Default</option>
+              <option value="AZ">Sort: A → Z</option>
+              <option value="ZA">Sort: Z → A</option>
             </select>
 
             <button
@@ -1088,7 +1115,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
             </thead>
 
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-              {filteredCreators.length === 0 ? (
+              {sortedCreators.length === 0 ? (
                 <tr>
                   <td colSpan={12} className="text-center py-12 text-slate-400">
                     No creators found matching current criteria.
@@ -1338,9 +1365,9 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
         {/* Table Footer & Pagination */}
         <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex items-center justify-between text-xs text-slate-500">
           <span>
-            {filteredCreators.length === 0
+            {sortedCreators.length === 0
               ? 'Showing 0 of 0 creators'
-              : `Showing ${pageStart + 1}–${Math.min(pageStart + PAGE_SIZE, filteredCreators.length)} of ${filteredCreators.length} creators`}
+              : `Showing ${pageStart + 1}–${Math.min(pageStart + PAGE_SIZE, sortedCreators.length)} of ${sortedCreators.length} creators`}
           </span>
           <div className="flex items-center gap-1">
             <button
