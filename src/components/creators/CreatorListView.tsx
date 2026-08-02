@@ -234,6 +234,12 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   const [selectedCountry, setSelectedCountry] = useState('ALL');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
   const [selectedOwner, setSelectedOwner] = useState('ALL');
+  // Lọc theo ngày import — group theo ngày (YYYY-MM-DD, giờ local) của creator.importedAt, để
+  // operator cô lập đúng đợt vừa import (vd 2000 creator import hôm nay) và duyệt giữ/xóa trước
+  // khi bắt đầu cào, thay vì lẫn lộn với toàn bộ database. Creator chưa từng import qua file/sheet
+  // (chỉ tới từ TCM scrape hoặc thêm tay) không có importedAt nên không xuất hiện trong danh sách
+  // ngày — chọn "Chưa rõ ngày import" để xem riêng nhóm đó.
+  const [selectedImportDate, setSelectedImportDate] = useState('ALL');
 
   // Sort theo cột — bấm vào tiêu đề cột trong bảng (Creator, Category & Niche, Email,
   // Followers, Avg Views, ER %, d'Alba Fit, Brands, Campaigns, Status) để sort tăng/giảm,
@@ -454,6 +460,27 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     new Set(sourceCreators.map(c => c.category).filter((cat): cat is string => !!cat))
   ).sort((a, b) => a.localeCompare(b));
 
+  // Danh sách các đợt import theo ngày — key là YYYY-MM-DD (giờ local) rút từ importedAt, kèm
+  // số lượng creator mỗi ngày để operator biết chọn đúng đợt (vd "02/08/2026 (2.000)"). Sắp xếp
+  // ngày gần nhất lên đầu vì đó là đợt vừa import, thứ operator cần lọc ngay sau khi cào xong.
+  const importDateCounts = new Map<string, number>();
+  let creatorsWithoutImportDate = 0;
+  sourceCreators.forEach(c => {
+    if (!c.importedAt) {
+      creatorsWithoutImportDate++;
+      return;
+    }
+    const d = new Date(c.importedAt);
+    if (isNaN(d.getTime())) return;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    importDateCounts.set(key, (importDateCounts.get(key) || 0) + 1);
+  });
+  const availableImportDates = Array.from(importDateCounts.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  const formatImportDateLabel = (key: string) => {
+    const [y, m, d] = key.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('vi-VN');
+  };
+
   // Filtering logic
   const filteredCreators = sourceCreators.filter(c => {
     // Ẩn mặc định creator đã archive/bị từ chối khỏi mọi view — trừ khi operator chủ động
@@ -475,6 +502,17 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     if (selectedCountry !== 'ALL' && c.country !== selectedCountry) return false;
     if (selectedCategory !== 'ALL' && c.category !== selectedCategory) return false;
     if (selectedOwner !== 'ALL' && c.owner !== selectedOwner) return false;
+
+    if (selectedImportDate !== 'ALL') {
+      if (selectedImportDate === 'NONE') {
+        if (c.importedAt) return false;
+      } else {
+        if (!c.importedAt) return false;
+        const d = new Date(c.importedAt);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        if (key !== selectedImportDate) return false;
+      }
+    }
 
     // Trạng thái quét TCM — cùng tiêu chí đủ điều kiện với 2 hàng đợi "Tìm cid" / "Cào chi
     // tiết" phía trên (creatorsMissingTcmCid / creatorsMissingTcmDetail) để filter luôn khớp
@@ -567,6 +605,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     selectedCountry,
     selectedCategory,
     selectedOwner,
+    selectedImportDate,
     sortKey,
     sortDir,
     tcmScrapeFilter,
@@ -889,6 +928,21 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
               {availableCategories.map(cat => (
                 <option key={cat} value={cat}>{cat}</option>
               ))}
+            </select>
+
+            <select
+              value={selectedImportDate}
+              onChange={e => setSelectedImportDate(e.target.value)}
+              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-medium"
+              title="Lọc theo ngày import — cô lập đợt vừa import để duyệt giữ/xóa trước khi cào"
+            >
+              <option value="ALL">Đợt import: Tất cả</option>
+              {availableImportDates.map(([key, count]) => (
+                <option key={key} value={key}>{`${formatImportDateLabel(key)} (${count})`}</option>
+              ))}
+              {creatorsWithoutImportDate > 0 && (
+                <option value="NONE">{`Chưa rõ ngày import (${creatorsWithoutImportDate})`}</option>
+              )}
             </select>
 
             {sortKey && (
