@@ -135,7 +135,8 @@ const KALODATA_PREVIEW_FIELDS: { key: string; label: string }[] = [
   { key: 'gmv30d', label: 'Revenue (30d)' },
   { key: 'engagementRate', label: 'Engagement Rate' },
   { key: 'avgViews', label: 'Avg. Views/video' },
-  { key: 'profileUrl', label: 'Link TikTok' }
+  { key: 'profileUrl', label: 'Link TikTok' },
+  { key: 'email', label: 'Email' }
 ];
 
 // Cột nào trong file khớp preset Kalodata, dùng để hiện cảnh báo thiếu cột trước khi import.

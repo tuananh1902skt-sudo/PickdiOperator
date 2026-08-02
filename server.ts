@@ -570,6 +570,27 @@ app.post('/api/creators/batch-import', async (req, res) => {
   let updatedCount = 0;
   const avatarJobs: { creatorId: string; avatarUrl: string }[] = [];
   const failedHandles: { handle: string; message: string }[] = [];
+  const toSave: { creator: Creator; kind: 'new' | 'updated' }[] = [];
+
+  // 1 lần fetch toàn bộ creators hiện có thay vì gọi getCreatorByHandle (1 round-trip Supabase)
+  // riêng cho từng dòng — với import hàng nghìn dòng, N round-trip tuần tự là nguyên nhân chính
+  // khiến request treo lâu tới mức client timeout ("Lỗi kết nối tới máy chủ") dù dữ liệu đã ghi
+  // được vào DB. Batch-import không cần dữ liệu real-time tuyệt đối như getCreatorByHandle đơn lẻ.
+  const existingByHandle = new Map<string, Creator>();
+  for (const c of await getAllCreators()) {
+    existingByHandle.set(c.handle.toLowerCase(), c);
+  }
+  // Cache scoring criteria theo workspace — đa số dòng trong 1 lần import cùng chung workspace
+  // đích, gọi lại getWorkspaceById cho từng dòng (như applyScore vẫn làm) là round-trip thừa.
+  const criteriaCache = new Map<string, any>();
+  async function getCachedCriteria(wsId: string | undefined) {
+    if (!wsId) return undefined;
+    if (!criteriaCache.has(wsId)) {
+      const ws = await getWorkspaceById(wsId);
+      criteriaCache.set(wsId, ws?.scoringCriteria);
+    }
+    return criteriaCache.get(wsId);
+  }
 
   for (const item of batchList as any[]) {
    try {
@@ -590,7 +611,7 @@ app.post('/api/creators/batch-import', async (req, res) => {
 
     if (!isValidCreatorHandle(rawHandle)) continue;
 
-    const existing = await getCreatorByHandle(rawHandle);
+    const existing = existingByHandle.get(rawHandle.toLowerCase());
 
     const targetWs = workspaceId || INITIAL_WORKSPACES[0]?.id;
     const countryName = item.country || region || (rawHandle.includes('_us') ? 'United States' : rawHandle.includes('_uk') ? 'United Kingdom' : undefined);
@@ -660,8 +681,14 @@ app.post('/api/creators/batch-import', async (req, res) => {
         tags: Array.from(new Set([...(existing.tags || []), 'Scraper Enriched', source || 'Pickdi Extension'])),
         updatedAt: new Date().toISOString()
       };
-      await applyScore(updated, undefined);
-      updatedCount++;
+      const criteria = await getCachedCriteria(updated.workspaceId);
+      const breakdown = scoreCreator(updated, undefined, criteria);
+      updated.scoreBreakdown = breakdown;
+      updated.brandFitScore = breakdown.totalScore;
+      toSave.push({ creator: updated, kind: 'updated' });
+      // Ghi đè lại map ngay — nếu file import có 2 dòng trùng handle, dòng thứ 2 phải update lên
+      // trên bản dòng 1 vừa build (chưa lưu DB), không phải update lên bản cũ trước khi import.
+      existingByHandle.set(rawHandle.toLowerCase(), updated);
     } else {
       const newCrId = `cr-scraped-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       if (rawAvatar && typeof rawAvatar === 'string' && rawAvatar.startsWith('http')) {
@@ -713,30 +740,60 @@ app.post('/api/creators/batch-import', async (req, res) => {
         importedAt: isFileImport ? nowIso : undefined,
         tcmCreatorOecuid: item.tcmCreatorOecuid || undefined
       };
-      await applyScore(newCr, undefined);
-      importedCount++;
+      const criteria = await getCachedCriteria(newCr.workspaceId);
+      const breakdown = scoreCreator(newCr, undefined, criteria);
+      newCr.scoreBreakdown = breakdown;
+      newCr.brandFitScore = breakdown.totalScore;
+      toSave.push({ creator: newCr, kind: 'new' });
+      existingByHandle.set(rawHandle.toLowerCase(), newCr);
     }
    } catch (err: any) {
-    console.error('batch-import: failed to save one creator record:', err);
+    console.error('batch-import: failed to build one creator record:', err);
     const failedHandle = (item && (item.handle || item.nickname || item.name)) || '(unknown)';
     failedHandles.push({ handle: String(failedHandle), message: err && err.message ? String(err.message) : String(err) });
    }
   }
 
-  await normalizeCreatorStoreInDb(isValidCreatorHandle, sanitizeCreatorDisplayName);
-  await addActivity('Scraper Bot', `synced ${importedCount} new & ${updatedCount} updated creators`, source || 'Pickdi Harvester', 'creator', 'batch-scrape');
+  // Lưu theo lô song song (thay vì 1 request Supabase tuần tự/creator) — với vài nghìn dòng,
+  // tuần tự từng dòng là nguyên nhân chính khiến cả request treo lâu tới mức client timeout
+  // ("Lỗi kết nối tới máy chủ") dù dữ liệu vẫn có thể ghi được. Giới hạn concurrency để không
+  // dí quá nhiều request cùng lúc vào Supabase.
+  const SAVE_CONCURRENCY = 25;
+  for (let i = 0; i < toSave.length; i += SAVE_CONCURRENCY) {
+    const chunk = toSave.slice(i, i + SAVE_CONCURRENCY);
+    const results = await Promise.allSettled(chunk.map(({ creator }) => saveCreator(creator)));
+    results.forEach((r, idx) => {
+      const { creator, kind } = chunk[idx];
+      if (r.status === 'fulfilled') {
+        if (kind === 'new') importedCount++; else updatedCount++;
+      } else {
+        console.error('batch-import: failed to save one creator record:', r.reason);
+        failedHandles.push({ handle: creator.handle, message: r.reason?.message ? String(r.reason.message) : String(r.reason) });
+      }
+    });
+  }
 
-  // Push notification into CRM bell list
-  await saveNotification({
-    id: `notif-${Date.now()}`,
-    title: 'TikTok Sync Complete 🚀',
-    description: `Successfully synced ${importedCount} new creators (${updatedCount} enriched) into workspace (${workspaceId || INITIAL_WORKSPACES[0]?.id})!`,
-    priority: 'HIGH',
-    category: 'System',
-    isRead: false,
-    createdAt: new Date().toISOString(),
-    link: '/creators'
-  });
+  // Best-effort housekeeping — lỗi transient ở đây không được làm sập cả response, vì import
+  // chính (phần lưu DB ở trên) đã xong rồi. normalizeCreatorStoreInDb (quét lại toàn bộ bảng
+  // creators) không còn chạy sau MỖI lần import nữa — quá tốn kém khi bảng đã lớn (~vài nghìn
+  // dòng) và không cần chạy real-time; vẫn chạy 1 lần lúc server khởi động (xem seed ở trên).
+  try {
+    await addActivity('Scraper Bot', `synced ${importedCount} new & ${updatedCount} updated creators`, source || 'Pickdi Harvester', 'creator', 'batch-scrape');
+
+    // Push notification into CRM bell list
+    await saveNotification({
+      id: `notif-${Date.now()}`,
+      title: 'TikTok Sync Complete 🚀',
+      description: `Successfully synced ${importedCount} new creators (${updatedCount} enriched) into workspace (${workspaceId || INITIAL_WORKSPACES[0]?.id})!`,
+      priority: 'HIGH',
+      category: 'System',
+      isRead: false,
+      createdAt: new Date().toISOString(),
+      link: '/creators'
+    });
+  } catch (err: any) {
+    console.error('batch-import: post-import housekeeping (normalize/activity/notification) failed:', err);
+  }
 
   const allFailed = failedHandles.length > 0 && importedCount === 0 && updatedCount === 0;
   res.json({
