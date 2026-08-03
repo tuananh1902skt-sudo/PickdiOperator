@@ -244,7 +244,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   // Sort theo cột — bấm vào tiêu đề cột trong bảng (Creator, Category & Niche, Email,
   // Followers, Avg Views, ER %, d'Alba Fit, Brands, Campaigns, Status) để sort tăng/giảm,
   // bấm lại lần nữa trên cùng cột để đảo chiều. null = giữ nguyên thứ tự gốc.
-  type SortKey = 'creator' | 'category' | 'email' | 'followers' | 'avgViews' | 'er' | 'score' | 'brands' | 'campaigns' | 'status';
+  type SortKey = 'creator' | 'category' | 'email' | 'followers' | 'avgViews' | 'er' | 'gmv' | 'score' | 'brands' | 'campaigns' | 'status';
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const toggleSort = (key: SortKey) => {
@@ -270,6 +270,8 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   const [maxAvgViews, setMaxAvgViews] = useState('');
   const [minFollowers, setMinFollowers] = useState('');
   const [maxFollowers, setMaxFollowers] = useState('');
+  const [minGmv, setMinGmv] = useState('');
+  const [maxGmv, setMaxGmv] = useState('');
 
   const advancedFilterCount = [
     tcmScrapeFilter !== 'ALL',
@@ -280,7 +282,9 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     minAvgViews !== '',
     maxAvgViews !== '',
     minFollowers !== '',
-    maxFollowers !== ''
+    maxFollowers !== '',
+    minGmv !== '',
+    maxGmv !== ''
   ].filter(Boolean).length;
 
   const clearAdvancedFilters = () => {
@@ -293,6 +297,8 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     setMaxAvgViews('');
     setMinFollowers('');
     setMaxFollowers('');
+    setMinGmv('');
+    setMaxGmv('');
   };
 
   // Bulk Selection
@@ -549,6 +555,9 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     if (minFollowers !== '' && (c.followers === undefined || c.followers < Number(minFollowers))) return false;
     if (maxFollowers !== '' && (c.followers === undefined || c.followers > Number(maxFollowers))) return false;
 
+    if (minGmv !== '' && (c.gmv30d === undefined || c.gmv30d < Number(minGmv))) return false;
+    if (maxGmv !== '' && (c.gmv30d === undefined || c.gmv30d > Number(maxGmv))) return false;
+
     return true;
   }), [
     sourceCreators,
@@ -567,6 +576,8 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     maxAvgViews,
     minFollowers,
     maxFollowers,
+    minGmv,
+    maxGmv,
   ]);
 
   // Brands/Campaigns không phải field trực tiếp trên Creator — đếm từ assignments, cùng cách
@@ -599,6 +610,9 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                 break;
               case 'er':
                 cmp = (a.engagementRate ?? -1) - (b.engagementRate ?? -1);
+                break;
+              case 'gmv':
+                cmp = (a.gmv30d ?? -1) - (b.gmv30d ?? -1);
                 break;
               case 'score':
                 cmp = (getScoreValue(a) ?? -1) - (getScoreValue(b) ?? -1);
@@ -651,7 +665,9 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     minAvgViews,
     maxAvgViews,
     minFollowers,
-    maxFollowers
+    maxFollowers,
+    minGmv,
+    maxGmv
   ]);
 
   const totalPages = Math.max(1, Math.ceil(sortedCreators.length / PAGE_SIZE));
@@ -1139,6 +1155,30 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                   />
                 </div>
               </div>
+
+              {/* GMV 30d */}
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-semibold text-slate-500 uppercase">GMV (30d)</label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={0}
+                    value={minGmv}
+                    onChange={e => setMinGmv(e.target.value)}
+                    placeholder="Min"
+                    className="w-24 p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs"
+                  />
+                  <span className="text-slate-400">–</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={maxGmv}
+                    onChange={e => setMaxGmv(e.target.value)}
+                    placeholder="Max"
+                    className="w-24 p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs"
+                  />
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -1272,6 +1312,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                 {renderSortableTh('Followers', 'followers', 'py-3 px-4 text-right whitespace-nowrap')}
                 {renderSortableTh('Avg Views', 'avgViews', 'py-3 px-4 text-right whitespace-nowrap')}
                 {renderSortableTh('ER %', 'er', 'py-3 px-4 text-center whitespace-nowrap')}
+                {renderSortableTh('GMV (30d)', 'gmv', 'py-3 px-4 text-right whitespace-nowrap')}
                 {renderSortableTh(scoreColumnLabel, 'score', 'py-3 px-4 text-center whitespace-nowrap')}
                 {renderSortableTh('Brands', 'brands', 'py-3 px-4 min-w-[110px]')}
                 {renderSortableTh('Campaigns', 'campaigns', 'py-3 px-4 min-w-[200px]')}
@@ -1283,7 +1324,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
               {sortedCreators.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="text-center py-12 text-slate-400">
+                  <td colSpan={13} className="text-center py-12 text-slate-400">
                     No creators found matching current criteria.
                   </td>
                 </tr>
@@ -1378,6 +1419,11 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                       {/* ER % */}
                       <td className="py-3.5 px-4 text-center font-bold text-emerald-600 dark:text-emerald-400">
                         {cr.engagementRate !== undefined ? `${cr.engagementRate}%` : '—'}
+                      </td>
+
+                      {/* GMV (30d) */}
+                      <td className="py-3.5 px-4 text-right font-semibold text-slate-900 dark:text-white">
+                        {cr.gmv30d !== undefined ? `$${formatNumber(cr.gmv30d)}` : '—'}
                       </td>
 
                       {/* Score Badge — Brand Fit (điểm nền tự tính, xem src/scoring.ts) */}
