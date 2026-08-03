@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "Pickdi TCM Creator Scraper (v2 - Human Sim)",
   "version": "3.8.6",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA6m+jpmCovn5YWXkPjXHhDqlWQKGiJvVfl7quXTUH1lyNVJzeIl3R+BOxwH3ORGeLt4mF0dpVpYEkW/ptg83MXffMxWX1K9glPULUE0MEX66wTqobjIA7SDXtNV7Af6VkoW8P5KVdegNLqDHdzdRwE4le5pyE4BcHdqvqfA0doQTCLJWkuuC/YYv4zFNklu/6Gx+vjNwDQDNidBnn3YvAfEH3VcSXTjUiCgAoG6S4hGKEEXfBN9pTxcKioktZcUpDUj+t31ifuGsf24ALDRefTRuCYpeAhhIjD181eVKBJjKoC6LtnFYdi0H8BBUZckLbIV9CdfHiyDz4m9K00awDEwIDAQAB",
   "description": "Cào creator thật từ TikTok Shop Affiliate Center (Creator Marketplace) và tiktok.com, đẩy vào Pickdi Operator CRM.",
   "permissions": [
     "activeTab",

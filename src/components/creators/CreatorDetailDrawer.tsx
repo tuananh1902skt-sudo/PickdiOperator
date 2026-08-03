@@ -1196,11 +1196,23 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 </h3>
                 {creator.collabMetrics ? (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                        <span className="text-xs text-slate-500 font-medium">Est. post rate</span>
+                        <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
+                          {typeof creator.collabMetrics.estPostRatePct === 'number' ? `${creator.collabMetrics.estPostRatePct}%` : EMPTY}
+                        </p>
+                      </div>
                       <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
                         <span className="text-xs text-slate-500 font-medium">Avg. commission rate</span>
                         <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
                           {typeof creator.collabMetrics.avgCommissionRatePct === 'number' ? `${creator.collabMetrics.avgCommissionRatePct}%` : EMPTY}
+                        </p>
+                      </div>
+                      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                        <span className="text-xs text-slate-500 font-medium">Products</span>
+                        <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
+                          {typeof creator.collabMetrics.productsCount === 'number' ? creator.collabMetrics.productsCount : EMPTY}
                         </p>
                       </div>
                       <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
@@ -1230,8 +1242,7 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 )}
               </section>
 
-              {/* SECTION: VIDEO — avg video views/engagement riêng CHƯA xác nhận field JSON
-                  thật, chỉ hiện GPM + số video đã confirm, không bịa 2 số còn lại. */}
+              {/* SECTION: VIDEO */}
               <section id="sec-video" className="space-y-4 pt-6 border-t border-slate-200 dark:border-slate-800">
                 <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
                   <span className="w-3 h-3 rounded-full bg-pink-500 inline-block" />
@@ -1252,7 +1263,9 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                   </div>
                   <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
                     <span className="text-xs text-slate-500 font-medium">Avg. video views</span>
-                    <p className="text-sm font-normal text-slate-400 italic mt-1">{EMPTY}</p>
+                    <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
+                      {typeof creator.videoMetrics?.avgViews === 'number' ? creator.videoMetrics.avgViews.toLocaleString() : EMPTY}
+                    </p>
                   </div>
                   <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
                     <span className="text-xs text-slate-500 font-medium">Avg. video engagement rate</span>
@@ -1284,7 +1297,9 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                   </div>
                   <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
                     <span className="text-xs text-slate-500 font-medium">Avg. LIVE views</span>
-                    <p className="text-sm font-normal text-slate-400 italic mt-1">{EMPTY}</p>
+                    <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
+                      {typeof creator.liveMetrics?.avgViews === 'number' ? creator.liveMetrics.avgViews.toLocaleString() : EMPTY}
+                    </p>
                   </div>
                   <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
                     <span className="text-xs text-slate-500 font-medium">Avg. LIVE engagement rate</span>

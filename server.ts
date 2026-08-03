@@ -569,6 +569,18 @@ app.delete('/api/creators/:id/permanent', async (req, res) => {
 // CREATOR IMPORT ROUTES
 // ==========================================
 
+// Extension chạy 2 hàng đợi độc lập (auto-detail-queue và search-cid-queue, xem
+// extension-v2/background.js) — mỗi item của mỗi hàng đợi tự POST 1 request riêng lên đây, không
+// khoá lẫn nhau. Nếu 2 request cho CÙNG 1 handle chồng thời gian (ví dụ user chạy cả 2 hàng đợi
+// gần nhau cho cùng creator), request nào cũng đọc existingByHandle NGAY LÚC BẮT ĐẦU — request
+// B có thể đọc snapshot TRƯỚC KHI request A kịp lưu xong, không thấy creator A vừa tạo -> tạo
+// thêm 1 dòng trùng thay vì update (bug thật: đã thấy 2 dòng "Jori Renee" trùng handle, 1 dòng
+// thiếu email do search-cid, 1 dòng có email do auto-detail, ngày 2026-08-03). Tuần tự hoá toàn
+// bộ handler bằng 1 promise chain — mỗi request đợi request trước xử lý xong (đọc DB + lưu DB)
+// rồi mới bắt đầu đọc, loại bỏ hoàn toàn khoảng hở race này. Chi phí chấp nhận được vì tần suất
+// gọi endpoint này rất thấp (giãn cách vài giây/creator theo thiết kế chống bot của extension).
+let batchImportChain: Promise<void> = Promise.resolve();
+
 // 1. Webhook Endpoint for Extension & Scraper Script Sync — receives creators from any
 // import source via item.metricsSource (Kalodata, TCM, CSV, etc.); source-specific field
 // mapping is added per-source as those integrations land.
@@ -577,6 +589,14 @@ app.post('/api/creators/batch-import', async (req, res) => {
   if (!Array.isArray(batchList) || batchList.length === 0) {
     return res.status(400).json({ success: false, message: 'No valid creators provided in batch payload' });
   }
+
+  // Xếp hàng sau request trước (nếu có) — .catch(() => {}) để 1 request lỗi không làm kẹt cả
+  // chain, chặn mãi mãi mọi request batch-import sau nó.
+  const runAfterPrevious = batchImportChain.catch(() => {});
+  let releaseNext: () => void = () => {};
+  batchImportChain = runAfterPrevious.then(() => new Promise<void>((resolve) => { releaseNext = resolve; }));
+  await runAfterPrevious;
+  try {
 
   let importedCount = 0;
   let updatedCount = 0;
@@ -626,7 +646,22 @@ app.post('/api/creators/batch-import', async (req, res) => {
     const existing = existingByHandle.get(rawHandle.toLowerCase());
 
     const targetWs = workspaceId || INITIAL_WORKSPACES[0]?.id;
-    const countryName = item.country || region || (rawHandle.includes('_us') ? 'United States' : rawHandle.includes('_uk') ? 'United Kingdom' : undefined);
+    // BUG THẬT (2026-08-03, phát hiện lúc test cào chi tiết thật): profile.selection_region trả
+    // về mã vùng viết tắt ("US", "UK"...) chứ không phải tên đầy đủ, nhưng phần còn lại của app
+    // (CreatorDetailDrawer flag icon, outreach.ts chọn ngôn ngữ, và nhánh language phía dưới) đều
+    // so sánh countryName với tên đầy đủ ("United States", "Vietnam") — creator US thật bị gắn
+    // nhầm "Languages spoken: Vietnamese" nếu không normalize trước khi lưu.
+    const REGION_CODE_TO_COUNTRY: Record<string, string> = {
+      US: 'United States',
+      UK: 'United Kingdom',
+      GB: 'United Kingdom',
+      VN: 'Vietnam',
+    };
+    const rawCountry = item.country || region;
+    const countryName =
+      (rawCountry && REGION_CODE_TO_COUNTRY[String(rawCountry).toUpperCase()]) ||
+      rawCountry ||
+      (rawHandle.includes('_us') ? 'United States' : rawHandle.includes('_uk') ? 'United Kingdom' : undefined);
 
     const cleanDisplayName = sanitizeCreatorDisplayName(item.displayName || item.nickname || item.name || rawHandle, rawHandle);
 
@@ -656,7 +691,16 @@ app.post('/api/creators/batch-import', async (req, res) => {
       const updated: Creator = {
         ...existing,
         workspaceId: existing.workspaceId || targetWs,
-        displayName: sanitizeCreatorDisplayName(existing.displayName, rawHandle),
+        // BUG THẬT (2026-08-03): nhánh update creator đã tồn tại trước đây KHÔNG merge
+        // displayName/country từ data mới scrape — chỉ sanitize lại displayName CŨ, còn country
+        // thì hoàn toàn không có trong object này. Kết quả: creator nào đã tồn tại từ trước (vd
+        // được tạo stub qua "Import creator đã bắt được") rồi sau đó cào chi tiết đầy đủ qua "Lấy
+        // chi tiết trang này" thì displayName/country vẫn bị bỏ trống vĩnh viễn dù shared.js đã
+        // trích xuất đúng field từ TCM — đây chính là nguyên nhân "creator detail không có đủ" dù
+        // extension báo cào thành công.
+        displayName: (item.displayName || item.nickname || item.name) ? cleanDisplayName : sanitizeCreatorDisplayName(existing.displayName, rawHandle),
+        country: countryName || existing.country,
+        language: countryName ? (countryName === 'United States' || countryName === 'United Kingdom' ? 'English' : 'Vietnamese') : existing.language,
         avatar: (typeof rawAvatar === 'string' && rawAvatar.startsWith('/api/avatars/')) ? rawAvatar : existing.avatar,
         followers: toFiniteNumber(scrapedFollowers) ?? existing.followers,
         avgViews: toFiniteNumber(scrapedAvgViews) ?? existing.avgViews,
@@ -785,6 +829,11 @@ app.post('/api/creators/batch-import', async (req, res) => {
     });
   }
 
+  // Đã xong phần đọc existingByHandle + quyết định new/update + lưu DB (vùng race thật) — nhả
+  // khoá ngay đây để request batch-import kế tiếp không phải đợi thêm phần housekeeping/response/
+  // avatar download bên dưới, vốn không đụng tới existingByHandle nên không cần tuần tự hoá.
+  releaseNext();
+
   // Best-effort housekeeping — lỗi transient ở đây không được làm sập cả response, vì import
   // chính (phần lưu DB ở trên) đã xong rồi. normalizeCreatorStoreInDb (quét lại toàn bộ bảng
   // creators) không còn chạy sau MỖI lần import nữa — quá tốn kém khi bảng đã lớn (~vài nghìn
@@ -839,6 +888,16 @@ app.post('/api/creators/batch-import', async (req, res) => {
         console.error(`${failed.length}/${avatarJobs.length} avatar downloads failed during batch-import:`, failed.map(f => f.reason));
       }
     });
+  }
+  } catch (err: any) {
+    // Lỗi thoát khỏi cả vùng đọc/lưu (ví dụ getAllCreators() ở đầu ném lỗi) — vẫn PHẢI nhả khoá,
+    // nếu không mọi request batch-import sau đó (từ cả 2 hàng đợi extension) sẽ treo vĩnh viễn
+    // chờ 1 request đã chết. releaseNext() an toàn gọi 2 lần (no-op nếu đã gọi ở nhánh thành công).
+    releaseNext();
+    console.error('batch-import: unexpected error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: err?.message ? String(err.message) : String(err) });
+    }
   }
 });
 

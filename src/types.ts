@@ -123,17 +123,21 @@ export interface CreatorCollabMetrics {
   avgCommissionRatePct?: number; // med_commission_rate/100
   brandCollabCount?: number; // collaborated_brands_num
   brandPartners?: { id: string; name: string }[]; // partnered_brand[]
+  estPostRatePct?: number; // sample_fulfillment_rate/100 — xác nhận thật qua recon lúc test cào (2026-08-03)
+  productsCount?: number; // promoted_product_num — xác nhận thật qua recon lúc test cào (2026-08-03)
 }
 
 export interface CreatorVideoMetrics {
   gpm?: number; // ec_video_gpm (range {minimal,maximum} — không phải video_gpm như đoán trước, field đó không tồn tại)
   videosCount?: number; // video_publish_cnt_30d
+  avgViews?: number; // video_play_cnt_med — xác nhận thật qua recon lúc test cào (2026-08-03), khớp "Avg. video views" trên UI TCM
   engagementRatePct?: number; // video_engagement/100 — xác nhận thật qua live recon (Session 6/7)
 }
 
 export interface CreatorLiveMetrics {
   gpm?: number; // ec_live_gpm (range {minimal,maximum} — không phải live_gpm như đoán trước, field đó không tồn tại)
   streamsCount?: number; // live_streaming_cnt_30d
+  avgViews?: number; // live_med_view_cnt — xác nhận thật qua recon lúc test cào (2026-08-03), khớp "Avg. LIVE views" trên UI TCM
   engagementRatePct?: number; // live_engagement/100 — xác nhận thật qua live recon (Session 6/7)
 }
 

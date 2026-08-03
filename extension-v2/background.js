@@ -29,6 +29,7 @@ importScripts('shared.js');
 const STORAGE_KEY = 'autoDetailState';
 const AUTO_CONTINUE_ALARM = 'autoDetailContinue';
 const BREAK_ALARM = 'autoDetailBreak';
+const SEARCH_CID_BREAK_ALARM = 'searchCidBreak';
 const TAB_LOAD_TIMEOUT_MS = 20000;
 const POST_LOAD_BUFFER_MS = 1800; // đợi thêm sau khi tab 'complete' để interceptor.js kịp merge response
 
@@ -215,23 +216,34 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Mở tab trong 1 CỬA SỔ RIÊNG không focus, thay vì active:false trong cửa sổ hiện tại của user
+// rồi tạm active nó lên (cách cũ). Chrome chỉ dừng requestAnimationFrame khi tab bị "hidden"
+// (không phải tab active của cửa sổ nó thuộc về) — tab active trong 1 cửa sổ RIÊNG, kể cả cửa
+// sổ đó không được focus, vẫn KHÔNG bị coi là hidden nên component client-render vẫn chạy bình
+// thường mà không cần đụng gì tới tab/cửa sổ user đang thao tác. Trước đây cách active:true trong
+// cùng cửa sổ khiến user bị "giật" tab liên tục mỗi vài chục giây suốt cả lượt chạy hàng đợi.
+async function openHiddenWindow(url) {
+  const win = await chrome.windows.create({ url, focused: false, width: 1100, height: 800, type: 'normal' });
+  let tab = win && win.tabs && win.tabs[0];
+  if (!tab) {
+    const tabs = await chrome.tabs.query({ windowId: win.id });
+    tab = tabs[0];
+  }
+  return { windowId: win.id, tab };
+}
+
 async function processOneItem(state) {
   const item = state.queue[state.index];
-  let tab;
-  let previousActiveTabId;
+  let windowId;
   try {
     const url = `https://affiliate-us.tiktok.com/connection/creator/detail?cid=${encodeURIComponent(item.cid)}&shop_region=${encodeURIComponent(state.shopRegion || 'US')}&shop_id=${encodeURIComponent(state.shopId || '')}`;
-    tab = await chrome.tabs.create({ url, active: false });
+    const opened = await openHiddenWindow(url);
+    windowId = opened.windowId;
+    const tab = opened.tab;
+    if (!tab) {
+      return { ok: false, handle: item.handle, message: 'Không mở được cửa sổ ẩn để cào creator này.' };
+    }
     await waitForTabComplete(tab.id);
-    // Tab mở active:false — Chrome dừng hẳn requestAnimationFrame cho tab nền nên component
-    // client-render (và các mục lỗi "Failed to load data" cần cuộn tới mới trigger) có thể
-    // không mount/thao tác được trong lúc ẩn. Active tạm sang tab này (như flow search-cid ở
-    // dưới đã làm) là ĐỦ để tránh bị đóng băng — không cần ép cả cửa sổ Chrome lên trước mặt
-    // user (chỉ cần thiết để user NHÌN THẤY, không cần thiết để code chạy đúng, và steal focus
-    // làm phiền nếu user đang làm việc khác) — trả lại tab đang active của user ngay sau khi đọc.
-    const [prevActiveTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    previousActiveTabId = prevActiveTab && prevActiveTab.id;
-    await chrome.tabs.update(tab.id, { active: true });
     await sleep(POST_LOAD_BUFFER_MS);
 
     const results = await chrome.scripting.executeScript({
@@ -263,11 +275,8 @@ async function processOneItem(state) {
   } catch (err) {
     return { ok: false, handle: item && item.handle, message: String((err && err.message) || err) };
   } finally {
-    if (tab && tab.id) {
-      chrome.tabs.remove(tab.id).catch(() => {});
-    }
-    if (previousActiveTabId) {
-      chrome.tabs.update(previousActiveTabId, { active: true }).catch(() => {});
+    if (windowId) {
+      chrome.windows.remove(windowId).catch(() => {});
     }
   }
 }
@@ -368,7 +377,16 @@ async function runLoop() {
         break;
       }
 
-      await sleep(pickItemDelayMs(after));
+      // Delay ngắn/dài giữa 2 creator (5-45s) trước đây dùng await sleep() thô ngay trong service
+      // worker — nếu Chrome tắt SW giữa lúc đang chờ (MV3 tắt SW sau ~30s không có hoạt động API,
+      // và raw setTimeout không tính là "hoạt động"), Promise sleep() chết theo, hàng đợi đứng
+      // hình im lặng cho tới khi có sự kiện khác đánh thức SW. Dùng lại đúng cơ chế onBreakUntil +
+      // BREAK_ALARM (đã có sẵn cho nghỉ dài định kỳ) cho cả delay giữa-2-creator này — alarm vẫn
+      // đánh thức SW đúng giờ dù nó đã bị tắt hẳn.
+      const itemDelayMs = pickItemDelayMs(after);
+      await patchState({ onBreakUntil: Date.now() + itemDelayMs });
+      chrome.alarms.create(BREAK_ALARM, { delayInMinutes: Math.max(itemDelayMs / 60000, 0.01) });
+      break;
     }
   } finally {
     isProcessing = false;
@@ -458,22 +476,22 @@ async function patchSearchCidState(patch) {
 
 async function processOneSearchCidItem(state) {
   const item = state.queue[state.index];
-  let tab;
-  let previousActiveTabId;
+  let windowId;
   try {
     const url = `https://affiliate-us.tiktok.com/connection/creator?shop_region=${encodeURIComponent(state.shopRegion || 'US')}&shop_id=${encodeURIComponent(state.shopId || '')}`;
-    tab = await chrome.tabs.create({ url, active: false });
-    await waitForTabComplete(tab.id);
     // Khác trang chi tiết creator (SSR gần đủ data ngay khi load) — ô AI-search trên Find
-    // Creators là component client-render nặng, và Chrome DỪNG HẲN requestAnimationFrame cho tab
-    // nền/ẩn (không chỉ giảm tần suất) nên tab mở active:false có thể không bao giờ mount xong ô
-    // search trong lúc vẫn ẩn — đây là nguyên nhân thật gây lỗi "search_box_not_found" khi test
-    // (xác nhận bằng cách so sánh với lần test tay trước đó luôn thành công vì tab đang active).
-    // Đánh đổi: focus tạm sang tab này khi chạy script rồi trả lại tab đang active của user ngay
-    // sau đó — có nháy tab qua lại mỗi creator, chấp nhận được để đổi lấy độ tin cậy.
-    const [prevActiveTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    previousActiveTabId = prevActiveTab && prevActiveTab.id;
-    await chrome.tabs.update(tab.id, { active: true });
+    // Creators là component client-render nặng, và Chrome dừng hẳn requestAnimationFrame cho tab
+    // HIDDEN (không phải tab active của cửa sổ nó thuộc về) — mở trong 1 cửa sổ riêng không focus
+    // (openHiddenWindow) để tab này vẫn là tab active của chính cửa sổ đó, không bị coi là hidden,
+    // mà không cần đụng gì tới tab/cửa sổ user đang thao tác (khác cách cũ: active:true trong cùng
+    // cửa sổ user, gây giật tab liên tục mỗi creator).
+    const opened = await openHiddenWindow(url);
+    windowId = opened.windowId;
+    const tab = opened.tab;
+    if (!tab) {
+      return { ok: false, handle: item.handle, message: 'Không mở được cửa sổ ẩn để tìm creator này.' };
+    }
+    await waitForTabComplete(tab.id);
     await sleep(SEARCH_TAB_POST_LOAD_BUFFER_MS);
 
     const results = await chrome.scripting.executeScript({
@@ -524,11 +542,8 @@ async function processOneSearchCidItem(state) {
   } catch (err) {
     return { ok: false, handle: item && item.handle, message: String((err && err.message) || err) };
   } finally {
-    if (tab && tab.id) {
-      chrome.tabs.remove(tab.id).catch(() => {});
-    }
-    if (previousActiveTabId) {
-      chrome.tabs.update(previousActiveTabId, { active: true }).catch(() => {});
+    if (windowId) {
+      chrome.windows.remove(windowId).catch(() => {});
     }
   }
 }
@@ -540,6 +555,11 @@ async function runSearchCidLoop() {
     for (;;) {
       const state = await getSearchCidState();
       if (!state || state.status !== 'running') break;
+
+      // Xem BREAK_ALARM ở hàng đợi auto-detail — cùng lý do: raw sleep() trong service worker
+      // không sống sót nếu Chrome tắt SW giữa lúc chờ, SEARCH_CID_BREAK_ALARM đánh thức lại đúng giờ.
+      if (state.onBreakUntil && Date.now() < state.onBreakUntil) break;
+
       if (state.index >= state.queue.length) {
         await patchSearchCidState({ status: 'done', currentHandle: null });
         break;
@@ -566,7 +586,10 @@ async function runSearchCidLoop() {
       if (!after || after.status !== 'running') break;
       if (after.index >= after.queue.length) continue;
 
-      await sleep(randomDelay(4000, 8000));
+      const itemDelayMs = randomDelay(4000, 8000);
+      await patchSearchCidState({ onBreakUntil: Date.now() + itemDelayMs });
+      chrome.alarms.create(SEARCH_CID_BREAK_ALARM, { delayInMinutes: Math.max(itemDelayMs / 60000, 0.01) });
+      break;
     }
   } finally {
     isSearchCidProcessing = false;
@@ -995,7 +1018,8 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 
   if (message.type === 'WEBAPP_STOP_SEARCH_CID_QUEUE') {
     (async () => {
-      await patchSearchCidState({ status: 'stopped' });
+      chrome.alarms.clear(SEARCH_CID_BREAK_ALARM);
+      await patchSearchCidState({ status: 'stopped', onBreakUntil: null });
       sendResponse({ ok: true });
     })();
     return true;
@@ -1022,15 +1046,28 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   await continueAutoDetailQueueInternal();
 });
 
-// Nghỉ dài định kỳ GIỮA 1 chunk (không phải giữa 2 chunk) — status vẫn giữ 'running' suốt lúc
-// nghỉ (chỉ runLoop() tự break ra khi thấy onBreakUntil chưa tới) để popup/webapp vẫn hiển thị
-// đúng là "đang chạy", không hiểu nhầm là đã xong. Alarm này chỉ cần đánh thức runLoop() lại.
+// Dùng chung cho CẢ 2 loại chờ trong 1 chunk: delay ngắn/dài giữa 2 creator VÀ nghỉ dài định kỳ
+// sau mỗi N creator (cả 2 đều set onBreakUntil rồi break khỏi runLoop() — xem runLoop()). status
+// vẫn giữ 'running' suốt lúc chờ (chỉ runLoop() tự break ra khi thấy onBreakUntil chưa tới) để
+// popup/webapp vẫn hiển thị đúng là "đang chạy", không hiểu nhầm là đã xong. Alarm này chỉ cần
+// đánh thức runLoop() lại — đảm bảo tiếp tục đúng giờ dù SW có bị Chrome tắt hẳn giữa lúc chờ.
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== BREAK_ALARM) return;
   const state = await getState();
   if (!state || state.status !== 'running') return;
   await patchState({ onBreakUntil: null });
   runLoop();
+});
+
+// Tương tự BREAK_ALARM nhưng cho hàng đợi "tìm CID theo handle" — delay 4-8s giữa 2 lượt search
+// trước đây dùng raw sleep() trong service worker, không có gì đánh thức lại nếu SW bị tắt giữa
+// chừng (khác hàng đợi auto-detail, vốn đã có BREAK_ALARM bảo hiểm cho lúc nghỉ dài).
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== SEARCH_CID_BREAK_ALARM) return;
+  const state = await getSearchCidState();
+  if (!state || state.status !== 'running') return;
+  await patchSearchCidState({ onBreakUntil: null });
+  runSearchCidLoop();
 });
 
 // Nếu service worker bị Chrome tắt giữa chừng rồi dựng lại (ví dụ do idle timeout), top-level

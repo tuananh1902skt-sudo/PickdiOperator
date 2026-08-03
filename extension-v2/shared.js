@@ -49,6 +49,44 @@ function asString(v) {
   return (typeof v === 'string' && v.trim()) ? v.trim() : undefined;
 }
 
+// BUG THẬT (2026-08-03, phát hiện qua recon DevTools thật trên đúng response marketplace/profile
+// đang cào): med_gmv_revenue/gpm/units_sold/avg_revenue_per_buyer/ec_video_gpm/ec_live_gpm hầu
+// như LUÔN là placeholder {is_authorized:false,status:0} — TCM không trả số chính xác cho hầu hết
+// creator (cần quyền "authorized" riêng), extractMoneyLikeValue() trả undefined đúng như thiết
+// kế nên GMV/Items sold/GPM/GMV per customer/Video GPM/LIVE GPM bị bỏ trắng hoàn toàn dù TCM UI
+// vẫn hiển thị được 1 khoảng ước lượng — vì mỗi field số đó có 1 field "_range" song song
+// (med_gmv_revenue_range="$5k-$25K", units_sold_range="100-1K", gpm_range="$0-$5k",
+// avg_revenue_per_buyer_range="$20+", video_gpm_range, live_gpm_range) mà TCM UI đọc để hiển thị
+// khi số chính xác không có quyền xem. Parse khoảng này thành số ước lượng (trung điểm, hoặc cận
+// dưới cho dạng "X+") — vẫn tốt hơn nhiều so với bỏ trắng, và đúng là cách TCM tự làm với chính
+// mình. Không xác nhận khớp % (dạng "10%-15%") nên hàm chỉ dùng cho field tiền/số lượng.
+function parseBucketRange(str) {
+  if (typeof str !== 'string') return undefined;
+  const s = str.trim();
+  if (!s) return undefined;
+  const parseTok = (tok) => {
+    const t = tok.replace(/[$,\s]/g, '');
+    const m = t.match(/^([0-9]*\.?[0-9]+)([kKmM]?)$/);
+    if (!m) return undefined;
+    const n = parseFloat(m[1]);
+    if (!Number.isFinite(n)) return undefined;
+    const suffix = m[2].toLowerCase();
+    if (suffix === 'k') return n * 1000;
+    if (suffix === 'm') return n * 1000000;
+    return n;
+  };
+  const plusMatch = s.match(/^(.+)\+$/);
+  if (plusMatch) return parseTok(plusMatch[1]);
+  const parts = s.split('-').map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 2) {
+    const lo = parseTok(parts[0]);
+    const hi = parseTok(parts[1]);
+    if (lo !== undefined && hi !== undefined) return (lo + hi) / 2;
+    return lo !== undefined ? lo : hi;
+  }
+  return parseTok(s);
+}
+
 const DEMO_LABELS = { male: 'Male', female: 'Female' };
 
 // follower_genders_v2/follower_ages_v2 không phải lúc nào cũng cộng đúng 100% (còn 1 phần
@@ -114,6 +152,33 @@ function normalizeTcmProfileDetail(profile) {
   const avatarUrl = extractAvatarUrl(profile.avatar) || extractAvatarUrl(profile.avatar_thumb) || extractAvatarUrl(profile.head_url);
   if (avatarUrl) out.avatar = avatarUrl;
 
+  // BUG THẬT (2026-08-03): hàm này chưa bao giờ map followers/avgViews/displayName/country —
+  // chỉ normalizeCreator() (list endpoint) map các field này. Creator nào được tạo MỚI thẳng qua
+  // "Lấy chi tiết trang này"/"Auto quét" (chưa từng qua "Import creator đã bắt được" từ danh sách
+  // trước đó — vd mở thẳng link chi tiết 1 creator từ nơi khác trên TCM) sẽ thiếu hẳn follower
+  // count/avg views/tên hiển thị/quốc gia trên CRM dù các nhóm PPS/Sales/Video/LIVE/... vẫn đầy
+  // đủ như báo cáo "Đã bắt". follower_cnt/nickname/selection_region XÁC NHẬN THẬT qua recon
+  // DevTools (Claude in Chrome, session này) tồn tại y hệt ở response marketplace/profile
+  // (detail) — cùng tên với marketplace/find (list).
+  const followers = toNum(profile.follower_cnt);
+  if (followers !== undefined) out.followers = followers;
+
+  // BUG THẬT #2 (2026-08-03, sửa lại phát hiện lúc test cào thật 1 creator qua đối chiếu số
+  // hiển thị trên chính trang TCM): `video_avg_view_cnt` LUÔN là placeholder
+  // {is_authorized:true,status:0} trên response thật, KHÔNG BAO GIỜ có .value — dòng comment cũ
+  // ở đây ("chỉ có giá trị thật sau khi xem tab Video") sai, có thể do đối chiếu nhầm creator
+  // khác lúc trước. Field thật khớp CHÍNH XÁC với số "Avg. video views" trên UI TCM (test thật:
+  // TCM hiển thị 13.45K, video_play_cnt_med trả về "13450") là `video_play_cnt_med` — giữ
+  // video_avg_view_cnt làm fallback phòng trường hợp TCM đổi field cho creator khác.
+  const avgViews = toNum(profile.video_play_cnt_med) ?? toNum(profile.video_avg_view_cnt);
+  if (avgViews !== undefined) out.avgViews = avgViews;
+
+  const displayName = asString(profile.nickname);
+  if (displayName) out.displayName = displayName;
+
+  const country = asString(profile.selection_region);
+  if (country) out.country = country;
+
   const bio = asString(profile.bio);
   if (bio) {
     out.bio = bio;
@@ -155,17 +220,18 @@ function normalizeTcmProfileDetail(profile) {
   }
   if (Object.keys(demographics).length > 0) out.demographics = demographics;
 
-  const gpm = parseMoney(extractMoneyLikeValue(profile.gpm));
+  const gpm = parseMoney(extractMoneyLikeValue(profile.gpm)) ?? parseBucketRange(profile.gpm_range);
   if (gpm !== undefined) out.gpm = gpm;
 
   // med_gmv_revenue là GMV TRUNG VỊ 30 ngày (không phải tổng tích luỹ) — field GMV tích luỹ
   // hiển thị ở list view TCM chưa xác nhận tên JSON thô, dùng tạm field này cho gmv30d.
-  const gmv30d = parseMoney(extractMoneyLikeValue(profile.med_gmv_revenue));
+  // Fallback sang med_gmv_revenue_range (parseBucketRange) khi số chính xác bị khoá quyền xem.
+  const gmv30d = parseMoney(extractMoneyLikeValue(profile.med_gmv_revenue)) ?? parseBucketRange(profile.med_gmv_revenue_range);
   if (gmv30d !== undefined) out.gmv30d = gmv30d;
 
   if (profile.video_publish_cnt_30d != null) out.postingFrequency30d = toNum(profile.video_publish_cnt_30d);
 
-  const unitsSold = toNum(profile.units_sold);
+  const unitsSold = toNum(profile.units_sold) ?? parseBucketRange(profile.units_sold_range);
   if (gmv30d !== undefined || unitsSold !== undefined) {
     out.hasAffiliateGmv = (gmv30d || 0) > 0 || (unitsSold || 0) > 0;
   }
@@ -207,7 +273,7 @@ function normalizeTcmProfileDetail(profile) {
   if (gmv30d !== undefined) salesMetrics.gmv = gmv30d;
   if (unitsSold !== undefined) salesMetrics.itemsSold = unitsSold;
   if (gpm !== undefined) salesMetrics.gpm = gpm;
-  const gmvPerCustomer = parseMoney(extractMoneyLikeValue(profile.avg_revenue_per_buyer));
+  const gmvPerCustomer = parseMoney(extractMoneyLikeValue(profile.avg_revenue_per_buyer)) ?? parseBucketRange(profile.avg_revenue_per_buyer_range);
   if (gmvPerCustomer !== undefined) salesMetrics.gmvPerCustomer = gmvPerCustomer;
   if (Array.isArray(profile.content_groups) && profile.content_groups.length > 0) {
     const channelSplit = {};
@@ -232,29 +298,46 @@ function normalizeTcmProfileDetail(profile) {
       .filter((b) => b && b.name)
       .map((b) => ({ id: String(b.id ?? b.name), name: asString(b.name) || String(b.name) }));
   }
+  // "Est. post rate" (sample_fulfillment_rate/100) và "Products" (promoted_product_num) — 2 ô
+  // TCM UI hiển thị thật trong khối Collaboration metrics nhưng trước đây KHÔNG hàm nào map,
+  // xác nhận thật tên field qua recon: sample_fulfillment_rate=9280 khớp "Est. post rate 92.8%",
+  // promoted_product_num="6" khớp "Products 6".
+  const postRateRaw = toNum(profile.sample_fulfillment_rate);
+  if (postRateRaw !== undefined) collabMetrics.estPostRatePct = postRateRaw / 100;
+  const productsCount = toNum(profile.promoted_product_num);
+  if (productsCount !== undefined) collabMetrics.productsCount = productsCount;
   if (Object.keys(collabMetrics).length > 0) out.collabMetrics = collabMetrics;
 
   // video_gpm/live_gpm KHÔNG tồn tại trong response thật — tên field thật là ec_video_gpm/
   // ec_live_gpm, dạng range {minimal,maximum} chứ không phải 1 số đơn (xác nhận qua live recon
   // DevTools, session 7). video_engagement/live_engagement (chia 100) khớp CHÍNH XÁC với %
-  // hiển thị trên UI thật ("Avg. video engagement rate 0.8%" = video_engagement 80/100).
-  const videoGpm = parseMoney(extractMoneyLikeValue(profile.ec_video_gpm));
+  // hiển thị trên UI thật ("Avg. video engagement rate 0.8%" = video_engagement 80/100). Cả 2
+  // field GPM này gần như LUÔN là placeholder {is_authorized:false,...} như GMV/GPM chung —
+  // fallback sang video_gpm_range/live_gpm_range (parseBucketRange) khi bị khoá quyền xem.
+  // video_play_cnt_med/live_med_view_cnt là "Avg. video views"/"Avg. LIVE views" thật trên UI
+  // (đối chiếu số chính xác lúc test cào thật, session này) — trước đây 2 field này chưa được
+  // map dù UI (CreatorDetailDrawer) đã có sẵn ô hiển thị luôn để trống "Chưa có dữ liệu".
+  const videoGpm = parseMoney(extractMoneyLikeValue(profile.ec_video_gpm)) ?? parseBucketRange(profile.video_gpm_range);
   const videoEngagementRatePct = toNum(profile.video_engagement) !== undefined ? toNum(profile.video_engagement) / 100 : undefined;
-  if (videoGpm !== undefined || profile.video_publish_cnt_30d != null || videoEngagementRatePct !== undefined) {
+  const videoAvgViews = toNum(profile.video_play_cnt_med);
+  if (videoGpm !== undefined || profile.video_publish_cnt_30d != null || videoEngagementRatePct !== undefined || videoAvgViews !== undefined) {
     out.videoMetrics = {
       gpm: videoGpm,
       videosCount: toNum(profile.video_publish_cnt_30d),
+      avgViews: videoAvgViews,
       engagementRatePct: videoEngagementRatePct,
     };
   }
 
-  const liveGpm = parseMoney(extractMoneyLikeValue(profile.ec_live_gpm));
+  const liveGpm = parseMoney(extractMoneyLikeValue(profile.ec_live_gpm)) ?? parseBucketRange(profile.live_gpm_range);
   const liveEngagementRatePct = toNum(profile.live_engagement) !== undefined ? toNum(profile.live_engagement) / 100 : undefined;
-  if (liveGpm !== undefined || profile.live_streaming_cnt_30d != null || liveEngagementRatePct !== undefined) {
+  const liveAvgViews = toNum(profile.live_med_view_cnt);
+  if (liveGpm !== undefined || profile.live_streaming_cnt_30d != null || liveEngagementRatePct !== undefined || liveAvgViews !== undefined) {
     out.liveMetrics = {
       gpm: liveGpm,
       engagementRatePct: liveEngagementRatePct,
       streamsCount: toNum(profile.live_streaming_cnt_30d),
+      avgViews: liveAvgViews,
     };
   }
 
@@ -264,16 +347,21 @@ function normalizeTcmProfileDetail(profile) {
   if (videoEngagementRatePct !== undefined) out.engagementRate = videoEngagementRatePct;
   else if (liveEngagementRatePct !== undefined) out.engagementRate = liveEngagementRatePct;
 
-  // Tên field con của top_video_data ở TCM CHƯA xác nhận khớp 1:1 với TikTok One — dò nhiều
-  // tên khả dĩ thay vì đoán cứng 1 path duy nhất.
+  // BUG THẬT (2026-08-03, xác nhận qua recon DevTools thật lúc test cào 1 creator): top_video_data
+  // KHÔNG có field title/cover/createTime như đoán trước — tên field thật là `name` (title),
+  // `release_date` (unix giây, không phải mili-giây), `item_id`. Không có field cover/thumbnail
+  // nào trong response (video.video_infos chỉ chứa file video main_url/backup_url, không phải
+  // ảnh bìa) nên out.thumb tiếp tục để trống thay vì đoán tên field không tồn tại.
   const videoList = profile.top_video_data || profile.ec_top_video_data;
   if (Array.isArray(videoList) && videoList.length > 0) {
     out.recentVideos = videoList.slice(0, 10).map((v, i) => ({
       id: String(v.itemID || v.item_id || v.id || i),
-      title: v.title || '',
+      title: asString(v.name) || asString(v.title) || '',
       views: Number(v.views ?? v.play_cnt ?? v.playCount ?? 0),
       thumb: v.cover || v.coverUrl || v.thumb || '',
-      date: (v.createTime || v.create_time) ? new Date(Number(v.createTime || v.create_time) * 1000).toISOString().slice(0, 10) : undefined,
+      date: (v.release_date || v.createTime || v.create_time)
+        ? new Date(Number(v.release_date || v.createTime || v.create_time) * 1000).toISOString().slice(0, 10)
+        : undefined,
       isBranded: !!(v.isSponsoredVideo ?? v.is_sponsored ?? v.isBranded),
       videoUrl: (v.itemID || v.item_id) ? `https://www.tiktok.com/@${handle}/video/${v.itemID || v.item_id}` : undefined,
     }));
