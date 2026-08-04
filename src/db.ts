@@ -15,6 +15,7 @@ import {
   BulkOutreachJob,
   PostedVideo,
 } from './types';
+import { computeGmvTier } from './lib/gmvTier';
 
 let instance: SupabaseClient | null = null;
 
@@ -384,6 +385,7 @@ export async function saveWorkspace(w: Workspace): Promise<void> {
 
 export async function saveCreator(c: Creator): Promise<void> {
   const db = getDb();
+  const gmvTier = computeGmvTier(c.gmv30d) ?? c.gmvTier;
   check(await db.from('creators').upsert({
     id: c.id,
     workspaceId: c.workspaceId ?? null,
@@ -427,7 +429,7 @@ export async function saveCreator(c: Creator): Promise<void> {
     isMock: !!c.isMock,
     scoreBreakdown: c.scoreBreakdown ?? null,
     campaignScores: c.campaignScores ?? null,
-    gmvTier: c.gmvTier ?? null,
+    gmvTier: gmvTier ?? null,
     gpm: c.gpm ?? null,
     beautyCategoryRatio: c.beautyCategoryRatio ?? null,
     hasAffiliateGmv: c.hasAffiliateGmv ?? null,

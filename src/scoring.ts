@@ -78,7 +78,7 @@ function bandScore(value: number, floor: number, ideal: number): number {
   return (value - floor) / (ideal - floor);
 }
 
-const GMV_TIER_ORDER: CreatorGmvTier[] = ['L1', 'L2', 'L3', 'L4'];
+const GMV_TIER_ORDER: CreatorGmvTier[] = ['L1', 'L2', 'L3', 'L4', 'L5'];
 
 // Không phải "càng cao càng tốt" — d'Alba nhắm đúng tier mục tiêu (mặc định L3), tier càng
 // xa mục tiêu (theo cả 2 hướng) thì điểm càng thấp.

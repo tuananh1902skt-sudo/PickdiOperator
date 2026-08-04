@@ -188,8 +188,9 @@ export interface Creator {
   medianViews?: number | string;
   recentVideos?: CreatorVideo[];
   demographics?: CreatorDemographics;
-  // Tiêu chí sourcing thật của d'Alba (file d'Alba Onboarding.xlsx, sheet Sourcing List_Bo) —
-  // điền từ import Kalodata, KHÔNG tự suy diễn từ field khác.
+  // GMV tier theo bảng Pickdi (src/lib/gmvTier.ts) — tự động suy ra từ gmv30d mỗi lần
+  // saveCreator(), KHÔNG còn nhập tay từ Kalodata nữa. Quyết định hình thức hợp tác: L2 chỉ
+  // commission, từ L3 trở lên mới thương lượng được commission + flat-fee.
   gmvTier?: CreatorGmvTier;
   gpm?: number;
   beautyCategoryRatio?: number; // % 0-100
@@ -294,7 +295,7 @@ export interface Campaign {
 // filter theo workspace không cần join), và status là trạng thái RIÊNG của lần hợp tác này —
 // không dùng chung Creator.status vì cùng 1 creator có thể đang "Negotiating" ở brand A nhưng
 // đã "Posted" ở brand B.
-export type CreatorGmvTier = 'L1' | 'L2' | 'L3' | 'L4';
+export type CreatorGmvTier = 'L1' | 'L2' | 'L3' | 'L4' | 'L5';
 
 export type CreatorQualification = 'Qualified' | 'Not Qualified' | 'Not Reviewed';
 

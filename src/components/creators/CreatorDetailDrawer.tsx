@@ -33,6 +33,7 @@ import {
   CastingStage,
   WorkspaceScoringCriteria,
 } from '../../types';
+import { cooperationModeForTier, cooperationModeLabel } from '../../lib/gmvTier';
 
 // Mốc mặc định để tô màu badge checklist d'Alba khi workspace chưa tự cấu hình Settings >
 // Sourcing Scoring Criteria — PHẢI khớp DEFAULT_SCORING_CRITERIA trong src/scoring.ts (không
@@ -612,6 +613,10 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 <div className={`px-3 py-2 rounded-xl border text-xs font-bold flex flex-col gap-0.5 ${creator.gmvTier ? 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800' : BAND_STYLES.nodata}`}>
                   <span className="text-[10px] font-medium uppercase tracking-wide opacity-80">GMV tier</span>
                   <span>{creator.gmvTier || EMPTY}</span>
+                </div>
+                <div className={`px-3 py-2 rounded-xl border text-xs font-bold flex flex-col gap-0.5 ${creator.gmvTier ? 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800' : BAND_STYLES.nodata}`}>
+                  <span className="text-[10px] font-medium uppercase tracking-wide opacity-80">Hình thức hợp tác</span>
+                  <span>{cooperationModeLabel(cooperationModeForTier(creator.gmvTier)) || EMPTY}</span>
                 </div>
                 <div className={`px-3 py-2 rounded-xl border text-xs font-bold flex flex-col gap-0.5 ${gpmValForChecklist !== undefined ? 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700' : BAND_STYLES.nodata}`}>
                   <span className="text-[10px] font-medium uppercase tracking-wide opacity-80">GPM</span>
