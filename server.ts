@@ -538,6 +538,27 @@ app.post('/api/creators/sheet-approval', async (req, res) => {
       .json({ success: false, message: `Không tìm thấy creator với handle @${handle} — bỏ qua` });
   }
 
+  // "O" chỉ được phép đẩy New Lead -> Qualified. Nếu reviewer đã liên hệ creator này
+  // trong app (Contact lần 1/2/3, Interested, Negotiating, ...) thì tiến trình đó là
+  // của người vận hành app, sheet không được ghi đè lùi lại. "X" (từ chối) thì luôn áp
+  // dụng bất kể đang ở giai đoạn nào.
+  if (value !== 'X') {
+    const scopedAssignments = (await getAllAssignments({ creatorId: creator.id })).filter(
+      a => a.workspaceId === DALBA_SHEET_WORKSPACE_ID
+    );
+    const latestAssignment = scopedAssignments.length
+      ? [...scopedAssignments].sort((a, b) => new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime())[0]
+      : undefined;
+    const currentStatus = latestAssignment ? latestAssignment.status : creator.status;
+
+    if (currentStatus !== 'New Lead') {
+      return res.json({
+        success: true,
+        data: { handle: creator.handle, skipped: true, currentStatus, reason: 'not New Lead' },
+      });
+    }
+  }
+
   const result = await setCreatorWorkspaceStatus(
     creator,
     DALBA_SHEET_WORKSPACE_ID,
