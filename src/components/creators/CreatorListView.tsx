@@ -272,6 +272,8 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   const [maxFollowers, setMaxFollowers] = useState('');
   const [minGmv, setMinGmv] = useState('');
   const [maxGmv, setMaxGmv] = useState('');
+  const [minBeautyRatio, setMinBeautyRatio] = useState('');
+  const [maxBeautyRatio, setMaxBeautyRatio] = useState('');
 
   const advancedFilterCount = [
     tcmScrapeFilter !== 'ALL',
@@ -284,7 +286,9 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     minFollowers !== '',
     maxFollowers !== '',
     minGmv !== '',
-    maxGmv !== ''
+    maxGmv !== '',
+    minBeautyRatio !== '',
+    maxBeautyRatio !== ''
   ].filter(Boolean).length;
 
   const clearAdvancedFilters = () => {
@@ -299,6 +303,8 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     setMaxFollowers('');
     setMinGmv('');
     setMaxGmv('');
+    setMinBeautyRatio('');
+    setMaxBeautyRatio('');
   };
 
   // Bulk Selection
@@ -558,6 +564,9 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     if (minGmv !== '' && (c.gmv30d === undefined || c.gmv30d < Number(minGmv))) return false;
     if (maxGmv !== '' && (c.gmv30d === undefined || c.gmv30d > Number(maxGmv))) return false;
 
+    if (minBeautyRatio !== '' && (c.beautyCategoryRatio === undefined || c.beautyCategoryRatio < Number(minBeautyRatio))) return false;
+    if (maxBeautyRatio !== '' && (c.beautyCategoryRatio === undefined || c.beautyCategoryRatio > Number(maxBeautyRatio))) return false;
+
     return true;
   }), [
     sourceCreators,
@@ -578,6 +587,8 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     maxFollowers,
     minGmv,
     maxGmv,
+    minBeautyRatio,
+    maxBeautyRatio,
   ]);
 
   // Brands/Campaigns không phải field trực tiếp trên Creator — đếm từ assignments, cùng cách
@@ -667,7 +678,9 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     minFollowers,
     maxFollowers,
     minGmv,
-    maxGmv
+    maxGmv,
+    minBeautyRatio,
+    maxBeautyRatio
   ]);
 
   const totalPages = Math.max(1, Math.ceil(sortedCreators.length / PAGE_SIZE));
@@ -1176,6 +1189,32 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                     onChange={e => setMaxGmv(e.target.value)}
                     placeholder="Max"
                     className="w-24 p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Beauty Category Ratio */}
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-semibold text-slate-500 uppercase">% Beauty</label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={minBeautyRatio}
+                    onChange={e => setMinBeautyRatio(e.target.value)}
+                    placeholder="Min"
+                    className="w-20 p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs"
+                  />
+                  <span className="text-slate-400">–</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={maxBeautyRatio}
+                    onChange={e => setMaxBeautyRatio(e.target.value)}
+                    placeholder="Max"
+                    className="w-20 p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs"
                   />
                 </div>
               </div>
