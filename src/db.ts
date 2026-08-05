@@ -677,15 +677,25 @@ export async function saveAssignment(a: CreatorCampaignAssignment): Promise<void
   }));
 }
 
+// PostgREST mặc định chỉ trả về tối đa 1000 dòng/query — không phân trang ở đây thì khi bảng
+// vượt 1000 assignment, các dòng cũ hơn (kể cả "Contact lần 1/2/3" chưa có creator/assignment
+// mới đè lên) bị rớt khỏi kết quả và "biến mất" khỏi app dù dữ liệu vẫn còn nguyên trong DB.
 export async function getAllAssignments(filters?: { creatorId?: string; campaignId?: string }): Promise<CreatorCampaignAssignment[]> {
   const db = getDb();
-  const { data, error } = await db
-    .from('creator_campaign_assignments')
-    .select('*')
-    .order('created_at_ts', { ascending: false })
-    .order('rowid', { ascending: false });
-  if (error) throw error;
-  let list = (data ?? []).map(rowToAssignment);
+  const PAGE_SIZE = 1000;
+  const rows: any[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await db
+      .from('creator_campaign_assignments')
+      .select('*')
+      .order('created_at_ts', { ascending: false })
+      .order('rowid', { ascending: false })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  let list = rows.map(rowToAssignment);
   if (filters?.creatorId) list = list.filter(a => a.creatorId === filters.creatorId);
   if (filters?.campaignId) list = list.filter(a => a.campaignId === filters.campaignId);
   return list;

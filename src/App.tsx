@@ -185,12 +185,15 @@ export function App() {
 
   // Trạng thái hiển thị của creator trong workspace đang mở PHẢI lấy từ assignment riêng
   // của workspace đó (nếu có) — không phải Creator.status chung — vì cùng 1 creator có thể
-  // đang "Contact lần 1/2/3" ở brand A nhưng chưa từng liên hệ ở brand B. Workspace Agency xem toàn
-  // bộ creator ở nhiều brand cùng lúc nên không có 1 "trạng thái đang mở" duy nhất để lấy —
-  // giữ nguyên Creator.status chung cho trường hợp đó.
+  // đang "Contact lần 1/2/3" ở brand A nhưng chưa từng liên hệ ở brand B. Outreach send giờ chỉ
+  // ghi "Contact lần N" vào assignment.status, không còn ghi vào Creator.status nữa — nên ở
+  // workspace Agency (xem toàn bộ creator nhiều brand cùng lúc) cũng phải lấy từ assignment mới
+  // nhất trên tất cả brand, nếu không status sẽ đứng yên ở "New Lead" và creator "biến mất" khỏi
+  // filter dù đã contact thật.
   const resolveWorkspaceStatus = (creator: Creator): Creator => {
-    if (isAgencyWorkspace) return creator;
-    const scoped = assignments.filter(a => a.creatorId === creator.id && a.workspaceId === activeWorkspaceId);
+    const scoped = assignments.filter(a =>
+      a.creatorId === creator.id && (isAgencyWorkspace || a.workspaceId === activeWorkspaceId)
+    );
     if (scoped.length === 0) return creator;
     const latest = [...scoped].sort((a, b) => new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime())[0];
     return creator.status === latest.status ? creator : { ...creator, status: latest.status };
