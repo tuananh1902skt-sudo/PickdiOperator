@@ -27,19 +27,19 @@ const DEFAULT_TEMPLATES: OutreachTemplateSet = {
       "Would you be interested in learning more?\n\nThank you!",
   },
   reminder_1: {
-    subject: 'Re: Collaboration with {{brandName}} — {{campaignName}}',
+    subject: 'Re: Paid Collaboration with {{brandName}} — {{campaignName}}',
     body:
       "Hi {{creatorName}}, just following up in case our last email got buried. " +
       "The {{campaignName}} collaboration offer is still open — we'd love to hear back from you.",
   },
   reminder_2: {
-    subject: 'Re: Collaboration with {{brandName}} — {{campaignName}}',
+    subject: 'Re: Paid Collaboration with {{brandName}} — {{campaignName}}',
     body:
       "Hi {{creatorName}}, we're happy to be flexible on the commission rate or send a product sample " +
       "for you to try first. If now isn't the right time, no worries — just let us know.",
   },
   reminder_3: {
-    subject: 'Re: Collaboration with {{brandName}} — {{campaignName}}',
+    subject: 'Re: Paid Collaboration with {{brandName}} — {{campaignName}}',
     body:
       "Hi {{creatorName}}, this will be our last follow-up for this round. " +
       "If you're interested down the line, feel free to reach out anytime — we'd love to work with you.",

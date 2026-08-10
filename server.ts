@@ -11,7 +11,7 @@ import { downloadAvatar } from './src/lib/avatars';
 import { Client as QStashClient, Receiver as QStashReceiver } from '@upstash/qstash';
 import { getAiConfig, saveAiConfig, defaultModelFor, AiProviderName } from './src/lib/aiConfig';
 import { getOutreachTemplates, saveOutreachTemplates, fillOutreachTemplate, SequenceStage } from './src/lib/outreachTemplates';
-import { pickRandomFirstContactSubject } from './src/lib/outreachSubjects';
+import { pickRandomFirstContactSubject, ensurePaidSubject } from './src/lib/outreachSubjects';
 import {
   runAgent,
   runTextAgent,
@@ -1271,7 +1271,8 @@ app.get('/api/outreach', async (req, res) => {
 // text (that depends on the creator's conversation having a stored subject/messageId, which
 // isn't always available, e.g. before a manually-assigned inbound email exists).
 function ensureReplySubject(subject: string): string {
-  return subject.startsWith('Re:') ? subject : `Re: ${subject}`;
+  const withRe = subject.startsWith('Re:') ? subject : `Re: ${subject}`;
+  return ensurePaidSubject(withRe);
 }
 
 // Shared by the single-creator composer (/api/outreach/send) and the bulk-outreach send
@@ -1315,7 +1316,7 @@ async function deliverOutreachEmail(payload: {
   const currentConvs = await getAllConversations();
   let conv = currentConvs.find((c) => c.creatorId === creatorId && (!workspaceId || c.workspaceId === workspaceId));
 
-  let sendSubject = isFirstContact ? subject : ensureReplySubject(subject);
+  let sendSubject = isFirstContact ? ensurePaidSubject(subject) : ensureReplySubject(subject);
   let inReplyTo: string | undefined;
   let references: string[] | undefined;
   if (!isFirstContact && conv) {
