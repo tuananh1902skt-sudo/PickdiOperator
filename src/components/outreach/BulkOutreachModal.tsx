@@ -487,11 +487,12 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
                             })
                           : renderOutreachEmailHtml({
                               bodyText: item.body,
+                              creatorName: item.creatorName,
+                              senderName: branding.senderName,
                               brandName: currentCampaign?.brand || branding.brand,
                               logoUrl: branding.logoUrl,
                               primaryColor: branding.primaryColor,
                               ctaHref: branding.email ? `mailto:${branding.email}` : undefined,
-                              signatureName: branding.brand,
                             })}
                         className="w-full h-72 rounded-lg border border-slate-200 dark:border-slate-700 bg-white"
                       />

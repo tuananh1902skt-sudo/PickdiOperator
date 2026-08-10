@@ -1342,11 +1342,12 @@ async function deliverOutreachEmail(payload: {
   } else {
     html = renderOutreachEmailHtml({
       bodyText: body,
+      creatorName,
+      senderName: emailConfig.senderName || DEFAULT_SENDER_NAME,
       brandName: campaignName || emailConfig.brand,
       logoUrl: emailConfig.logoUrl,
       primaryColor: emailConfig.primaryColor,
       ctaHref,
-      signatureName: emailConfig.brand,
     });
   }
 

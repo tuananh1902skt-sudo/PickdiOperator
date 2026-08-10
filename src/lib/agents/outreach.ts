@@ -22,7 +22,7 @@ function followerTier(followers?: number): string {
 
 function recentContentLine(creator?: Partial<Creator>) {
   const titles = (creator?.recentVideos || []).slice(0, 2).map(v => v.title).filter(Boolean);
-  return titles.length ? titles.join(' | ') : 'Không có dữ liệu video gần đây';
+  return titles.length ? titles.join(' | ') : 'No recent video data available';
 }
 
 function creatorLine(creator?: Partial<Creator>) {
@@ -183,7 +183,7 @@ export const negotiationReplyAgent: AgentDefinition<NegotiationReplyContext> = {
       ? ctx.conversation.messages
           .map((m: any) => `${m.senderName} (${m.senderType}): ${m.content}`)
           .join('\n')
-      : 'Chưa có lịch sử nhắn tin thực tế giữa Brand và Creator.';
+      : 'No prior message history between Brand and Creator yet.';
 
     return `You are an Affiliate Negotiation Specialist. Suggest an optimal reply to this creator's conversation thread.
 

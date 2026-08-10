@@ -13,12 +13,14 @@
 
 export interface OutreachEmailTemplateData {
   bodyText: string;
+  creatorName?: string;
+  senderName?: string;
+  senderTitle?: string;
   brandName?: string;
   logoUrl?: string;
   primaryColor?: string;
   ctaLabel?: string;
   ctaHref?: string;
-  signatureName?: string;
 }
 
 export interface FirstContactEmailTemplateData {
@@ -48,10 +50,9 @@ export interface FirstContactEmailTemplateData {
   ctaHref?: string;
 }
 
-const DEFAULT_PRIMARY_COLOR = '#4f46e5'; // indigo-600 — used by the plain reminder template
-const GOLD_PRIMARY_COLOR = '#735c00'; // Piedmont Ethereal "primary" — first-contact template
+const GOLD_PRIMARY_COLOR = '#735c00'; // Piedmont Ethereal "primary" — shared by both templates
 const GOLD_ACCENT_COLOR = '#d4af37'; // Piedmont Ethereal "primary-container", gradient end
-const DEFAULT_CTA_LABEL = 'Trả lời email này để hợp tác';
+const DEFAULT_CTA_LABEL = 'Reply to this email to collaborate';
 const DEFAULT_PRODUCT_CTA_LABEL = 'View on TikTok Shop';
 export const DEFAULT_SENDER_TITLE = 'TikTok Shop Manager';
 
@@ -115,32 +116,49 @@ function shell(headerHtml: string, middleHtml: string, footerHtml: string): stri
 </html>`;
 }
 
-// Reminder sequence (stage 2-4) and generic fallback — plain body + optional CTA, no
-// product highlight or checklist since the pitch was already made in the first email.
+// Reminder sequence (stage 2-4) and generic fallback — same "Piedmont Ethereal" shell as
+// first-contact (white header, serif hero greeting, gold gradient CTA, signed sign-off) so
+// a creator doesn't get a visually unrelated email partway through the same conversation;
+// just without the product card/next-steps blocks since that pitch was already made.
 export function renderOutreachEmailHtml(data: OutreachEmailTemplateData): string {
   const brandName = escapeHtml(data.brandName || 'Pickdi Partner');
-  const primaryColor = data.primaryColor || DEFAULT_PRIMARY_COLOR;
-  const signatureName = escapeHtml(data.signatureName || data.brandName || 'Pickdi Partner');
+  const creatorName = escapeHtml(data.creatorName || 'Creator');
+  const senderName = escapeHtml(data.senderName || 'Juan');
+  const senderTitle = escapeHtml(data.senderTitle || DEFAULT_SENDER_TITLE);
+  const primaryColor = data.primaryColor || GOLD_PRIMARY_COLOR;
+  const accentColor = data.primaryColor ? data.primaryColor : GOLD_ACCENT_COLOR;
 
   const header = `
     <tr>
-      <td style="background:${primaryColor};padding:24px 32px;">
-        ${logoBlockHtml(brandName, data.logoUrl, '#ffffff')}
+      <td align="center" style="background:#ffffff;padding:28px 32px;border-bottom:1px solid rgba(26,26,26,0.08);">
+        ${logoBlockHtml(brandName, data.logoUrl, '#1a1c1c')}
+      </td>
+    </tr>`;
+
+  const hero = `
+    <tr>
+      <td align="center" style="padding:40px 32px 8px;">
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:30px;color:${primaryColor};margin-bottom:12px;">
+          Hi ${creatorName},
+        </div>
       </td>
     </tr>`;
 
   const middle = `
+    ${hero}
     <tr>
-      <td style="padding:32px 32px 8px;color:#1e293b;font-size:15px;line-height:1.6;">
+      <td style="padding:0 32px 8px;color:#4d4635;font-size:15px;line-height:1.6;">
         ${bodyTextToHtml(data.bodyText || '')}
       </td>
     </tr>
-    ${data.ctaHref ? ctaButtonHtml(data.ctaHref, data.ctaLabel || DEFAULT_CTA_LABEL, primaryColor, primaryColor) : ''}`;
+    ${data.ctaHref ? ctaButtonHtml(data.ctaHref, data.ctaLabel || DEFAULT_CTA_LABEL, primaryColor, accentColor) : ''}`;
 
   const footer = `
     <tr>
-      <td style="padding:20px 32px 28px;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:12px;line-height:1.5;">
-        ${signatureName}
+      <td style="padding:28px 32px 28px;border-top:1px solid rgba(26,26,26,0.08);color:#4d4635;font-size:14px;line-height:1.6;">
+        Best regards,<br>
+        <strong style="color:#1a1c1c;">${senderName}</strong><br>
+        <span style="font-size:13px;">${senderTitle} | ${brandName}</span>
       </td>
     </tr>`;
 

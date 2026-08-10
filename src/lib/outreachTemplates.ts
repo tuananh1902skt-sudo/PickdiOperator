@@ -18,31 +18,31 @@ const CONFIG_KEY = 'outreachTemplates';
 // operator always sees a "filled from template" warning before this can be sent.
 const DEFAULT_TEMPLATES: OutreachTemplateSet = {
   first: {
-    subject: 'Hợp tác cùng {{brandName}} — {{campaignName}}',
+    subject: 'Collaboration with {{brandName}} — {{campaignName}}',
     body:
-      'Xin chào {{creatorName}} ({{handle}}),\n\n' +
-      'Mình là đại diện {{brandName}}. Team đang chạy chương trình "{{campaignName}}" trong ngành {{niche}} ' +
-      'và thấy nội dung của bạn rất phù hợp.\n\n' +
-      'Bên mình mời bạn tham gia với mẫu sản phẩm tặng kèm và mức hoa hồng hấp dẫn. ' +
-      'Bạn có quan tâm tìm hiểu thêm không?\n\nCảm ơn bạn!',
+      'Hi {{creatorName}} ({{handle}}),\n\n' +
+      "This is a representative from {{brandName}}. We're running \"{{campaignName}}\" in the {{niche}} space " +
+      "and your content looks like a great fit.\n\n" +
+      "We'd love to have you join with a free product sample and a competitive commission rate. " +
+      "Would you be interested in learning more?\n\nThank you!",
   },
   reminder_1: {
-    subject: 'Re: Hợp tác cùng {{brandName}} — {{campaignName}}',
+    subject: 'Re: Collaboration with {{brandName}} — {{campaignName}}',
     body:
-      'Chào {{creatorName}}, mình nhắn lại xem bạn đã xem email trước chưa. ' +
-      'Lời mời hợp tác {{campaignName}} vẫn còn hiệu lực, rất mong nhận được phản hồi từ bạn.',
+      "Hi {{creatorName}}, just following up in case our last email got buried. " +
+      "The {{campaignName}} collaboration offer is still open — we'd love to hear back from you.",
   },
   reminder_2: {
-    subject: 'Re: Hợp tác cùng {{brandName}} — {{campaignName}}',
+    subject: 'Re: Collaboration with {{brandName}} — {{campaignName}}',
     body:
-      'Chào {{creatorName}}, bên mình có thể linh hoạt về mức hoa hồng hoặc gửi mẫu sản phẩm trước ' +
-      'để bạn trải nghiệm. Nếu thời điểm này chưa phù hợp cũng không sao, cho mình biết nhé.',
+      "Hi {{creatorName}}, we're happy to be flexible on the commission rate or send a product sample " +
+      "for you to try first. If now isn't the right time, no worries — just let us know.",
   },
   reminder_3: {
-    subject: 'Re: Hợp tác cùng {{brandName}} — {{campaignName}}',
+    subject: 'Re: Collaboration with {{brandName}} — {{campaignName}}',
     body:
-      'Chào {{creatorName}}, đây là lần nhắn cuối của mình trong đợt này. ' +
-      'Nếu sau này bạn quan tâm, cứ thoải mái liên hệ lại — bên mình luôn chào đón hợp tác cùng bạn.',
+      "Hi {{creatorName}}, this will be our last follow-up for this round. " +
+      "If you're interested down the line, feel free to reach out anytime — we'd love to work with you.",
   },
 };
 
@@ -78,11 +78,11 @@ export async function fillOutreachTemplate(
   const tokens: Record<string, string> = {
     creatorName: creator.displayName || 'Creator',
     handle: `@${creator.handle || 'handle'}`,
-    niche: creator.niche?.join(', ') || creator.category || 'nội dung sáng tạo',
+    niche: creator.niche?.join(', ') || creator.category || 'creative content',
     followerTier: followerTier(creator.followers),
     brandName: campaign?.brand || 'Pickdi Partner',
     campaignName: campaign?.name || 'General Campaign',
-    productName: campaign?.products?.[0]?.name || 'sản phẩm mẫu',
+    productName: campaign?.products?.[0]?.name || 'our product',
   };
 
   const fill = (text: string) =>
