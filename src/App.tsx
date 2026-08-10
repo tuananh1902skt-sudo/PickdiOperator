@@ -1277,7 +1277,7 @@ export function App() {
               creators={workspaceCreators}
               campaigns={workspaceCampaigns}
               assignments={workspaceAssignments}
-              reviews={workspaceReviews}
+              outreachList={workspaceOutreach}
               postedVideos={workspacePostedVideos}
             />
           )}
