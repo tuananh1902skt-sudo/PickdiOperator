@@ -1265,24 +1265,13 @@ app.get('/api/outreach', async (req, res) => {
   res.json({ success: true, data: await getAllOutreach() });
 });
 
-// Reminder emails (reminder_1/2/3) should land in the SAME inbox thread as the first
-// contact email instead of showing up as a brand-new, unrelated message — so both drafting
-// (bulk/generate, PATCH regenerate) and actual sending (deliverOutreachEmail) need to agree
-// on the real thread subject, not each compute their own. This looks up the creator's
-// existing conversation and returns `Re: {last known subject}`, falling back to
-// `fallbackSubject` (the template/AI-drafted subject) if no thread or subject is on file yet.
-async function resolveThreadedSubject(
-  creatorId: string,
-  workspaceId: string | undefined,
-  fallbackSubject: string,
-  allConvs?: Conversation[]
-): Promise<string> {
-  const currentConvs = allConvs || (await getAllConversations());
-  const conv = currentConvs.find((c) => c.creatorId === creatorId && (!workspaceId || c.workspaceId === workspaceId));
-  if (!conv) return fallbackSubject;
-  const lastMsgWithSubject = [...conv.messages].reverse().find((m) => m.subject);
-  const baseSubject = lastMsgWithSubject?.subject || fallbackSubject;
-  return baseSubject.startsWith('Re:') ? baseSubject : `Re: ${baseSubject}`;
+// Reminder emails (reminder_1/2/3) just need a "Re:"-prefixed subject for display — actual
+// inbox threading is handled by the In-Reply-To/References headers in deliverOutreachEmail,
+// which is far more reliable than trying to reconstruct and match the exact original subject
+// text (that depends on the creator's conversation having a stored subject/messageId, which
+// isn't always available, e.g. before a manually-assigned inbound email exists).
+function ensureReplySubject(subject: string): string {
+  return subject.startsWith('Re:') ? subject : `Re: ${subject}`;
 }
 
 // Shared by the single-creator composer (/api/outreach/send) and the bulk-outreach send
@@ -1320,20 +1309,19 @@ async function deliverOutreachEmail(payload: {
   const emailConfig = await getEmailConfig();
   const isFirstContact = !payload.sequenceStage || payload.sequenceStage === 'first';
 
-  // Thread off of the existing conversation's last messageId/subject via In-Reply-To +
-  // a "Re:" subject, same mechanism the manual-reply endpoint uses — see
-  // resolveThreadedSubject above.
+  // Thread off of the existing conversation's messageId chain via In-Reply-To/References —
+  // see ensureReplySubject above for why the subject text itself doesn't try to match the
+  // original.
   const currentConvs = await getAllConversations();
   let conv = currentConvs.find((c) => c.creatorId === creatorId && (!workspaceId || c.workspaceId === workspaceId));
 
-  let sendSubject = subject;
+  let sendSubject = isFirstContact ? subject : ensureReplySubject(subject);
   let inReplyTo: string | undefined;
   let references: string[] | undefined;
   if (!isFirstContact && conv) {
     const messageIdChain = conv.messages.map((m) => m.messageId).filter((id): id is string => !!id);
     inReplyTo = messageIdChain[messageIdChain.length - 1];
     references = messageIdChain.length ? messageIdChain : undefined;
-    sendSubject = await resolveThreadedSubject(creatorId, workspaceId, subject, currentConvs);
   }
 
   const ctaHref = emailConfig.email ? `mailto:${emailConfig.email}?subject=${encodeURIComponent(sendSubject.startsWith('Re:') ? sendSubject : `Re: ${sendSubject}`)}` : undefined;
@@ -1516,10 +1504,6 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
     const campaign = campaignId ? await getCampaignById(campaignId) : undefined;
     const agent = OUTREACH_SEQUENCE_AGENTS[sequenceStage] || OUTREACH_SEQUENCE_AGENTS.first;
     const allOutreach = await getAllOutreach();
-    // Fetched once up front so reminder drafts can preview the real "Re: {original subject}"
-    // they'll thread onto at send time (see resolveThreadedSubject), instead of always
-    // showing the generic template/AI subject that deliverOutreachEmail would later override.
-    const allConvs = sequenceStage === 'first' ? [] : await getAllConversations();
 
     const items: BulkOutreachItem[] = [];
     const avoidPhrasings: string[] = [];
@@ -1561,7 +1545,7 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
         // an easy fingerprint for spam filters to key off of.
         const subject = sequenceStage === 'first'
           ? pickRandomFirstContactSubject()
-          : await resolveThreadedSubject(cr.id, workspaceId, filled.subject, allConvs);
+          : ensureReplySubject(filled.subject);
         items.push({ ...baseItem, subject, body, source: 'template', status: 'draft' });
         continue;
       }
@@ -1578,7 +1562,7 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
         const draftSubject = data.subject || `Collaboration Offer: ${campaign?.name || 'Partnership'}`;
         const subject = sequenceStage === 'first'
           ? pickRandomFirstContactSubject()
-          : await resolveThreadedSubject(cr.id, workspaceId, draftSubject, allConvs);
+          : ensureReplySubject(draftSubject);
         const body = data.body || '';
         items.push({ ...baseItem, subject, body, source: 'ai', status: 'draft' });
         avoidPhrasings.push(extractOpeningPhrasing(body));
@@ -1590,7 +1574,7 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
         const filled = await fillOutreachTemplate(sequenceStage, cr, campaign);
         const subject = sequenceStage === 'first'
           ? pickRandomFirstContactSubject()
-          : await resolveThreadedSubject(cr.id, workspaceId, filled.subject, allConvs);
+          : ensureReplySubject(filled.subject);
         items.push({ ...baseItem, subject, body: filled.body, source: 'template_fallback', status: 'draft' });
       }
     }
@@ -1669,7 +1653,7 @@ app.patch('/api/outreach/bulk/:jobId/items/:creatorId', async (req, res) => {
         const filled = await fillOutreachTemplate(job.sequenceStage, cr, campaign);
         item.subject = job.sequenceStage === 'first'
           ? pickRandomFirstContactSubject()
-          : await resolveThreadedSubject(cr.id, job.workspaceId, filled.subject);
+          : ensureReplySubject(filled.subject);
         item.body = job.sequenceStage === 'first' ? '' : filled.body;
         item.source = 'template';
       } else {
@@ -1690,7 +1674,7 @@ app.patch('/api/outreach/bulk/:jobId/items/:creatorId', async (req, res) => {
         const draftSubject = data.subject || item.subject;
         item.subject = job.sequenceStage === 'first'
           ? pickRandomFirstContactSubject()
-          : await resolveThreadedSubject(cr.id, job.workspaceId, draftSubject);
+          : ensureReplySubject(draftSubject);
         item.body = data.body || item.body;
         item.source = 'ai';
       }
