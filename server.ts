@@ -1264,6 +1264,26 @@ app.get('/api/outreach', async (req, res) => {
   res.json({ success: true, data: await getAllOutreach() });
 });
 
+// Reminder emails (reminder_1/2/3) should land in the SAME inbox thread as the first
+// contact email instead of showing up as a brand-new, unrelated message — so both drafting
+// (bulk/generate, PATCH regenerate) and actual sending (deliverOutreachEmail) need to agree
+// on the real thread subject, not each compute their own. This looks up the creator's
+// existing conversation and returns `Re: {last known subject}`, falling back to
+// `fallbackSubject` (the template/AI-drafted subject) if no thread or subject is on file yet.
+async function resolveThreadedSubject(
+  creatorId: string,
+  workspaceId: string | undefined,
+  fallbackSubject: string,
+  allConvs?: Conversation[]
+): Promise<string> {
+  const currentConvs = allConvs || (await getAllConversations());
+  const conv = currentConvs.find((c) => c.creatorId === creatorId && (!workspaceId || c.workspaceId === workspaceId));
+  if (!conv) return fallbackSubject;
+  const lastMsgWithSubject = [...conv.messages].reverse().find((m) => m.subject);
+  const baseSubject = lastMsgWithSubject?.subject || fallbackSubject;
+  return baseSubject.startsWith('Re:') ? baseSubject : `Re: ${baseSubject}`;
+}
+
 // Shared by the single-creator composer (/api/outreach/send) and the bulk-outreach send
 // loop (/api/outreach/bulk/:jobId/send) — actually sends the email, then keeps every
 // downstream record (outreach history, KPI, assignment status, creator.lastContactAt,
@@ -1299,10 +1319,9 @@ async function deliverOutreachEmail(payload: {
   const emailConfig = await getEmailConfig();
   const isFirstContact = !payload.sequenceStage || payload.sequenceStage === 'first';
 
-  // Reminder emails (reminder_1/2/3) should land in the SAME inbox thread as the first
-  // contact email instead of showing up as a brand-new, unrelated message — so we look up
-  // the existing conversation's last messageId/subject and thread off of it via
-  // In-Reply-To/References + a "Re:" subject, same mechanism the manual-reply endpoint uses.
+  // Thread off of the existing conversation's last messageId/subject via In-Reply-To +
+  // a "Re:" subject, same mechanism the manual-reply endpoint uses — see
+  // resolveThreadedSubject above.
   const currentConvs = await getAllConversations();
   let conv = currentConvs.find((c) => c.creatorId === creatorId && (!workspaceId || c.workspaceId === workspaceId));
 
@@ -1311,9 +1330,7 @@ async function deliverOutreachEmail(payload: {
   if (!isFirstContact && conv) {
     const lastMsgWithMessageId = [...conv.messages].reverse().find((m) => m.messageId);
     inReplyTo = lastMsgWithMessageId?.messageId;
-    const lastMsgWithSubject = [...conv.messages].reverse().find((m) => m.subject);
-    const baseSubject = lastMsgWithSubject?.subject || subject;
-    sendSubject = baseSubject.startsWith('Re:') ? baseSubject : `Re: ${baseSubject}`;
+    sendSubject = await resolveThreadedSubject(creatorId, workspaceId, subject, currentConvs);
   }
 
   const ctaHref = emailConfig.email ? `mailto:${emailConfig.email}?subject=${encodeURIComponent(sendSubject.startsWith('Re:') ? sendSubject : `Re: ${sendSubject}`)}` : undefined;
@@ -1496,6 +1513,10 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
     const campaign = campaignId ? await getCampaignById(campaignId) : undefined;
     const agent = OUTREACH_SEQUENCE_AGENTS[sequenceStage] || OUTREACH_SEQUENCE_AGENTS.first;
     const allOutreach = await getAllOutreach();
+    // Fetched once up front so reminder drafts can preview the real "Re: {original subject}"
+    // they'll thread onto at send time (see resolveThreadedSubject), instead of always
+    // showing the generic template/AI subject that deliverOutreachEmail would later override.
+    const allConvs = sequenceStage === 'first' ? [] : await getAllConversations();
 
     const items: BulkOutreachItem[] = [];
     const avoidPhrasings: string[] = [];
@@ -1535,7 +1556,9 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
         // First-contact subjects rotate through a pool of varied phrasings instead of the
         // one fixed template line — sending the same subject to every creator in a batch is
         // an easy fingerprint for spam filters to key off of.
-        const subject = sequenceStage === 'first' ? pickRandomFirstContactSubject() : filled.subject;
+        const subject = sequenceStage === 'first'
+          ? pickRandomFirstContactSubject()
+          : await resolveThreadedSubject(cr.id, workspaceId, filled.subject, allConvs);
         items.push({ ...baseItem, subject, body, source: 'template', status: 'draft' });
         continue;
       }
@@ -1549,9 +1572,10 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
           originalOutreach,
           daysSinceLastContact: sinceContact,
         });
+        const draftSubject = data.subject || `Collaboration Offer: ${campaign?.name || 'Partnership'}`;
         const subject = sequenceStage === 'first'
           ? pickRandomFirstContactSubject()
-          : (data.subject || `Collaboration Offer: ${campaign?.name || 'Partnership'}`);
+          : await resolveThreadedSubject(cr.id, workspaceId, draftSubject, allConvs);
         const body = data.body || '';
         items.push({ ...baseItem, subject, body, source: 'ai', status: 'draft' });
         avoidPhrasings.push(extractOpeningPhrasing(body));
@@ -1561,7 +1585,9 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
         // the review UI can warn the operator before they send it.
         console.warn(`Bulk outreach: AI generation failed for creator ${cr.id}, using template fallback:`, err?.message);
         const filled = await fillOutreachTemplate(sequenceStage, cr, campaign);
-        const subject = sequenceStage === 'first' ? pickRandomFirstContactSubject() : filled.subject;
+        const subject = sequenceStage === 'first'
+          ? pickRandomFirstContactSubject()
+          : await resolveThreadedSubject(cr.id, workspaceId, filled.subject, allConvs);
         items.push({ ...baseItem, subject, body: filled.body, source: 'template_fallback', status: 'draft' });
       }
     }
@@ -1638,7 +1664,9 @@ app.patch('/api/outreach/bulk/:jobId/items/:creatorId', async (req, res) => {
         // or after they updated the saved template in Settings), not switch to AI. Same
         // first-contact-stays-empty rule as the initial generate loop above.
         const filled = await fillOutreachTemplate(job.sequenceStage, cr, campaign);
-        item.subject = job.sequenceStage === 'first' ? pickRandomFirstContactSubject() : filled.subject;
+        item.subject = job.sequenceStage === 'first'
+          ? pickRandomFirstContactSubject()
+          : await resolveThreadedSubject(cr.id, job.workspaceId, filled.subject);
         item.body = job.sequenceStage === 'first' ? '' : filled.body;
         item.source = 'template';
       } else {
@@ -1656,7 +1684,10 @@ app.patch('/api/outreach/bulk/:jobId/items/:creatorId', async (req, res) => {
           originalOutreach,
           daysSinceLastContact: daysSince(cr.lastContactAt),
         });
-        item.subject = job.sequenceStage === 'first' ? pickRandomFirstContactSubject() : (data.subject || item.subject);
+        const draftSubject = data.subject || item.subject;
+        item.subject = job.sequenceStage === 'first'
+          ? pickRandomFirstContactSubject()
+          : await resolveThreadedSubject(cr.id, job.workspaceId, draftSubject);
         item.body = data.body || item.body;
         item.source = 'ai';
       }
