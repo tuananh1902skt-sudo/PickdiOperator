@@ -74,6 +74,49 @@ function formatUsdShort(v: number | undefined | null): string {
   return `${sign}$${short}`;
 }
 
+// Generates a 1-line rationale for the "Why This Creator" column from existing metrics (no AI
+// call) — dynamically picks the 2-3 most notable signals (GMV, % beauty, demographic, engagement,
+// risk) per creator, then appends a situational conclusion instead of one fixed template for all.
+function whyThisCreator(creator?: Creator): string {
+  if (!creator) return '';
+  const facts: string[] = [];
+
+  const gmv = creator.gmv30d;
+  if (gmv !== undefined && gmv > 0) facts.push(`GMV 30d ${formatUsdShort(gmv)}`);
+
+  const beautyRatio = creator.beautyCategoryRatio
+    ?? creator.salesMetrics?.categorySplit?.find(c => c.name.toLowerCase().includes('beauty'))?.value;
+  if (beautyRatio !== undefined) facts.push(`${roundPct(beautyRatio, 0)}% revenue from beauty category`);
+
+  const demo = creator.demographics;
+  if (demo?.topGender && demo?.topAgeGroup) {
+    facts.push(`top audience ${demo.topGender} ${demo.topAgeGroup}${demo.topCountry ? ` in ${demo.topCountry}` : ''}`);
+  }
+
+  if (creator.engagementRate !== undefined && creator.engagementRate >= 7) {
+    facts.push(`engagement ${roundPct(creator.engagementRate, 1)}% above average`);
+  }
+
+  if (facts.length === 0) return '';
+
+  const riskFlags = creator.scoreBreakdown?.riskFlags;
+  const collabCount = creator.collabMetrics?.brandCollabCount;
+  const isTopTier = creator.gmvTier === 'L4' || creator.gmvTier === 'L5';
+
+  let conclusion = '';
+  if (riskFlags && riskFlags.length > 0) {
+    conclusion = `review carefully before partnering (${riskFlags[0]})`;
+  } else if (isTopTier && (creator.riskScore === undefined || creator.riskScore < 40)) {
+    conclusion = collabCount ? `safe pick, already collabed with ${collabCount} other brands` : 'safe pick';
+  } else if (beautyRatio !== undefined && beautyRatio >= 50) {
+    conclusion = 'strong fit for the category';
+  } else if ((gmv === undefined || gmv < 5000) && creator.engagementRate !== undefined && creator.engagementRate >= 7) {
+    conclusion = 'good candidate to test a new product';
+  }
+
+  return conclusion ? `${facts.slice(0, 3).join(', ')} — ${conclusion}.` : `${facts.slice(0, 3).join(', ')}.`;
+}
+
 type ExportColumn = {
   section?: string; // nhãn nhóm cột (row 1 merge trong file gốc) — undefined = cột đứng riêng (vd "O/X & Reason")
   header: string;
@@ -104,7 +147,7 @@ const COLUMNS: ExportColumn[] = [
   { section: '1. Sourcing', header: 'Main Category (top 2)', get: ({ creator }) => categoryTop2(creator) },
   { section: '1. Sourcing', header: 'Demographic', get: ({ creator }) => demographicStr(creator) },
   { section: '1. Sourcing', header: 'GMV/Video, Last 30d ($)', get: ({ creator }) => formatUsdShort(creator?.gmv30d) },
-  { section: '1. Sourcing', header: 'Why This Creator', get: ({ creator }) => fmt(creator?.scoreBreakdown?.strengths?.join('; ')) },
+  { section: '1. Sourcing', header: 'Why This Creator', get: ({ creator }) => whyThisCreator(creator) || fmt(creator?.scoreBreakdown?.strengths?.join('; ')) },
   { header: 'O/X & Reason', get: () => '' },
   { section: '2. Outreach', header: '1st Email Sent', get: ({ emails }) => {
     const first = [...emails].filter(e => e.sentAt).sort((a, b) => new Date(a.sentAt!).getTime() - new Date(b.sentAt!).getTime())[0];
