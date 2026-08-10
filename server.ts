@@ -1298,7 +1298,25 @@ async function deliverOutreachEmail(payload: {
 
   const emailConfig = await getEmailConfig();
   const isFirstContact = !payload.sequenceStage || payload.sequenceStage === 'first';
-  const ctaHref = emailConfig.email ? `mailto:${emailConfig.email}?subject=${encodeURIComponent(`Re: ${subject}`)}` : undefined;
+
+  // Reminder emails (reminder_1/2/3) should land in the SAME inbox thread as the first
+  // contact email instead of showing up as a brand-new, unrelated message — so we look up
+  // the existing conversation's last messageId/subject and thread off of it via
+  // In-Reply-To/References + a "Re:" subject, same mechanism the manual-reply endpoint uses.
+  const currentConvs = await getAllConversations();
+  let conv = currentConvs.find((c) => c.creatorId === creatorId && (!workspaceId || c.workspaceId === workspaceId));
+
+  let sendSubject = subject;
+  let inReplyTo: string | undefined;
+  if (!isFirstContact && conv) {
+    const lastMsgWithMessageId = [...conv.messages].reverse().find((m) => m.messageId);
+    inReplyTo = lastMsgWithMessageId?.messageId;
+    const lastMsgWithSubject = [...conv.messages].reverse().find((m) => m.subject);
+    const baseSubject = lastMsgWithSubject?.subject || subject;
+    sendSubject = baseSubject.startsWith('Re:') ? baseSubject : `Re: ${baseSubject}`;
+  }
+
+  const ctaHref = emailConfig.email ? `mailto:${emailConfig.email}?subject=${encodeURIComponent(sendSubject.startsWith('Re:') ? sendSubject : `Re: ${sendSubject}`)}` : undefined;
 
   let html: string;
   if (isFirstContact) {
@@ -1332,7 +1350,7 @@ async function deliverOutreachEmail(payload: {
     });
   }
 
-  const { messageId } = await sendEmail({ to: cr.email, cc, subject, text: body, html });
+  const { messageId } = await sendEmail({ to: cr.email, cc, subject: sendSubject, text: body, html, inReplyTo });
 
   const newOutreach: OutreachEmail = {
     id: `out-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -1342,7 +1360,7 @@ async function deliverOutreachEmail(payload: {
     creatorHandle,
     campaignId,
     campaignName,
-    subject,
+    subject: sendSubject,
     body,
     cc,
     status: 'Sent',
@@ -1382,8 +1400,6 @@ async function deliverOutreachEmail(payload: {
   cr.lastContactAt = new Date().toISOString();
   await saveCreator(cr);
 
-  const currentConvs = await getAllConversations();
-  let conv = currentConvs.find((c) => c.creatorId === creatorId && (!workspaceId || c.workspaceId === workspaceId));
   if (!conv) {
     conv = {
       id: `conv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -1408,7 +1424,8 @@ async function deliverOutreachEmail(payload: {
     content: body,
     createdAt: newOutreach.sentAt,
     messageId,
-    subject,
+    inReplyTo,
+    subject: sendSubject,
   });
   conv.lastMessageAt = newOutreach.sentAt;
   conv.status = 'Waiting Reply';
