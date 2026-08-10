@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Copy, Download, Check, FileSpreadsheet } from 'lucide-react';
 import { Creator, Campaign, CreatorCampaignAssignment, OutreachEmail, PostedVideo } from '../../types';
 
@@ -8,6 +8,10 @@ interface ExportViewProps {
   assignments: CreatorCampaignAssignment[];
   outreachList: OutreachEmail[];
   postedVideos: PostedVideo[];
+}
+
+function todayStr(): string {
+  return toLocalDateStr(new Date().toISOString());
 }
 
 function toLocalDateStr(iso: string | undefined | null): string {
@@ -34,7 +38,9 @@ function roundPct(v: number, digits: number): string {
 // "Main Category (top 2)" của file d'Alba ("1. Beauty / Skincare 40%\n2. Womensweat 27.3%").
 // Không có categorySplit (creator Kalodata/manual, chưa cào TCM) thì rơi về category đơn của creator.
 function categoryTop2(creator?: Creator): string {
-  const split = creator?.salesMetrics?.categorySplit;
+  // TCM trả cả bucket "-1" (chưa phân loại được ngành hàng) trong industry_groups — loại khỏi
+  // top 2 vì không có ý nghĩa với VN/KR, không phải tên ngành hàng thật.
+  const split = creator?.salesMetrics?.categorySplit?.filter(c => c.name !== '-1');
   if (split && split.length > 0) {
     return [...split]
       .sort((a, b) => b.value - a.value)
@@ -206,24 +212,64 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
   const activeCampaigns = useMemo(() => campaigns.filter(c => c.status !== 'Archived'), [campaigns]);
   const [selectedCampaignId, setSelectedCampaignId] = useState(() => activeCampaigns[0]?.id || campaigns[0]?.id || '');
   const campaignId = selectedCampaignId || activeCampaigns[0]?.id || campaigns[0]?.id || '';
+  // Lọc theo "Listed Date" (= ngày assign vào campaign) để mỗi lần nộp chỉ xuất đúng số creator
+  // mới thêm trong ngày đó — render cả nghìn dòng 1 lúc (toàn bộ roster của campaign) làm treo
+  // trình duyệt, và thực tế thao tác nộp file cũng diễn ra theo ngày chứ không phải 1 lần duy nhất.
+  const [selectedDate, setSelectedDate] = useState(todayStr());
 
   const creatorById = useMemo(() => new Map(creators.map(c => [c.id, c])), [creators]);
 
-  const rows = useMemo(() => {
+  const filteredAssignments = useMemo(() => {
     return assignments
-      .filter(a => a.campaignId === campaignId)
-      .sort((a, b) => new Date(a.assignedAt).getTime() - new Date(b.assignedAt).getTime())
-      .map(assignment => {
-        const creator = creatorById.get(assignment.creatorId);
-        const emails = outreachList.filter(o => o.creatorId === assignment.creatorId && o.campaignId === campaignId);
-        const posted = postedVideos.filter(v => v.creatorId === assignment.creatorId && v.campaignId === campaignId);
-        const totalGmv = posted.length > 0
-          ? posted.reduce((sum, v) => sum + (v.totalRevenue || 0), 0)
-          : undefined;
-        const ctx: RowContext = { creator, assignment, emails, totalGmv };
-        return COLUMNS.map(col => col.get(ctx));
+      .filter(a => a.campaignId === campaignId && toLocalDateStr(a.assignedAt) === selectedDate)
+      .sort((a, b) => new Date(a.assignedAt).getTime() - new Date(b.assignedAt).getTime());
+  }, [assignments, campaignId, selectedDate]);
+
+  // `creators` (App.tsx global list state) cố tình bỏ demographics/salesMetrics để nhẹ khi load
+  // cả 3900+ creator (xem comment CREATOR_LIST_COLUMNS trong db.ts) — Main Category (top 2) và
+  // Demographic cần 2 field JSONB đó nên phải fetch riêng qua getCreatorById cho từng creator
+  // ĐANG hiển thị (số dòng đã nhỏ vì lọc theo ngày ở trên rồi, không phải fetch cả roster).
+  const [detailById, setDetailById] = useState<Map<string, Creator>>(new Map());
+  // Khoá effect theo chuỗi id (primitive) thay vì theo reference của `filteredAssignments` —
+  // App.tsx tạo mảng assignments/creators MỚI mỗi lần re-render (không useMemo ở đó) nên reference
+  // đổi liên tục. Đánh dấu "đã fetch" bằng useRef (không phải state) để tránh fetch lặp lại.
+  // KHÔNG dùng cờ "cancelled" ở đây — React StrictMode (dev) chạy effect 2 lần liên tiếp
+  // (mount → cleanup → mount lại); ref đã dedupe id nên lần chạy thứ 2 không fetch lại, nhưng
+  // nếu có cờ cancelled thì cleanup của lần 2 sẽ huỷ luôn kết quả của lần fetch DUY NHẤT (lần 1),
+  // khiến dữ liệu tải về không bao giờ được áp dụng vào state.
+  const attemptedIdsRef = useRef<Set<string>>(new Set());
+  const creatorIdsKey = useMemo(() => filteredAssignments.map(a => a.creatorId).join(','), [filteredAssignments]);
+  useEffect(() => {
+    const ids = creatorIdsKey ? creatorIdsKey.split(',').filter(Boolean) : [];
+    const idsToFetch = ids.filter(id => !attemptedIdsRef.current.has(id));
+    if (idsToFetch.length === 0) return;
+    idsToFetch.forEach(id => attemptedIdsRef.current.add(id));
+    Promise.all(idsToFetch.map(id => fetch(`/api/creators/${id}`).then(r => r.ok ? r.json() : null).catch(() => null)))
+      .then(results => {
+        setDetailById(prev => {
+          const next = new Map(prev);
+          results.forEach((res, i) => {
+            if (res?.data) next.set(idsToFetch[i], res.data as Creator);
+          });
+          return next;
+        });
       });
-  }, [assignments, outreachList, postedVideos, creatorById, campaignId]);
+  }, [creatorIdsKey]);
+
+  const rows = useMemo(() => {
+    return filteredAssignments.map(assignment => {
+      const summary = creatorById.get(assignment.creatorId);
+      const detail = detailById.get(assignment.creatorId);
+      const creator = summary && detail ? { ...summary, demographics: detail.demographics, salesMetrics: detail.salesMetrics } : summary;
+      const emails = outreachList.filter(o => o.creatorId === assignment.creatorId && o.campaignId === campaignId);
+      const posted = postedVideos.filter(v => v.creatorId === assignment.creatorId && v.campaignId === campaignId);
+      const totalGmv = posted.length > 0
+        ? posted.reduce((sum, v) => sum + (v.totalRevenue || 0), 0)
+        : undefined;
+      const ctx: RowContext = { creator, assignment, emails, totalGmv };
+      return COLUMNS.map(col => col.get(ctx));
+    });
+  }, [filteredAssignments, outreachList, postedVideos, creatorById, detailById, campaignId]);
 
   const headers = useMemo(() => COLUMNS.map(c => c.header), []);
   const headerLines = useMemo(() => [groupHeaderLine(), headers], [headers]);
@@ -256,6 +302,14 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
+          <label htmlFor="export-date" className="text-sm text-slate-500 dark:text-slate-400">Ngày</label>
+          <input
+            id="export-date"
+            type="date"
+            value={selectedDate}
+            onChange={e => setSelectedDate(e.target.value)}
+            className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+          />
         </div>
       </div>
 
@@ -272,7 +326,7 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
               {copied ? 'Đã copy' : 'Copy'}
             </button>
             <button
-              onClick={() => downloadCsv(`${selectedCampaignName || 'export'}-${toLocalDateStr(new Date().toISOString())}.csv`, headerLines, rows)}
+              onClick={() => downloadCsv(`${selectedCampaignName || 'export'}-${selectedDate}.csv`, headerLines, rows)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
             >
               <Download className="w-3.5 h-3.5" />
