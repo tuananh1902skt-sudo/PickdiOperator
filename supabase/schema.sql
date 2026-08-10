@@ -394,3 +394,10 @@ alter table bulk_outreach_jobs add column if not exists cc text;
 -- without this a job silently stalls forever after its first item. Safe to re-run.
 alter table bulk_outreach_jobs add column if not exists "nextSendAt" text;
 alter table bulk_outreach_jobs add column if not exists "sendLockUntil" text;
+
+-- Migration: unmatched_inbound_emails gained "messageId" — without it, an inbound reply that
+-- goes through manual assignment (ambiguous sender email matching multiple creators) loses
+-- its Message-ID forever, permanently breaking In-Reply-To/References threading for any
+-- reminder sent later in that conversation even though the subject line still looks correct.
+-- Safe to re-run.
+alter table unmatched_inbound_emails add column if not exists "messageId" text;

@@ -1244,6 +1244,7 @@ app.post('/api/inbox/unmatched/:id/assign', async (req, res) => {
     content: record.content || '(No text content)',
     createdAt: record.receivedAt || new Date().toISOString(),
     subject: record.subject,
+    messageId: record.messageId,
   };
 
   conv.messages.push(newMessage);
@@ -1327,9 +1328,11 @@ async function deliverOutreachEmail(payload: {
 
   let sendSubject = subject;
   let inReplyTo: string | undefined;
+  let references: string[] | undefined;
   if (!isFirstContact && conv) {
-    const lastMsgWithMessageId = [...conv.messages].reverse().find((m) => m.messageId);
-    inReplyTo = lastMsgWithMessageId?.messageId;
+    const messageIdChain = conv.messages.map((m) => m.messageId).filter((id): id is string => !!id);
+    inReplyTo = messageIdChain[messageIdChain.length - 1];
+    references = messageIdChain.length ? messageIdChain : undefined;
     sendSubject = await resolveThreadedSubject(creatorId, workspaceId, subject, currentConvs);
   }
 
@@ -1368,7 +1371,7 @@ async function deliverOutreachEmail(payload: {
     });
   }
 
-  const { messageId } = await sendEmail({ to: cr.email, cc, subject: sendSubject, text: body, html, inReplyTo });
+  const { messageId } = await sendEmail({ to: cr.email, cc, subject: sendSubject, text: body, html, inReplyTo, references });
 
   const newOutreach: OutreachEmail = {
     id: `out-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -1951,15 +1954,17 @@ app.post('/api/conversations/:id/reply', async (req, res) => {
     }
   }
 
-  const lastMsgWithMessageId = [...conv.messages].reverse().find(m => m.messageId);
-  const inReplyTo = lastMsgWithMessageId ? lastMsgWithMessageId.messageId : undefined;
+  const messageIdChain = conv.messages.map(m => m.messageId).filter((id): id is string => !!id);
+  const inReplyTo = messageIdChain[messageIdChain.length - 1];
+  const references = messageIdChain.length ? messageIdChain : undefined;
 
   try {
     const { messageId } = await sendEmail({
       to: cr.email,
       subject: replySubject,
       text: content,
-      inReplyTo
+      inReplyTo,
+      references
     });
 
     const newMessage = {

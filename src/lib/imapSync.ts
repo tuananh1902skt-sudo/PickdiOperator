@@ -195,6 +195,7 @@ export async function checkInboxForReplies(): Promise<CheckInboxResult> {
             receivedAt: parsed.date ? new Date(parsed.date).toISOString() : new Date().toISOString(),
             candidateCreatorIds: matchingCreators.map((c) => c.id),
             resolved: false,
+            messageId: parsed.messageId,
           };
 
           await saveUnmatchedInboundEmail(unmatchedItem);

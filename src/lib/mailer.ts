@@ -9,6 +9,7 @@ export async function sendEmail(opts: {
   text: string;
   html?: string;
   inReplyTo?: string;
+  references?: string[];
 }): Promise<{ messageId: string }> {
   const config = await getEmailConfig();
 
@@ -58,7 +59,11 @@ export async function sendEmail(opts: {
 
   if (opts.inReplyTo) {
     mailOptions.inReplyTo = opts.inReplyTo;
-    mailOptions.references = [opts.inReplyTo];
+    // Gmail/most clients thread more reliably off the full References chain (every prior
+    // Message-ID in the conversation) than off a single In-Reply-To id alone — especially
+    // past the first reminder, where relying on just the immediate parent can drop the
+    // message out of the existing thread.
+    mailOptions.references = opts.references?.length ? opts.references : [opts.inReplyTo];
   }
 
   const info = await transporter.sendMail(mailOptions);

@@ -343,6 +343,7 @@ export interface UnmatchedInboundEmail {
   receivedAt: string;
   candidateCreatorIds: string[]; // các creator khớp senderEmail, chờ Operator chọn 1
   resolved: boolean; // true sau khi Operator đã gán vào 1 conversation cụ thể
+  messageId?: string; // Message-ID gốc của email này — cần giữ để reminder sau này thread đúng
 }
 
 export interface CheckInboxResult {

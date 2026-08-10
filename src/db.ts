@@ -357,6 +357,7 @@ export function rowToUnmatchedInboundEmail(row: any): UnmatchedInboundEmail {
     receivedAt: row.receivedAt,
     candidateCreatorIds: parseJson(row.candidateCreatorIds, []),
     resolved: Boolean(row.resolved),
+    messageId: row.messageId || undefined,
   };
 }
 
@@ -815,6 +816,7 @@ export async function saveUnmatchedInboundEmail(u: UnmatchedInboundEmail): Promi
     receivedAt: u.receivedAt,
     candidateCreatorIds: u.candidateCreatorIds ?? null,
     resolved: !!u.resolved,
+    messageId: u.messageId ?? null,
     created_at_ts: u.receivedAt ? new Date(u.receivedAt).getTime() || Date.now() : Date.now(),
   }));
 }
