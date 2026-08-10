@@ -23,16 +23,23 @@ function fmt(v: string | number | boolean | undefined | null): string {
   return String(v);
 }
 
+// Làm tròn % về tối đa `digits` chữ số thập phân, bỏ ".0"/".00" thừa khi số tròn (vd 40.0% → 40%,
+// 27.3% giữ nguyên) — khớp đúng cách file mẫu hiển thị % (không cố định số lẻ).
+function roundPct(v: number, digits: number): string {
+  const rounded = Number(v.toFixed(digits));
+  return String(rounded);
+}
+
 // Top 2 ngành hàng theo % doanh thu thật (industry_groups từ TCM) — khớp đúng định dạng cột
-// "Main Category (top 2)" của file d'Alba ("1. Beauty / Skincare 40%\n2. ..."). Không có
-// categorySplit (creator Kalodata/manual, chưa cào TCM) thì rơi về category đơn của creator.
+// "Main Category (top 2)" của file d'Alba ("1. Beauty / Skincare 40%\n2. Womensweat 27.3%").
+// Không có categorySplit (creator Kalodata/manual, chưa cào TCM) thì rơi về category đơn của creator.
 function categoryTop2(creator?: Creator): string {
   const split = creator?.salesMetrics?.categorySplit;
   if (split && split.length > 0) {
     return [...split]
       .sort((a, b) => b.value - a.value)
       .slice(0, 2)
-      .map((c, i) => `${i + 1}. ${c.name} ${c.value}%`)
+      .map((c, i) => `${i + 1}. ${c.name} ${roundPct(c.value, 1)}%`)
       .join('\n');
   }
   return fmt(creator?.category);
@@ -44,7 +51,21 @@ function demographicStr(creator?: Creator): string {
   const demo = creator?.demographics;
   if (!demo?.topGender) return '';
   const pct = demo.topGender === 'Female' ? demo.genderFemale : demo.topGender === 'Male' ? demo.genderMale : undefined;
-  return pct !== undefined ? `${demo.topGender} ${pct}%` : demo.topGender;
+  return pct !== undefined ? `${demo.topGender} ${roundPct(pct, 2)}%` : demo.topGender;
+}
+
+// GMV rút gọn dạng $53k/$1.2m/$3.4b cho dễ đọc trong cột "GMV/Video, Last 30d" — làm tròn
+// về số nguyên (không giữ số lẻ như $53.1k) theo đúng ví dụ file mẫu yêu cầu.
+function formatUsdShort(v: number | undefined | null): string {
+  if (v === undefined || v === null || Number.isNaN(v)) return '';
+  const sign = v < 0 ? '-' : '';
+  const abs = Math.abs(v);
+  let short: string;
+  if (abs >= 1e9) short = `${Math.round(abs / 1e9)}b`;
+  else if (abs >= 1e6) short = `${Math.round(abs / 1e6)}m`;
+  else if (abs >= 1e3) short = `${Math.round(abs / 1e3)}k`;
+  else short = String(Math.round(abs));
+  return `${sign}$${short}`;
 }
 
 type ExportColumn = {
@@ -76,7 +97,7 @@ const COLUMNS: ExportColumn[] = [
   { section: '1. Sourcing', header: 'Email', get: ({ creator }) => fmt(creator?.email) },
   { section: '1. Sourcing', header: 'Main Category (top 2)', get: ({ creator }) => categoryTop2(creator) },
   { section: '1. Sourcing', header: 'Demographic', get: ({ creator }) => demographicStr(creator) },
-  { section: '1. Sourcing', header: 'GMV/Video, Last 30d ($)', get: ({ creator }) => fmt(creator?.gmv30d) },
+  { section: '1. Sourcing', header: 'GMV/Video, Last 30d ($)', get: ({ creator }) => formatUsdShort(creator?.gmv30d) },
   { section: '1. Sourcing', header: 'Why This Creator', get: ({ creator }) => fmt(creator?.scoreBreakdown?.strengths?.join('; ')) },
   { header: 'O/X & Reason', get: () => '' },
   { section: '2. Outreach', header: '1st Email Sent', get: ({ emails }) => {
