@@ -19,7 +19,8 @@ import {
   SlidersHorizontal,
   X,
   AlertTriangle,
-  Image as ImageIcon
+  Image as ImageIcon,
+  RefreshCw
 } from 'lucide-react';
 import { Creator, Campaign, Workspace, CreatorCampaignAssignment } from '../../types';
 import { WorkspaceBanner } from '../layout/WorkspaceBanner';
@@ -194,6 +195,7 @@ interface CreatorListViewProps {
   onOpenSettings?: () => void;
   onSelectCreator: (cr: Creator) => void;
   onOpenImport: () => void;
+  onRefresh?: () => Promise<void> | void;
   onOpenEmailComposer: (cr: Creator) => void;
   onArchiveCreator: (id: string) => void;
   onDeleteCreatorPermanently?: (id: string) => void;
@@ -213,6 +215,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   onOpenSettings,
   onSelectCreator,
   onOpenImport,
+  onRefresh,
   onOpenEmailComposer,
   onArchiveCreator,
   onDeleteCreatorPermanently,
@@ -227,6 +230,17 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   // content/production quality.
   const scoreColumnLabel = "d'Alba Fit";
   const getScoreValue = (cr: Creator) => cr.brandFitScore;
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const handleRefresh = async () => {
+    if (!onRefresh || isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // Search & Filter state
   const [search, setSearch] = useState('');
@@ -824,6 +838,17 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
             onConfigureExtension={handleConfigureExtensionId}
             extensionId={extensionId}
           />
+          {onRefresh && (
+            <button
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              title="Tải lại danh sách creator"
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-60"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          )}
           <button
             onClick={onOpenImport}
             className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"

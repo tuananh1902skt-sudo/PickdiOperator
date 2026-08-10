@@ -317,12 +317,10 @@ export function App() {
     navigateTo(TAB_PATHS.campaigns);
   };
 
-  // Fetch state from backend & poll periodically for background script syncs
-  const refreshCreators = async (opts: { skipIfHidden?: boolean } = {}) => {
-    // Only the periodic background poll should skip while the tab is hidden (to save
-    // bandwidth/avoid rate limits) — the initial mount load and focus refresh must always
-    // run, otherwise a tab that starts backgrounded never loads any creator data at all.
-    if (opts.skipIfHidden && document.hidden) return;
+  // Fetch state from backend — called on mount and manually via the Refresh button
+  // (no auto-poll: the extension/userscript writes creators in the background, so the
+  // operator refreshes on demand after running a scrape rather than paying for a timer).
+  const refreshCreators = async () => {
     try {
       const res = await fetch('/api/creators');
       if (!res.ok) {
@@ -417,17 +415,6 @@ export function App() {
       .then(data => { if (data && Array.isArray(data.data)) setOutreachList(data.data); })
       .catch(err => console.error(err));
 
-    // Poll every 10 seconds for new scraped creators from extension/userscript
-    const interval = setInterval(() => refreshCreators({ skipIfHidden: true }), 10000);
-
-    // Also refresh immediately when switching back to this browser tab
-    const handleFocus = () => refreshCreators();
-    window.addEventListener('focus', handleFocus);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', handleFocus);
-    };
   }, []);
 
   // Drawer chi tiết creator chỉ nhận `creator` như 1 snapshot lúc click — nếu để mở trong lúc
@@ -1198,6 +1185,7 @@ export function App() {
               onOpenSettings={() => setActiveTab('settings')}
               onSelectCreator={openCreatorDetail}
               onOpenImport={() => setIsImportModalOpen(true)}
+              onRefresh={refreshCreators}
               onOpenEmailComposer={cr => {
                 setSelectedCreatorForEmail(cr);
                 setIsEmailComposerOpen(true);
