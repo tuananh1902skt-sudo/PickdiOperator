@@ -541,7 +541,10 @@ export async function tryClaimBulkOutreachSendLock(job: BulkOutreachJob): Promis
   const db = getDb();
   const now = Date.now();
   if (job.sendLockUntil && Date.parse(job.sendLockUntil) > now) return null;
-  const newLock = new Date(now + 30_000).toISOString();
+  // 90s, not 30s: deliverOutreachEmail does a live SMTP send plus several sequential DB
+  // round trips and can legitimately run past 30s, which let the lock look "expired" to a
+  // second caller while the first was still working — the trigger for duplicate sends.
+  const newLock = new Date(now + 90_000).toISOString();
   let query = db.from('bulk_outreach_jobs').update({ sendLockUntil: newLock }).eq('id', job.id).eq('status', 'sending');
   query = job.sendLockUntil ? query.eq('sendLockUntil', job.sendLockUntil) : query.is('sendLockUntil', null);
   const { data, error } = await query.select('id');
@@ -1120,6 +1123,30 @@ export async function getAllOutreach(): Promise<OutreachEmail[]> {
     .order('rowid', { ascending: false });
   if (error) throw error;
   return (data ?? []).map(rowToOutreach);
+}
+
+// Last-line-of-defense duplicate check for deliverOutreachEmail: a targeted, indexed lookup
+// (not a full-table getAllOutreach scan) for the most recent send to this
+// creator+campaign+sequenceStage, used to catch a same-item resend that slipped past the
+// bulk-outreach send lock (e.g. two overlapping sendNextBulkOutreachItem invocations racing
+// on a slow SMTP send).
+export async function getLatestOutreachForItem(
+  creatorId: string,
+  campaignId: string | undefined,
+  sequenceStage: string
+): Promise<OutreachEmail | null> {
+  const db = getDb();
+  let query = db
+    .from('outreach_emails')
+    .select('*')
+    .eq('creatorId', creatorId)
+    .eq('sequenceStage', sequenceStage)
+    .order('created_at_ts', { ascending: false })
+    .limit(1);
+  query = campaignId ? query.eq('campaignId', campaignId) : query.is('campaignId', null);
+  const { data, error } = await query;
+  if (error) throw error;
+  return data && data.length > 0 ? rowToOutreach(data[0]) : null;
 }
 
 export async function getAllConversations(): Promise<Conversation[]> {

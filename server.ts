@@ -84,6 +84,7 @@ import {
   archiveCampaign,
   getAllOutreach,
   saveOutreach,
+  getLatestOutreachForItem,
   getAllConversations,
   getConversationById,
   saveConversation,
@@ -1285,6 +1286,16 @@ async function deliverOutreachEmail(payload: {
   if (!cr) throw new Error('Không tìm thấy creator trong CRM');
   if (!cr.email || !cr.email.trim()) throw new Error('Creator này chưa có email');
 
+  // Last-line-of-defense against duplicate sends: if this exact creator+campaign+stage was
+  // already sent within the last 2 minutes, refuse to send again. A legitimate manual resend
+  // of the same sequence stage this soon is implausible; a race between two overlapping
+  // sendNextBulkOutreachItem invocations (or a double-submitted request) landing here within
+  // that window is exactly what this guards against.
+  const recent = await getLatestOutreachForItem(creatorId, campaignId, payload.sequenceStage || 'first');
+  if (recent?.sentAt && Date.now() - Date.parse(recent.sentAt) < 2 * 60 * 1000) {
+    throw new Error(`Email này vừa được gửi cho ${creatorName} rồi (trùng lặp) — bỏ qua để tránh gửi 2 lần.`);
+  }
+
   const emailConfig = await getEmailConfig();
   const isFirstContact = !payload.sequenceStage || payload.sequenceStage === 'first';
   const ctaHref = emailConfig.email ? `mailto:${emailConfig.email}?subject=${encodeURIComponent(`Re: ${subject}`)}` : undefined;
@@ -1683,6 +1694,7 @@ async function sendNextBulkOutreachItem(jobId: string) {
   item.status = 'sending';
   await saveBulkOutreachJob(job);
 
+  let itemUpdate: Partial<typeof item>;
   try {
     const result = await deliverOutreachEmail({
       creatorId: item.creatorId,
@@ -1696,21 +1708,34 @@ async function sendNextBulkOutreachItem(jobId: string) {
       workspaceId: job.workspaceId,
       sequenceStage: job.sequenceStage,
     });
-    item.status = 'sent';
-    item.sentAt = result.outreach.sentAt;
-    item.outreachId = result.outreach.id;
+    itemUpdate = { status: 'sent', sentAt: result.outreach.sentAt, outreachId: result.outreach.id };
   } catch (err: any) {
-    item.status = 'failed';
-    item.error = err?.message || 'Gửi thất bại';
+    itemUpdate = { status: 'failed', error: err?.message || 'Gửi thất bại' };
   }
 
   const pacingSeconds = Math.round(job.pacingMinSeconds + Math.random() * (job.pacingMaxSeconds - job.pacingMinSeconds));
+
+  // deliverOutreachEmail above (live SMTP send + several sequential DB round trips) can run
+  // long enough for another sendNextBulkOutreachItem invocation to have advanced this job in
+  // the meantime (lock expiry, or the poll-driven resume fallback). Re-fetch the job fresh
+  // and merge just this item's update onto it instead of writing back the stale in-memory
+  // `job` snapshot read at the top of this call — a blind full-row save here was the root
+  // cause of duplicate sends: it would revert a concurrently-processed item back to 'draft',
+  // making a later invocation pick it up and send it again.
+  const freshJob = await getBulkOutreachJobById(jobId);
+  if (!freshJob) return;
+  const freshItem = freshJob.items.find(i => i.creatorId === item.creatorId && i.status === 'sending');
+  if (freshItem) {
+    Object.assign(freshItem, itemUpdate);
+  } else {
+    console.error(`Bulk outreach job ${jobId}: item for ${item.creatorId} was no longer 'sending' on re-fetch — skipping merge to avoid clobbering a concurrent update.`);
+  }
   // Marks when the next item is due and releases the lock — the resume-on-poll fallback
   // (maybeResumeBulkJob) uses nextSendAt to tell "still pacing normally" apart from "the
   // scheduled continuation never fired" once this deadline passes.
-  job.nextSendAt = new Date(Date.now() + pacingSeconds * 1000).toISOString();
-  job.sendLockUntil = undefined;
-  await saveBulkOutreachJob(job);
+  freshJob.nextSendAt = new Date(Date.now() + pacingSeconds * 1000).toISOString();
+  freshJob.sendLockUntil = undefined;
+  await saveBulkOutreachJob(freshJob);
 
   if (qstashClient) {
     await qstashClient.publishJSON({
