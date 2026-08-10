@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { X, Sparkles, Send, RefreshCw, AlertTriangle, CheckCircle2, XCircle, Clock, Loader2, Eye, Pencil } from 'lucide-react';
 import { Creator, Campaign, BulkOutreachJob, BulkOutreachItem } from '../../types';
-import { renderOutreachEmailHtml, renderFirstContactEmailHtml } from '../../lib/emailTemplate';
+import { renderFirstContactEmailHtml } from '../../lib/emailTemplate';
 
 interface EmailBranding {
   brand?: string;
@@ -467,8 +467,7 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
                       <iframe
                         title={`Preview - ${item.creatorName}`}
                         sandbox=""
-                        srcDoc={sequenceStage === 'first'
-                          ? renderFirstContactEmailHtml({
+                        srcDoc={renderFirstContactEmailHtml({
                               creatorName: item.creatorName,
                               senderName: branding.senderName,
                               brandName: currentCampaign?.brand || branding.brand,
@@ -482,31 +481,30 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
                               productSoldCount: currentCampaign?.products?.[0]?.soldCount,
                               productHighlights: currentCampaign?.products?.[0]?.highlights,
                               compensationOffer: currentCampaign?.products?.[0]?.compensationOffer,
-                              bodyText: item.body,
-                              ctaHref: branding.email ? `mailto:${branding.email}` : undefined,
-                            })
-                          : renderOutreachEmailHtml({
-                              bodyText: item.body,
-                              creatorName: item.creatorName,
-                              senderName: branding.senderName,
-                              brandName: currentCampaign?.brand || branding.brand,
-                              logoUrl: branding.logoUrl,
-                              primaryColor: branding.primaryColor,
+                              bodyText: sequenceStage === 'first' ? item.body : undefined,
+                              introText: sequenceStage === 'first' ? undefined : item.body,
                               ctaHref: branding.email ? `mailto:${branding.email}` : undefined,
                             })}
                         className="w-full h-72 rounded-lg border border-slate-200 dark:border-slate-700 bg-white"
                       />
                     ) : (
-                      <textarea
-                        rows={4}
-                        value={item.body}
-                        onChange={e => updateItem(item.creatorId, { body: e.target.value })}
-                        onBlur={() => handleSaveEdit(item)}
-                        placeholder={item.source === 'template' && sequenceStage === 'first'
-                          ? 'Để trống nếu không cần — chào hỏi, sản phẩm, offer, next-steps và chữ ký đã được mẫu HTML xử lý sẵn. Gõ vào đây nếu muốn thêm 1 câu cá nhân hoá riêng cho creator này.'
-                          : undefined}
-                        className="w-full p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white leading-relaxed"
-                      />
+                      <>
+                        {sequenceStage !== 'first' && (
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                            Đây chỉ là câu mở đầu (thay câu pitch mặc định) — phần sản phẩm, offer và CTA bên dưới vẫn giữ nguyên như mẫu.
+                          </p>
+                        )}
+                        <textarea
+                          rows={4}
+                          value={item.body}
+                          onChange={e => updateItem(item.creatorId, { body: e.target.value })}
+                          onBlur={() => handleSaveEdit(item)}
+                          placeholder={item.source === 'template' && sequenceStage === 'first'
+                            ? 'Để trống nếu không cần — chào hỏi, sản phẩm, offer, next-steps và chữ ký đã được mẫu HTML xử lý sẵn. Gõ vào đây nếu muốn thêm 1 câu cá nhân hoá riêng cho creator này.'
+                            : undefined}
+                          className="w-full p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white leading-relaxed"
+                        />
+                      </>
                     )}
                   </div>
                 ))}

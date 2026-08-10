@@ -1,7 +1,6 @@
-// Fixed marketing-style HTML shells for outreach emails — one layout per sequence stage
-// (first-contact gets the rich "Piedmont Ethereal" product/CTA/checklist version,
-// reminders get the plain version), same for every campaign/creator; only the text
-// content changes.
+// Fixed marketing-style HTML shell for outreach emails — the "Piedmont Ethereal"
+// product/CTA/checklist version, same for every campaign/creator and every sequence stage
+// (first contact and reminders alike, see introText below); only the text content changes.
 //
 // Pure string building, no Node-only APIs or external CSS/JS (Tailwind CDN, web fonts,
 // <script>) — those get stripped or silently fail in real email clients, so everything
@@ -10,18 +9,6 @@
 // Moda serif (closest system font, since Google Fonts links get stripped by most email
 // clients). Safe to import from both server.ts (the email actually sent) and outreach
 // UI components (live preview).
-
-export interface OutreachEmailTemplateData {
-  bodyText: string;
-  creatorName?: string;
-  senderName?: string;
-  senderTitle?: string;
-  brandName?: string;
-  logoUrl?: string;
-  primaryColor?: string;
-  ctaLabel?: string;
-  ctaHref?: string;
-}
 
 export interface FirstContactEmailTemplateData {
   creatorName?: string;
@@ -46,6 +33,11 @@ export interface FirstContactEmailTemplateData {
   compensationOffer?: string;
   // Optional extra paragraph(s) the operator/AI adds on top of the fixed pitch copy.
   bodyText?: string;
+  // Overrides the fixed "We'd love to propose a paid collaboration..." pitch paragraph in
+  // the hero block — used by reminder emails to say something contextually appropriate
+  // ("didn't want this to get buried", "last chance") instead of literally re-pitching,
+  // while still reusing the same product/offer/CTA layout as the first-contact email.
+  introText?: string;
   ctaLabel?: string;
   ctaHref?: string;
 }
@@ -116,55 +108,6 @@ function shell(headerHtml: string, middleHtml: string, footerHtml: string): stri
 </html>`;
 }
 
-// Reminder sequence (stage 2-4) and generic fallback — same "Piedmont Ethereal" shell as
-// first-contact (white header, serif hero greeting, gold gradient CTA, signed sign-off) so
-// a creator doesn't get a visually unrelated email partway through the same conversation;
-// just without the product card/next-steps blocks since that pitch was already made.
-export function renderOutreachEmailHtml(data: OutreachEmailTemplateData): string {
-  const brandName = escapeHtml(data.brandName || 'Pickdi Partner');
-  const creatorName = escapeHtml(data.creatorName || 'Creator');
-  const senderName = escapeHtml(data.senderName || 'Juan');
-  const senderTitle = escapeHtml(data.senderTitle || DEFAULT_SENDER_TITLE);
-  const primaryColor = data.primaryColor || GOLD_PRIMARY_COLOR;
-  const accentColor = data.primaryColor ? data.primaryColor : GOLD_ACCENT_COLOR;
-
-  const header = `
-    <tr>
-      <td align="center" style="background:#ffffff;padding:28px 32px;border-bottom:1px solid rgba(26,26,26,0.08);">
-        ${logoBlockHtml(brandName, data.logoUrl, '#1a1c1c')}
-      </td>
-    </tr>`;
-
-  const hero = `
-    <tr>
-      <td align="center" style="padding:40px 32px 8px;">
-        <div style="font-family:Georgia,'Times New Roman',serif;font-size:30px;color:${primaryColor};margin-bottom:12px;">
-          Hi ${creatorName},
-        </div>
-      </td>
-    </tr>`;
-
-  const middle = `
-    ${hero}
-    <tr>
-      <td style="padding:0 32px 8px;color:#4d4635;font-size:15px;line-height:1.6;">
-        ${bodyTextToHtml(data.bodyText || '')}
-      </td>
-    </tr>
-    ${data.ctaHref ? ctaButtonHtml(data.ctaHref, data.ctaLabel || DEFAULT_CTA_LABEL, primaryColor, accentColor) : ''}`;
-
-  const footer = `
-    <tr>
-      <td style="padding:28px 32px 28px;border-top:1px solid rgba(26,26,26,0.08);color:#4d4635;font-size:14px;line-height:1.6;">
-        Best regards,<br>
-        <strong style="color:#1a1c1c;">${senderName}</strong><br>
-        <span style="font-size:13px;">${senderTitle} | ${brandName}</span>
-      </td>
-    </tr>`;
-
-  return shell(header, middle, footer);
-}
-
 // First-contact email — "Piedmont Ethereal" template: serif hero greeting, product
 // highlight card, fixed compensation pitch copy, gold gradient CTA, numbered next-steps,
 // and a signed sign-off. Structured fields instead of one freeform body because the
@@ -192,8 +135,8 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
           Hi ${creatorName},
         </div>
         <p style="margin:0;font-size:15px;line-height:1.6;color:#4d4635;">
-          This is ${senderName}, ${senderTitle} at ${brandName}. We'd love to propose a paid collaboration
-          for our top-selling product on TikTok Shop.
+          ${data.introText ? escapeHtml(data.introText) : `This is ${senderName}, ${senderTitle} at ${brandName}. We'd love to propose a paid collaboration
+          for our top-selling product on TikTok Shop.`}
         </p>
       </td>
     </tr>`;

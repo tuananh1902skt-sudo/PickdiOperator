@@ -5,7 +5,7 @@ import { ZipArchive } from 'archiver';
 import { scoreCreator } from './src/scoring';
 import { getEmailConfig, saveEmailConfig, DEFAULT_SENDER_NAME } from './src/lib/emailConfig';
 import { sendEmail } from './src/lib/mailer';
-import { renderOutreachEmailHtml, renderFirstContactEmailHtml } from './src/lib/emailTemplate';
+import { renderFirstContactEmailHtml } from './src/lib/emailTemplate';
 import { checkInboxForReplies } from './src/lib/imapSync';
 import { downloadAvatar } from './src/lib/avatars';
 import { Client as QStashClient, Receiver as QStashReceiver } from '@upstash/qstash';
@@ -1265,16 +1265,6 @@ app.get('/api/outreach', async (req, res) => {
   res.json({ success: true, data: await getAllOutreach() });
 });
 
-// Reminder emails (reminder_1/2/3) just need a "Re:"-prefixed subject for display — actual
-// inbox threading is handled by the In-Reply-To/References headers in deliverOutreachEmail,
-// which is far more reliable than trying to reconstruct and match the exact original subject
-// text (that depends on the creator's conversation having a stored subject/messageId, which
-// isn't always available, e.g. before a manually-assigned inbound email exists).
-function ensureReplySubject(subject: string): string {
-  const withRe = subject.startsWith('Re:') ? subject : `Re: ${subject}`;
-  return ensurePaidSubject(withRe);
-}
-
 // Shared by the single-creator composer (/api/outreach/send) and the bulk-outreach send
 // loop (/api/outreach/bulk/:jobId/send) — actually sends the email, then keeps every
 // downstream record (outreach history, KPI, assignment status, creator.lastContactAt,
@@ -1310,13 +1300,14 @@ async function deliverOutreachEmail(payload: {
   const emailConfig = await getEmailConfig();
   const isFirstContact = !payload.sequenceStage || payload.sequenceStage === 'first';
 
-  // Thread off of the existing conversation's messageId chain via In-Reply-To/References —
-  // see ensureReplySubject above for why the subject text itself doesn't try to match the
-  // original.
+  // Best-effort inbox threading via In-Reply-To/References when we have a prior Message-ID
+  // on file — harmless to include even when a mail client ends up starting a new thread
+  // anyway, which is why reminder subjects/copy below no longer depend on it working: they
+  // say "just following up" / "last chance" in plain language instead.
   const currentConvs = await getAllConversations();
   let conv = currentConvs.find((c) => c.creatorId === creatorId && (!workspaceId || c.workspaceId === workspaceId));
 
-  let sendSubject = isFirstContact ? ensurePaidSubject(subject) : ensureReplySubject(subject);
+  const sendSubject = ensurePaidSubject(subject);
   let inReplyTo: string | undefined;
   let references: string[] | undefined;
   if (!isFirstContact && conv) {
@@ -1325,40 +1316,32 @@ async function deliverOutreachEmail(payload: {
     references = messageIdChain.length ? messageIdChain : undefined;
   }
 
-  const ctaHref = emailConfig.email ? `mailto:${emailConfig.email}?subject=${encodeURIComponent(sendSubject.startsWith('Re:') ? sendSubject : `Re: ${sendSubject}`)}` : undefined;
+  const ctaHref = emailConfig.email ? `mailto:${emailConfig.email}?subject=${encodeURIComponent(sendSubject)}` : undefined;
 
-  let html: string;
-  if (isFirstContact) {
-    const campaign = campaignId ? await getCampaignById(campaignId) : undefined;
-    const product = campaign?.products?.[0];
-    html = renderFirstContactEmailHtml({
-      creatorName,
-      senderName: emailConfig.senderName || DEFAULT_SENDER_NAME,
-      brandName: campaignName || emailConfig.brand,
-      logoUrl: emailConfig.logoUrl,
-      primaryColor: emailConfig.primaryColor,
-      productName: product?.name,
-      productImageUrl: product?.imageUrl,
-      productUrl: product?.productUrl,
-      productRating: product?.rating,
-      productReviewCount: product?.reviewCount,
-      productSoldCount: product?.soldCount,
-      productHighlights: product?.highlights,
-      compensationOffer: product?.compensationOffer,
-      bodyText: body,
-      ctaHref,
-    });
-  } else {
-    html = renderOutreachEmailHtml({
-      bodyText: body,
-      creatorName,
-      senderName: emailConfig.senderName || DEFAULT_SENDER_NAME,
-      brandName: campaignName || emailConfig.brand,
-      logoUrl: emailConfig.logoUrl,
-      primaryColor: emailConfig.primaryColor,
-      ctaHref,
-    });
-  }
+  // Reminders reuse the exact same Piedmont Ethereal layout (product card, offer, CTA) as
+  // first contact — only the hero paragraph changes (via introText) to acknowledge this is
+  // a follow-up instead of re-pitching from scratch, so the product stays visible/consistent
+  // across the whole sequence instead of dropping to a bare-text email.
+  const campaign = campaignId ? await getCampaignById(campaignId) : undefined;
+  const product = campaign?.products?.[0];
+  const html = renderFirstContactEmailHtml({
+    creatorName,
+    senderName: emailConfig.senderName || DEFAULT_SENDER_NAME,
+    brandName: campaignName || emailConfig.brand,
+    logoUrl: emailConfig.logoUrl,
+    primaryColor: emailConfig.primaryColor,
+    productName: product?.name,
+    productImageUrl: product?.imageUrl,
+    productUrl: product?.productUrl,
+    productRating: product?.rating,
+    productReviewCount: product?.reviewCount,
+    productSoldCount: product?.soldCount,
+    productHighlights: product?.highlights,
+    compensationOffer: product?.compensationOffer,
+    bodyText: isFirstContact ? body : undefined,
+    introText: isFirstContact ? undefined : body,
+    ctaHref,
+  });
 
   const { messageId } = await sendEmail({ to: cr.email, cc, subject: sendSubject, text: body, html, inReplyTo, references });
 
@@ -1546,7 +1529,7 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
         // an easy fingerprint for spam filters to key off of.
         const subject = sequenceStage === 'first'
           ? pickRandomFirstContactSubject()
-          : ensureReplySubject(filled.subject);
+          : ensurePaidSubject(filled.subject);
         items.push({ ...baseItem, subject, body, source: 'template', status: 'draft' });
         continue;
       }
@@ -1563,7 +1546,7 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
         const draftSubject = data.subject || `Collaboration Offer: ${campaign?.name || 'Partnership'}`;
         const subject = sequenceStage === 'first'
           ? pickRandomFirstContactSubject()
-          : ensureReplySubject(draftSubject);
+          : ensurePaidSubject(draftSubject);
         const body = data.body || '';
         items.push({ ...baseItem, subject, body, source: 'ai', status: 'draft' });
         avoidPhrasings.push(extractOpeningPhrasing(body));
@@ -1575,7 +1558,7 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
         const filled = await fillOutreachTemplate(sequenceStage, cr, campaign);
         const subject = sequenceStage === 'first'
           ? pickRandomFirstContactSubject()
-          : ensureReplySubject(filled.subject);
+          : ensurePaidSubject(filled.subject);
         items.push({ ...baseItem, subject, body: filled.body, source: 'template_fallback', status: 'draft' });
       }
     }
@@ -1654,7 +1637,7 @@ app.patch('/api/outreach/bulk/:jobId/items/:creatorId', async (req, res) => {
         const filled = await fillOutreachTemplate(job.sequenceStage, cr, campaign);
         item.subject = job.sequenceStage === 'first'
           ? pickRandomFirstContactSubject()
-          : ensureReplySubject(filled.subject);
+          : ensurePaidSubject(filled.subject);
         item.body = job.sequenceStage === 'first' ? '' : filled.body;
         item.source = 'template';
       } else {
@@ -1675,7 +1658,7 @@ app.patch('/api/outreach/bulk/:jobId/items/:creatorId', async (req, res) => {
         const draftSubject = data.subject || item.subject;
         item.subject = job.sequenceStage === 'first'
           ? pickRandomFirstContactSubject()
-          : ensureReplySubject(draftSubject);
+          : ensurePaidSubject(draftSubject);
         item.body = data.body || item.body;
         item.source = 'ai';
       }

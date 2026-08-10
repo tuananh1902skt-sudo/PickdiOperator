@@ -26,23 +26,27 @@ const DEFAULT_TEMPLATES: OutreachTemplateSet = {
       "We'd love to have you join with a free product sample and a competitive commission rate. " +
       "Would you be interested in learning more?\n\nThank you!",
   },
+  // Reminder bodies render as the hero's intro paragraph (replacing the fixed first-contact
+  // pitch line — see introText in emailTemplate.ts), right below "Hi {creatorName},", so they
+  // should NOT repeat the greeting themselves. Reminder 1/2 read as "didn't want this to get
+  // buried/lost"; reminder 3 (final) leans into scarcity/FOMO instead.
   reminder_1: {
-    subject: 'Re: Paid Collaboration with {{brandName}} — {{campaignName}}',
+    subject: "Following Up: Paid Collaboration Opportunity | {{brandName}}",
     body:
-      "Hi {{creatorName}}, just following up in case our last email got buried. " +
-      "The {{campaignName}} collaboration offer is still open — we'd love to hear back from you.",
+      "Just want to make sure this doesn't get lost in your inbox — the paid collaboration opportunity " +
+      "with {{brandName}} for {{productName}} is still open, and we'd genuinely love to hear from you.",
   },
   reminder_2: {
-    subject: 'Re: Paid Collaboration with {{brandName}} — {{campaignName}}',
+    subject: "Don't Miss This — Paid Collaboration | {{brandName}}",
     body:
-      "Hi {{creatorName}}, we're happy to be flexible on the commission rate or send a product sample " +
-      "for you to try first. If now isn't the right time, no worries — just let us know.",
+      "Following up once more so this doesn't slip through the cracks — happy to be flexible on the " +
+      "commission rate or send {{productName}} for you to try first, whatever makes it easier to say yes.",
   },
   reminder_3: {
-    subject: 'Re: Paid Collaboration with {{brandName}} — {{campaignName}}',
+    subject: 'Last Chance: Paid Collaboration Opportunity | {{brandName}}',
     body:
-      "Hi {{creatorName}}, this will be our last follow-up for this round. " +
-      "If you're interested down the line, feel free to reach out anytime — we'd love to work with you.",
+      "This will be our last note on this — we're closing out this round of paid collaborations soon and " +
+      "didn't want you to miss out on {{productName}} with {{brandName}}. The door's always open if the timing works better later.",
   },
 };
 

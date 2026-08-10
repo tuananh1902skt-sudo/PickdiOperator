@@ -104,9 +104,11 @@ Days since last contact: ${ctx.daysSinceLastContact ?? 'unknown'}`;
 export const outreachReminder1Agent: AgentDefinition<ReminderContext> = {
   id: 'outreach.reminder_1',
   label: 'Outreach — Reminder #1',
-  defaultInstructions: `1. Tone: light, friendly, brief — assume they simply missed the first email, not that they declined.
-2. Reference the original offer in one short line, don't repeat the full pitch.
-3. Keep it under 80 words in the body.`,
+  defaultInstructions: `1. Tone: light, friendly, brief — assume they simply missed the first email, not that they declined. Lean on "didn't want this to get buried in your inbox" as the framing.
+2. Reference the original offer in one short line, don't repeat the full pitch — this email reuses the same product card/offer layout as the first email, your body text only replaces the opening line.
+3. Do NOT start with "Hi {name}," — that greeting is already rendered separately above your text. Start directly with the follow-up line.
+4. Subject must NOT be a literal "Re: ..." — write a fresh standalone subject that itself signals this is a follow-up (e.g. "Following Up: ..."), and must contain the word "Paid".
+5. Keep it under 60 words in the body.`,
   cacheKey: reminderCacheKey('reminder_1'),
   buildPrompt: (ctx, instructions) => `Generate a REMINDER #1 follow-up email for a creator who has not replied to our first outreach message yet.
 
@@ -123,9 +125,11 @@ ${EMAIL_JSON_CONTRACT}`,
 export const outreachReminder2Agent: AgentDefinition<ReminderContext> = {
   id: 'outreach.reminder_2',
   label: 'Outreach — Reminder #2',
-  defaultInstructions: `1. Tone: still warm, but add a concrete extra incentive or flexibility (e.g. "happy to send a sample first", "commission rate is negotiable", "no pressure, just checking if timing works better now").
+  defaultInstructions: `1. Tone: still warm, but add a concrete extra incentive or flexibility (e.g. "happy to send a sample first", "commission rate is negotiable", "no pressure, just checking if timing works better now"). Keep the "don't want this to slip through the cracks / get lost" framing since two emails have gone unanswered.
 2. Do NOT sound pushy or guilt-trip the creator.
-3. Keep it under 100 words in the body.`,
+3. Do NOT start with "Hi {name}," — that greeting is already rendered separately above your text. Start directly with the follow-up line.
+4. Subject must NOT be a literal "Re: ..." — write a fresh standalone subject that itself signals this is a follow-up, and must contain the word "Paid".
+5. Keep it under 80 words in the body.`,
   cacheKey: reminderCacheKey('reminder_2'),
   buildPrompt: (ctx, instructions) => `Generate a REMINDER #2 follow-up email — this creator has not responded to the first outreach or the first reminder.
 
@@ -143,10 +147,12 @@ ${EMAIL_JSON_CONTRACT}`,
 export const outreachReminder3Agent: AgentDefinition<ReminderContext> = {
   id: 'outreach.reminder_3',
   label: 'Outreach — Reminder #3 (Close-out)',
-  defaultInstructions: `1. Tone: respectful, no pressure — this is the last message in this sequence.
+  defaultInstructions: `1. Tone: respectful, no pressure — this is the last message in this sequence. Frame it as a final/limited-time opportunity (scarcity, not guilt) — e.g. "closing out this round of collaborations soon".
 2. Explicitly leave the door open ("feel free to reach out anytime if interested later"), don't demand a response.
-3. Keep it under 70 words in the body.
-4. followUpSuggestion should say "Move to closed / re-approach in 60 days" rather than suggest another immediate follow-up.`,
+3. Do NOT start with "Hi {name}," — that greeting is already rendered separately above your text. Start directly with the follow-up line.
+4. Subject must convey scarcity/last-chance framing (e.g. "Last Chance: ...") and must contain the word "Paid" — not a literal "Re: ...".
+5. Keep it under 60 words in the body.
+6. followUpSuggestion should say "Move to closed / re-approach in 60 days" rather than suggest another immediate follow-up.`,
   cacheKey: reminderCacheKey('reminder_3'),
   buildPrompt: (ctx, instructions) => `Generate a FINAL follow-up / polite close-out email — this creator has not responded to two prior messages.
 
