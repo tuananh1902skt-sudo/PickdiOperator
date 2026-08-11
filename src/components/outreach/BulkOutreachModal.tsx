@@ -250,13 +250,13 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
   };
 
   const currentCampaign = campaigns.find(c => c.id === campaignId);
-  const draftItems = job?.items.filter(i => i.status !== 'skipped_no_email' && i.status !== 'skipped_do_not_contact') || [];
+  const draftItems = job?.items.filter(i => i.status !== 'skipped_no_email' && i.status !== 'skipped_do_not_contact' && i.status !== 'skipped_recent_duplicate') || [];
   // Only the still-unsent items — what the review/edit list and the send button should
   // count. Distinct from draftItems (which includes already-sent/failed items too, needed
   // for the sending/done progress view) so a resumed paused_cap job doesn't re-show
   // already-sent emails as editable drafts.
   const remainingItems = job?.items.filter(i => i.status === 'draft') || [];
-  const skippedItems = job?.items.filter(i => i.status === 'skipped_no_email' || i.status === 'skipped_do_not_contact') || [];
+  const skippedItems = job?.items.filter(i => i.status === 'skipped_no_email' || i.status === 'skipped_do_not_contact' || i.status === 'skipped_recent_duplicate') || [];
   const sentCount = job?.items.filter(i => i.status === 'sent').length || 0;
   const failedCount = job?.items.filter(i => i.status === 'failed').length || 0;
   const isSendingOrDone = job?.status === 'sending' || job?.status === 'done';

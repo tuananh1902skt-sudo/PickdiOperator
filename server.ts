@@ -1511,6 +1511,25 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
         items.push({ ...baseItem, subject: '', body: '', source: 'ai', status: 'skipped_do_not_contact', skipReason: 'Đã đánh dấu "Không liên hệ nữa"' });
         continue;
       }
+
+      // Two overlapping bulk jobs for the same stage (e.g. the operator re-runs "generate"
+      // before noticing an earlier job already covered this creator) used to send the same
+      // creator the same reminder twice, minutes apart — deliverOutreachEmail's own dedup
+      // check only looks back 2 minutes, too short to catch this. Skip here if this creator
+      // already got this exact stage within the last 24h.
+      const recentSameStage = await getLatestOutreachForItem(cr.id, campaignId, sequenceStage);
+      if (recentSameStage?.sentAt && Date.now() - Date.parse(recentSameStage.sentAt) < 24 * 60 * 60 * 1000) {
+        items.push({
+          ...baseItem,
+          subject: '',
+          body: '',
+          source: 'ai',
+          status: 'skipped_recent_duplicate',
+          skipReason: `Đã gửi ${sequenceStage} cho creator này rồi (${new Date(recentSameStage.sentAt).toLocaleString('vi-VN')})`,
+        });
+        continue;
+      }
+
       const sinceContact = daysSince(cr.lastContactAt);
 
       const originalOutreach = allOutreach.find(o => o.creatorId === cr.id); // most recent first (getAllOutreach is ordered desc)
@@ -1588,6 +1607,19 @@ app.post('/api/outreach/bulk/generate', async (req, res) => {
 app.get('/api/outreach/bulk/:jobId', async (req, res) => {
   const job = await getBulkOutreachJobById(req.params.jobId);
   if (!job) return res.status(404).json({ success: false, message: 'Không tìm thấy job' });
+  // Runs regardless of job.status (checkLock guards against a genuinely in-flight send) —
+  // this is what unsticks a job that already flipped to 'done' while an item was still
+  // stranded at 'sending', since sendNextBulkOutreachItem's own sweep never runs again once
+  // a job is 'done'. Frontend polls this endpoint every few seconds while the modal is open,
+  // so a stuck item self-heals the next time the operator is looking at it.
+  try {
+    if (await reclaimStaleSendingItems(job, true)) {
+      res.json({ success: true, data: job });
+      return;
+    }
+  } catch (err) {
+    console.error(`Bulk outreach job ${job.id} reclaim-on-poll failed:`, err);
+  }
   maybeResumeBulkJob(job).catch(err => console.error(`Bulk outreach job ${job.id} resume-on-poll failed:`, err));
   res.json({ success: true, data: job });
 });
@@ -1699,6 +1731,33 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   });
 }
 
+// Mutates job.items in place, marking any 'sending' item stranded past STALE_SENDING_MS (or
+// missing sendingSince entirely — an item stuck by the older code before this field existed)
+// as 'failed', and saves if anything changed. Returns whether it changed anything.
+//
+// Called from two places: (a) inside sendNextBulkOutreachItem's own loop, where the caller
+// already holds the send lock, so `checkLock` is skipped; and (b) from the GET job-status
+// poll endpoint, which runs regardless of job.status — this is what actually unsticks a job
+// that already flipped to 'done' while an item was still stranded at 'sending', since nothing
+// else ever revisits a 'done' job. There, `checkLock` guards against stepping on a send that
+// is genuinely still in flight.
+async function reclaimStaleSendingItems(job: BulkOutreachJob, checkLock: boolean): Promise<boolean> {
+  if (checkLock && job.sendLockUntil && Date.parse(job.sendLockUntil) > Date.now()) return false;
+  const staleCutoff = Date.now() - STALE_SENDING_MS;
+  const stale = job.items.filter(i => i.status === 'sending' && (!i.sendingSince || Date.parse(i.sendingSince) < staleCutoff));
+  if (!stale.length) return false;
+  for (const item of stale) {
+    item.status = 'failed';
+    item.error = item.error || 'Gửi bị treo quá lâu, đã tự động đánh dấu thất bại';
+  }
+  if (job.status === 'sending' && !job.items.some(i => i.status === 'draft' || i.status === 'sending')) {
+    job.status = 'done';
+    job.sendLockUntil = undefined;
+  }
+  await saveBulkOutreachJob(job);
+  return true;
+}
+
 async function sendNextBulkOutreachItem(jobId: string) {
   const job = await getBulkOutreachJobById(jobId);
   if (!job || job.status !== 'sending') return;
@@ -1723,22 +1782,11 @@ async function sendNextBulkOutreachItem(jobId: string) {
     return;
   }
 
-  // Reclaim items stranded in 'sending': the persist step below (freshJob re-fetch + save)
-  // can throw and get its error swallowed by a .catch(console.error) caller, or
-  // deliverOutreachEmail can hang indefinitely on an un-timeout'd Supabase call — either way
-  // the item never reaches a terminal status and no other code path ever looks for 'sending'
-  // items again (every resume path only searches for 'draft'). SMTP itself is capped at 20s
-  // per step (src/lib/mailer.ts), so anything still 'sending' after STALE_SENDING_MS is
-  // certainly stuck, not just slow.
-  const staleCutoff = Date.now() - STALE_SENDING_MS;
-  const staleItems = job.items.filter(i => i.status === 'sending' && i.sendingSince && Date.parse(i.sendingSince) < staleCutoff);
-  if (staleItems.length) {
-    for (const stale of staleItems) {
-      stale.status = 'failed';
-      stale.error = 'Gửi bị treo quá lâu, đã tự động đánh dấu thất bại';
-    }
-    await saveBulkOutreachJob(job);
-  }
+  // Reclaim items stranded in 'sending' from a previous, interrupted run of this loop (the
+  // persist step below can throw and have its error swallowed by a .catch(console.error)
+  // caller, or deliverOutreachEmail can hang past its own timeout). We already hold the send
+  // lock, so skip the lock check.
+  await reclaimStaleSendingItems(job, false);
 
   const item = job.items.find(i => i.status === 'draft');
   if (!item) {

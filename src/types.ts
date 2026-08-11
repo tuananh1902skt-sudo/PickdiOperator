@@ -542,6 +542,7 @@ export interface BulkOutreachItem {
     | 'pending'
     | 'skipped_no_email'
     | 'skipped_do_not_contact'
+    | 'skipped_recent_duplicate'
     | 'draft'
     | 'sending'
     | 'sent'
