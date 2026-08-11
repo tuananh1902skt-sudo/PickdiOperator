@@ -191,7 +191,7 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
       <td style="padding:24px 32px 0;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FBF6E9;border:1px solid #e6d8a8;border-radius:12px;">
           <tr>
-            <td align="center" style="padding:22px 24px 24px;">
+            <td align="left" style="padding:22px 24px 24px;">
               <div style="font-size:11px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:${primaryColor};margin-bottom:14px;">Collaboration Offer</div>
               <p style="margin:0 0 10px;font-size:15px;line-height:1.6;color:#1a1c1c;font-weight:bold;">&#128176; Flat Fee + Affiliate Commission</p>
               ${data.compensationOffer ? `<p style="margin:0 0 10px;font-size:15px;line-height:1.6;color:#4d4635;">&#127909; Starting Offer: ${escapeHtml(data.compensationOffer)}</p>` : ''}
@@ -232,6 +232,7 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                 ${nextStepItem(1, 'Your flat fee rate')}
                 ${nextStepItem(2, 'Your shipping address')}
+                ${nextStepItem(3, 'Your WhatsApp number, for quick coordination')}
               </table>
             </td>
           </tr>
