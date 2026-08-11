@@ -27,6 +27,11 @@ export async function sendEmail(opts: {
       user: config.email,
       pass: config.password,
     },
+    // Without explicit timeouts, a dead/unreachable SMTP server leaves sendMail()
+    // pending forever — this stalls the whole bulk-outreach send loop on one item.
+    connectionTimeout: 20_000,
+    greetingTimeout: 20_000,
+    socketTimeout: 20_000,
   });
 
   // SMTP account profile name (set at the mail provider, e.g. Naver Works admin console)
