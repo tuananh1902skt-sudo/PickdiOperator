@@ -339,15 +339,31 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   const [queueState, setQueueState] = useState<AutoDetailQueueState | null>(null);
   const [queueError, setQueueError] = useState<string | null>(null);
   const queuePollRef = useRef<number | null>(null);
+  const queueTickRef = useRef<(() => void) | null>(null);
   const [searchCidState, setSearchCidState] = useState<SearchCidQueueState | null>(null);
   const [searchCidError, setSearchCidError] = useState<string | null>(null);
   const searchCidPollRef = useRef<number | null>(null);
+  const searchCidTickRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     return () => {
       if (queuePollRef.current) window.clearInterval(queuePollRef.current);
       if (searchCidPollRef.current) window.clearInterval(searchCidPollRef.current);
     };
+  }, []);
+
+  // Browsers clamp setInterval in backgrounded tabs, so the queue-status polls above stall
+  // silently while the user is on another tab/app — the scrape itself keeps running
+  // server-side, but the UI looks frozen until the next throttled tick. Force an immediate
+  // re-check as soon as the tab becomes visible again.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (queuePollRef.current) queueTickRef.current?.();
+      if (searchCidPollRef.current) searchCidTickRef.current?.();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
   const pollQueueStatus = () => {
@@ -371,6 +387,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
         }
       }
     };
+    queueTickRef.current = tick;
     tick();
     queuePollRef.current = window.setInterval(tick, 2000);
   };
@@ -392,6 +409,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
         }
       }
     };
+    searchCidTickRef.current = tick;
     tick();
     searchCidPollRef.current = window.setInterval(tick, 2000);
   };

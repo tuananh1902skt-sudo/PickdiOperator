@@ -107,10 +107,13 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
       .catch(err => console.error('Failed to load email branding:', err));
   }, [isOpen]);
 
-  // Poll job progress while the send loop is running in the background.
+  // Poll job progress while the send loop is running in the background. The send loop
+  // itself runs server-side and keeps going while the tab is hidden — but browsers clamp
+  // setInterval in backgrounded tabs, so without a visibilitychange kick the UI looks frozen
+  // until the next throttled tick fires, well after the user switches back.
   useEffect(() => {
     if (!job || job.status !== 'sending') return;
-    const interval = setInterval(async () => {
+    const poll = async () => {
       try {
         const res = await fetch(`/api/outreach/bulk/${job.id}`);
         const data = await res.json();
@@ -123,8 +126,14 @@ export const BulkOutreachModal: React.FC<BulkOutreachModalProps> = ({
       } catch (err) {
         console.error('Poll bulk job error:', err);
       }
-    }, 4000);
-    return () => clearInterval(interval);
+    };
+    const interval = setInterval(poll, 4000);
+    const onVisible = () => { if (document.visibilityState === 'visible') poll(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.id, job?.status]);
 
