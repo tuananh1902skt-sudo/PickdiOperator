@@ -26,6 +26,18 @@ interface OutreachViewProps {
 const REMINDER_ELIGIBLE_STATUSES: Creator['status'][] = ['Contact lần 1', 'Contact lần 2', 'Contact lần 3', 'Interested', 'Negotiating'];
 const STALE_CONTACT_DAYS = 3;
 
+// Which reminder sequence stage a column's bulk "send reminder" button should
+// default to, so the kanban card actually advances instead of re-writing the
+// same (or an earlier) stage. Interested/Negotiating creators have already
+// passed the contact-stage columns, so they fall back to the last reminder.
+const REMINDER_STAGE_BY_STATUS: Partial<Record<Creator['status'], 'reminder_1' | 'reminder_2' | 'reminder_3'>> = {
+  'Contact lần 1': 'reminder_1',
+  'Contact lần 2': 'reminder_2',
+  'Contact lần 3': 'reminder_3',
+  Interested: 'reminder_3',
+  Negotiating: 'reminder_3',
+};
+
 function daysSinceContact(lastContactAt?: string): number | undefined {
   if (!lastContactAt) return undefined;
   return Math.floor((Date.now() - new Date(lastContactAt).getTime()) / 86400000);
@@ -227,7 +239,7 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
 
                 {staleCreatorIds.length > 0 && onOpenBulkOutreach && (
                   <button
-                    onClick={() => onOpenBulkOutreach(staleCreatorIds, 'reminder_1')}
+                    onClick={() => onOpenBulkOutreach(staleCreatorIds, REMINDER_STAGE_BY_STATUS[stage.status] ?? 'reminder_1')}
                     className="mb-3 -mt-2 w-full text-[10px] font-bold text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg py-1.5 flex items-center justify-center gap-1 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
                   >
                     <Users className="w-3 h-3" />
