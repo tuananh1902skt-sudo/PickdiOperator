@@ -550,6 +550,10 @@ export interface BulkOutreachItem {
   error?: string;
   sentAt?: string;
   outreachId?: string;
+  // Set when status flips to 'sending' (server.ts sendNextBulkOutreachItem) — lets a stuck
+  // item (persist step threw, or deliverOutreachEmail hung on an un-timeout'd DB call) be
+  // detected and reclaimed as 'failed' instead of staying 'sending' forever.
+  sendingSince?: string;
 }
 
 export interface BulkOutreachJob {

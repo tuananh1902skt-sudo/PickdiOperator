@@ -1679,6 +1679,26 @@ app.patch('/api/outreach/bulk/:jobId/items/:creatorId', async (req, res) => {
 // delayed Upstash QStash message that calls POST /api/outreach/bulk/:jobId/send-next
 // again after a random delay. When QStash isn't configured (local dev), this falls back
 // to the old in-process setTimeout + recursive-call chain so local dev keeps working.
+// SMTP steps are capped at 20s each (src/lib/mailer.ts); this leaves generous headroom for
+// the DB round trips in deliverOutreachEmail plus the persist step's retries below.
+const STALE_SENDING_MS = 3 * 60 * 1000;
+
+// deliverOutreachEmail makes several sequential Supabase calls that have no network timeout
+// of their own — a stalled one would otherwise hang the `await` forever without throwing, so
+// the try/catch around it never fires and the item sits at 'sending' until the staleness
+// sweep above catches it minutes later. Racing a hard timeout turns that hang into a normal
+// caught failure right away.
+const DELIVER_OUTREACH_TIMEOUT_MS = 60 * 1000;
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      value => { clearTimeout(timer); resolve(value); },
+      err => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
 async function sendNextBulkOutreachItem(jobId: string) {
   const job = await getBulkOutreachJobById(jobId);
   if (!job || job.status !== 'sending') return;
@@ -1703,6 +1723,23 @@ async function sendNextBulkOutreachItem(jobId: string) {
     return;
   }
 
+  // Reclaim items stranded in 'sending': the persist step below (freshJob re-fetch + save)
+  // can throw and get its error swallowed by a .catch(console.error) caller, or
+  // deliverOutreachEmail can hang indefinitely on an un-timeout'd Supabase call — either way
+  // the item never reaches a terminal status and no other code path ever looks for 'sending'
+  // items again (every resume path only searches for 'draft'). SMTP itself is capped at 20s
+  // per step (src/lib/mailer.ts), so anything still 'sending' after STALE_SENDING_MS is
+  // certainly stuck, not just slow.
+  const staleCutoff = Date.now() - STALE_SENDING_MS;
+  const staleItems = job.items.filter(i => i.status === 'sending' && i.sendingSince && Date.parse(i.sendingSince) < staleCutoff);
+  if (staleItems.length) {
+    for (const stale of staleItems) {
+      stale.status = 'failed';
+      stale.error = 'Gửi bị treo quá lâu, đã tự động đánh dấu thất bại';
+    }
+    await saveBulkOutreachJob(job);
+  }
+
   const item = job.items.find(i => i.status === 'draft');
   if (!item) {
     job.status = 'done';
@@ -1712,11 +1749,12 @@ async function sendNextBulkOutreachItem(jobId: string) {
   }
 
   item.status = 'sending';
+  item.sendingSince = new Date().toISOString();
   await saveBulkOutreachJob(job);
 
   let itemUpdate: Partial<typeof item>;
   try {
-    const result = await deliverOutreachEmail({
+    const result = await withTimeout(deliverOutreachEmail({
       creatorId: item.creatorId,
       creatorName: item.creatorName,
       creatorHandle: item.creatorHandle,
@@ -1727,7 +1765,7 @@ async function sendNextBulkOutreachItem(jobId: string) {
       cc: job.cc,
       workspaceId: job.workspaceId,
       sequenceStage: job.sequenceStage,
-    });
+    }), DELIVER_OUTREACH_TIMEOUT_MS, 'Gửi bị treo quá lâu (timeout)');
     itemUpdate = { status: 'sent', sentAt: result.outreach.sentAt, outreachId: result.outreach.id };
   } catch (err: any) {
     itemUpdate = { status: 'failed', error: err?.message || 'Gửi thất bại' };
@@ -1742,20 +1780,37 @@ async function sendNextBulkOutreachItem(jobId: string) {
   // `job` snapshot read at the top of this call — a blind full-row save here was the root
   // cause of duplicate sends: it would revert a concurrently-processed item back to 'draft',
   // making a later invocation pick it up and send it again.
-  const freshJob = await getBulkOutreachJobById(jobId);
-  if (!freshJob) return;
-  const freshItem = freshJob.items.find(i => i.creatorId === item.creatorId && i.status === 'sending');
-  if (freshItem) {
-    Object.assign(freshItem, itemUpdate);
-  } else {
-    console.error(`Bulk outreach job ${jobId}: item for ${item.creatorId} was no longer 'sending' on re-fetch — skipping merge to avoid clobbering a concurrent update.`);
+  // A transient Supabase blip here used to strand the item at 'sending' forever — nothing
+  // ever revisits an item once it's off 'draft', and the caller only logs-and-swallows a
+  // thrown error. Retry a few times before giving up; the staleness reclaim above is the
+  // backstop if every attempt fails.
+  let persisted = false;
+  for (let attempt = 1; attempt <= 3 && !persisted; attempt++) {
+    try {
+      const freshJob = await getBulkOutreachJobById(jobId);
+      if (!freshJob) return;
+      const freshItem = freshJob.items.find(i => i.creatorId === item.creatorId && i.status === 'sending');
+      if (freshItem) {
+        Object.assign(freshItem, itemUpdate);
+      } else {
+        console.error(`Bulk outreach job ${jobId}: item for ${item.creatorId} was no longer 'sending' on re-fetch — skipping merge to avoid clobbering a concurrent update.`);
+      }
+      // Marks when the next item is due and releases the lock — the resume-on-poll fallback
+      // (maybeResumeBulkJob) uses nextSendAt to tell "still pacing normally" apart from "the
+      // scheduled continuation never fired" once this deadline passes.
+      freshJob.nextSendAt = new Date(Date.now() + pacingSeconds * 1000).toISOString();
+      freshJob.sendLockUntil = undefined;
+      await saveBulkOutreachJob(freshJob);
+      persisted = true;
+    } catch (err) {
+      console.error(`Bulk outreach job ${jobId}: attempt ${attempt} to persist result for ${item.creatorId} failed:`, err);
+      if (attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
+    }
   }
-  // Marks when the next item is due and releases the lock — the resume-on-poll fallback
-  // (maybeResumeBulkJob) uses nextSendAt to tell "still pacing normally" apart from "the
-  // scheduled continuation never fired" once this deadline passes.
-  freshJob.nextSendAt = new Date(Date.now() + pacingSeconds * 1000).toISOString();
-  freshJob.sendLockUntil = undefined;
-  await saveBulkOutreachJob(freshJob);
+  if (!persisted) {
+    console.error(`Bulk outreach job ${jobId}: giving up persisting result for ${item.creatorId} after 3 attempts — will be reclaimed as stale once STALE_SENDING_MS elapses.`);
+    return;
+  }
 
   if (qstashClient) {
     await qstashClient.publishJSON({
