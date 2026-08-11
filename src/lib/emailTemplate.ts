@@ -78,8 +78,8 @@ function logoBlockHtml(brandName: string, logoUrl: string | undefined, textColor
 function ctaButtonHtml(href: string, label: string, gradientFrom: string, gradientTo: string): string {
   return `
     <tr>
-      <td align="center" style="padding:8px 0 28px;">
-        <a href="${escapeHtml(href)}"
+      <td align="center" class="pd-pad-lg" style="padding:8px 24px 28px;">
+        <a href="${escapeHtml(href)}" class="pd-cta-link"
            style="display:inline-block;background:${gradientFrom};background:linear-gradient(90deg, ${gradientFrom}, ${gradientTo});
                   color:#ffffff;text-decoration:none;font-size:12px;font-weight:600;letter-spacing:0.1em;
                   text-transform:uppercase;padding:16px 32px;border-radius:12px;">
@@ -89,11 +89,36 @@ function ctaButtonHtml(href: string, label: string, gradientFrom: string, gradie
     </tr>`;
 }
 
+// Below ~480px (every phone in portrait), the fixed 32px side padding and the side-by-side
+// 130px product-image/text layout eat too much of the available width — text wraps into a
+// narrow, cramped column. This media query is ignored by clients that strip <style> (older
+// Outlook desktop), which just fall back to the desktop layout already used everywhere else
+// — never broken, just not optimized. Every mobile-aware client (Apple/Gmail/Outlook mobile
+// apps, most webmail) does honor it.
+const MOBILE_STYLE = `
+  <style>
+    @media only screen and (max-width: 480px) {
+      .pd-outer { padding: 16px 8px !important; }
+      .pd-pad-lg { padding-left: 20px !important; padding-right: 20px !important; }
+      .pd-hero-title { font-size: 24px !important; }
+      .pd-product-img-cell { display: block !important; width: 100% !important; text-align: center !important; padding: 0 0 16px !important; }
+      .pd-product-img-cell img { width: 100% !important; max-width: 220px !important; margin: 0 auto !important; }
+      .pd-product-text-cell { display: block !important; width: 100% !important; }
+      .pd-cta-link { display: block !important; width: 100% !important; box-sizing: border-box !important; text-align: center !important; }
+    }
+  </style>`;
+
 function shell(headerHtml: string, middleHtml: string, footerHtml: string): string {
   return `<!doctype html>
 <html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light">
+    ${MOBILE_STYLE}
+  </head>
   <body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 12px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="pd-outer" style="background:#f4f5f7;padding:32px 12px;">
       <tr>
         <td align="center">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;">
@@ -123,15 +148,15 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
 
   const header = `
     <tr>
-      <td align="center" style="background:#ffffff;padding:28px 32px;border-bottom:1px solid rgba(26,26,26,0.08);">
+      <td align="center" class="pd-pad-lg" style="background:#ffffff;padding:28px 32px;border-bottom:1px solid rgba(26,26,26,0.08);">
         ${logoBlockHtml(brandName, data.logoUrl, '#1a1c1c')}
       </td>
     </tr>`;
 
   const hero = `
     <tr>
-      <td align="center" style="padding:40px 32px 8px;">
-        <div style="font-family:Georgia,'Times New Roman',serif;font-size:30px;color:${primaryColor};margin-bottom:12px;">
+      <td align="center" class="pd-pad-lg" style="padding:40px 32px 8px;">
+        <div class="pd-hero-title" style="font-family:Georgia,'Times New Roman',serif;font-size:30px;color:${primaryColor};margin-bottom:12px;">
           Hi ${creatorName},
         </div>
         <p style="margin:0;font-size:15px;line-height:1.6;color:#4d4635;">
@@ -162,17 +187,17 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
   const productBlock = data.productName
     ? `
     <tr>
-      <td style="padding:24px 32px 0;">
+      <td class="pd-pad-lg" style="padding:24px 32px 0;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid rgba(26,26,26,0.1);">
           <tr>
             <td style="padding:24px;">
               ${data.productImageUrl ? `
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                 <tr>
-                  <td width="130" valign="middle" style="padding-right:20px;">
+                  <td width="130" valign="middle" class="pd-product-img-cell" style="padding-right:20px;">
                     <img src="${escapeHtml(data.productImageUrl)}" alt="${escapeHtml(data.productName)}" width="130" style="display:block;width:130px;max-width:100%;height:auto;border:0;object-fit:contain;">
                   </td>
-                  <td valign="middle">
+                  <td valign="middle" class="pd-product-text-cell">
                     ${productInfoHtml}
                   </td>
                 </tr>
@@ -188,7 +213,7 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
 
   const offer = `
     <tr>
-      <td style="padding:24px 32px 0;">
+      <td class="pd-pad-lg" style="padding:24px 32px 0;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FBF6E9;border:1px solid #e6d8a8;border-radius:12px;">
           <tr>
             <td align="left" style="padding:22px 24px 24px;">
@@ -203,7 +228,7 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
     </tr>
     ${data.bodyText ? `
     <tr>
-      <td align="center" style="padding:16px 32px 0;color:#4d4635;font-size:15px;line-height:1.6;">
+      <td align="center" class="pd-pad-lg" style="padding:16px 32px 0;color:#4d4635;font-size:15px;line-height:1.6;">
         ${bodyTextToHtml(data.bodyText)}
       </td>
     </tr>` : ''}`;
@@ -223,7 +248,7 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
 
   const nextSteps = `
     <tr>
-      <td style="padding:32px 32px 0;">
+      <td class="pd-pad-lg" style="padding:32px 32px 0;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FBF6E9;border:1px solid #e6d8a8;border-radius:12px;">
           <tr>
             <td style="padding:20px 24px 22px;">
@@ -242,7 +267,7 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
 
   const signOff = `
     <tr>
-      <td style="padding:28px 32px 8px;border-top:1px solid rgba(26,26,26,0.08);margin-top:20px;">
+      <td class="pd-pad-lg" style="padding:28px 32px 8px;border-top:1px solid rgba(26,26,26,0.08);margin-top:20px;">
         <p style="margin:20px 0 0;font-size:14px;line-height:1.6;color:#4d4635;">
           Best regards,<br>
           <strong style="color:#1a1c1c;">${senderName}</strong><br>
@@ -261,7 +286,7 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
 
   const footer = `
     <tr>
-      <td style="padding:20px 32px 28px;color:#7f7663;font-size:11px;line-height:1.5;">
+      <td class="pd-pad-lg" style="padding:20px 32px 28px;color:#7f7663;font-size:11px;line-height:1.5;">
         &copy; ${brandName}
       </td>
     </tr>`;
