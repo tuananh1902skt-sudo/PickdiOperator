@@ -1711,25 +1711,12 @@ app.patch('/api/outreach/bulk/:jobId/items/:creatorId', async (req, res) => {
 // delayed Upstash QStash message that calls POST /api/outreach/bulk/:jobId/send-next
 // again after a random delay. When QStash isn't configured (local dev), this falls back
 // to the old in-process setTimeout + recursive-call chain so local dev keeps working.
-// SMTP steps are capped at 20s each (src/lib/mailer.ts); this leaves generous headroom for
-// the DB round trips in deliverOutreachEmail plus the persist step's retries below.
-const STALE_SENDING_MS = 3 * 60 * 1000;
-
-// deliverOutreachEmail makes several sequential Supabase calls that have no network timeout
-// of their own — a stalled one would otherwise hang the `await` forever without throwing, so
-// the try/catch around it never fires and the item sits at 'sending' until the staleness
-// sweep above catches it minutes later. Racing a hard timeout turns that hang into a normal
-// caught failure right away.
-const DELIVER_OUTREACH_TIMEOUT_MS = 60 * 1000;
-function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), ms);
-    promise.then(
-      value => { clearTimeout(timer); resolve(value); },
-      err => { clearTimeout(timer); reject(err); },
-    );
-  });
-}
+// deliverOutreachEmail (live SMTP send, no connection pooling, plus several sequential
+// Supabase round trips) has been observed genuinely taking 40-90s to succeed — this must
+// stay well above that so a legitimately-slow-but-working send never gets reclaimed as
+// failed while it's still in flight (that would falsely mark a real send as failed, and a
+// manual retry from the operator would then send the same email twice).
+const STALE_SENDING_MS = 8 * 60 * 1000;
 
 // Mutates job.items in place, marking any 'sending' item stranded past STALE_SENDING_MS (or
 // missing sendingSince entirely — an item stuck by the older code before this field existed)
@@ -1802,7 +1789,17 @@ async function sendNextBulkOutreachItem(jobId: string) {
 
   let itemUpdate: Partial<typeof item>;
   try {
-    const result = await withTimeout(deliverOutreachEmail({
+    // No hard timeout here (there used to be one): deliverOutreachEmail — live SMTP send plus
+    // several sequential Supabase round trips, no connection pooling — routinely takes
+    // 40-90s to genuinely succeed. Racing it against a timeout doesn't cancel the underlying
+    // call, so a slow-but-working send would keep running in the background, actually
+    // deliver the email, and get recorded as 'sent' in outreach_emails, while this function
+    // had already given up and written 'failed' to the job item — a false failure that, if
+    // the operator retried it, would send the same email twice. True indefinite hangs are
+    // instead caught by reclaimStaleSendingItems below (and via the GET-poll endpoint),
+    // which only kicks in after STALE_SENDING_MS with no cancellation-vs-duplicate tradeoff
+    // since by then anything genuinely slow-but-working would already have finished.
+    const result = await deliverOutreachEmail({
       creatorId: item.creatorId,
       creatorName: item.creatorName,
       creatorHandle: item.creatorHandle,
@@ -1813,7 +1810,7 @@ async function sendNextBulkOutreachItem(jobId: string) {
       cc: job.cc,
       workspaceId: job.workspaceId,
       sequenceStage: job.sequenceStage,
-    }), DELIVER_OUTREACH_TIMEOUT_MS, 'Gửi bị treo quá lâu (timeout)');
+    });
     itemUpdate = { status: 'sent', sentAt: result.outreach.sentAt, outreachId: result.outreach.id };
   } catch (err: any) {
     itemUpdate = { status: 'failed', error: err?.message || 'Gửi thất bại' };
