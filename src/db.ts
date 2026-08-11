@@ -542,10 +542,13 @@ export async function tryClaimBulkOutreachSendLock(job: BulkOutreachJob): Promis
   const db = getDb();
   const now = Date.now();
   if (job.sendLockUntil && Date.parse(job.sendLockUntil) > now) return null;
-  // 90s, not 30s: deliverOutreachEmail does a live SMTP send plus several sequential DB
-  // round trips and can legitimately run past 30s, which let the lock look "expired" to a
-  // second caller while the first was still working — the trigger for duplicate sends.
-  const newLock = new Date(now + 90_000).toISOString();
+  // 4 minutes: deliverOutreachEmail does a live SMTP send (no connection pooling) plus
+  // several sequential DB round trips, and has been observed in production legitimately
+  // taking up to ~90s — a 90s lock let it look "expired" to a second caller while the first
+  // was still working, which then saw no 'draft' items left and wrongly flipped the job to
+  // 'done' while that item was still in flight (see the 'sending' check in
+  // sendNextBulkOutreachItem). This stays comfortably above the observed range.
+  const newLock = new Date(now + 4 * 60 * 1000).toISOString();
   let query = db.from('bulk_outreach_jobs').update({ sendLockUntil: newLock }).eq('id', job.id).eq('status', 'sending');
   query = job.sendLockUntil ? query.eq('sendLockUntil', job.sendLockUntil) : query.is('sendLockUntil', null);
   const { data, error } = await query.select('id');

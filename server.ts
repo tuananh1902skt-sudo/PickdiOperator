@@ -1777,7 +1777,15 @@ async function sendNextBulkOutreachItem(jobId: string) {
 
   const item = job.items.find(i => i.status === 'draft');
   if (!item) {
-    job.status = 'done';
+    // A 'sending' item here means another invocation is still actively working on it — its
+    // send lock can expire (90s) well before deliverOutreachEmail actually finishes (observed
+    // up to ~90s, sometimes more), letting this invocation see "no draft left" and wrongly
+    // conclude the job is done while that item hasn't reached a terminal status yet. Leave
+    // the job as 'sending' in that case; it'll resolve on its own once that item persists, or
+    // get caught by reclaimStaleSendingItems if it's genuinely stuck.
+    if (!job.items.some(i => i.status === 'sending')) {
+      job.status = 'done';
+    }
     job.sendLockUntil = undefined;
     await saveBulkOutreachJob(job);
     return;
