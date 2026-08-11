@@ -19,6 +19,15 @@ const STAGE_LABELS: Record<SequenceStage, string> = {
 
 const STAGE_ORDER: SequenceStage[] = ['first', 'reminder_1', 'reminder_2', 'reminder_3'];
 
+// Each of these rotates through its own 50-variant pool (see src/lib/*Variants.ts) instead
+// of the single saved/default template below — kept out of REMINDER_POOL_FILES so 'first'
+// (which only bypasses its subject, not the body) stays a separate case in the JSX.
+const REMINDER_POOL_FILES: Partial<Record<SequenceStage, string>> = {
+  reminder_1: 'src/lib/reminder1Variants.ts',
+  reminder_2: 'src/lib/reminder2Variants.ts',
+  reminder_3: 'src/lib/reminder3Variants.ts',
+};
+
 export const OutreachTemplateSettings: React.FC = () => {
   const [templates, setTemplates] = useState<OutreachTemplateSet | null>(null);
   const [saving, setSaving] = useState(false);
@@ -84,10 +93,10 @@ export const OutreachTemplateSettings: React.FC = () => {
                 "Paid Collaboration Opportunity | d'Alba Global" (xem src/lib/outreachSubjects.ts) để tránh gửi
                 cùng 1 subject cho mọi creator.
               </p>
-            ) : stage === 'reminder_1' ? (
+            ) : REMINDER_POOL_FILES[stage] ? (
               <p className="text-[11px] text-slate-400 italic">
-                Subject và nội dung không dùng ô bên dưới nữa — nhắc lần 1 tự chọn random từ bộ 50 mẫu
-                (xem src/lib/reminder1Variants.ts) để tránh gửi cùng 1 nội dung cho mọi creator trong đợt.
+                Subject và nội dung không dùng ô bên dưới nữa — {STAGE_LABELS[stage].toLowerCase()} tự chọn random
+                từ bộ 50 mẫu (xem {REMINDER_POOL_FILES[stage]}) để tránh gửi cùng 1 nội dung cho mọi creator trong đợt.
               </p>
             ) : (
               <input
@@ -97,7 +106,7 @@ export const OutreachTemplateSettings: React.FC = () => {
                 className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
               />
             )}
-            {stage !== 'reminder_1' && (
+            {!REMINDER_POOL_FILES[stage] && (
               <textarea
                 rows={4}
                 value={templates[stage]?.body || ''}

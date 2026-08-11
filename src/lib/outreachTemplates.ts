@@ -1,6 +1,8 @@
 import { getAppConfig, setAppConfig } from '../db';
 import type { Creator, Campaign } from '../types';
 import { pickRandomReminder1Variant } from './reminder1Variants';
+import { pickRandomReminder2Variant } from './reminder2Variants';
+import { pickRandomReminder3Variant } from './reminder3Variants';
 
 export type SequenceStage = 'first' | 'reminder_1' | 'reminder_2' | 'reminder_3';
 
@@ -31,10 +33,11 @@ const DEFAULT_TEMPLATES: OutreachTemplateSet = {
   // pitch line — see introText in emailTemplate.ts), right below "Hi {creatorName},", so they
   // should NOT repeat the greeting themselves. Reminder 1/2 read as "didn't want this to get
   // buried/lost"; reminder 3 (final) leans into scarcity/FOMO instead.
-  // Not actually used by fillOutreachTemplate anymore — reminder_1 rotates through the
-  // 50-variant pool in reminder1Variants.ts instead (see fillOutreachTemplate below). Kept
-  // here only so OutreachTemplateSet stays a complete Record<SequenceStage, ...> and any
-  // code still reading getOutreachTemplates() directly has a sane value for this key.
+  // Not actually used by fillOutreachTemplate anymore — reminder_1/2/3 each rotate through
+  // their own 50-variant pool instead (reminder1Variants.ts / reminder2Variants.ts /
+  // reminder3Variants.ts, see fillOutreachTemplate below). Kept here only so
+  // OutreachTemplateSet stays a complete Record<SequenceStage, ...> and any code still
+  // reading getOutreachTemplates() directly has a sane value for these keys.
   reminder_1: {
     subject: "Following Up: Paid Collaboration Opportunity | {{brandName}}",
     body:
@@ -83,12 +86,14 @@ export async function fillOutreachTemplate(
   creator: Partial<Creator>,
   campaign?: Partial<Campaign>
 ): Promise<OutreachTemplate> {
-  // reminder_1 rotates through a 50-variant pool instead of the single saved/default
-  // template (same reasoning as the first-contact subject pool below) — sending the exact
-  // same reminder body to every creator in a batch reads as obviously templated the moment
-  // two creators compare notes. Bypasses the Settings > Mẫu Email override for this stage.
-  const template = stage === 'reminder_1'
-    ? pickRandomReminder1Variant()
+  // reminder_1/2/3 each rotate through their own 50-variant pool instead of the single
+  // saved/default template (same reasoning as the first-contact subject pool below) —
+  // sending the exact same reminder body to every creator in a batch reads as obviously
+  // templated the moment two creators compare notes. Bypasses the Settings > Mẫu Email
+  // override for these stages.
+  const template = stage === 'reminder_1' ? pickRandomReminder1Variant()
+    : stage === 'reminder_2' ? pickRandomReminder2Variant()
+    : stage === 'reminder_3' ? pickRandomReminder3Variant()
     : (await getOutreachTemplates())[stage] || DEFAULT_TEMPLATES.first;
   const tokens: Record<string, string> = {
     creatorName: creator.displayName || 'Creator',
