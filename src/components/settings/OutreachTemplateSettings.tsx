@@ -84,6 +84,11 @@ export const OutreachTemplateSettings: React.FC = () => {
                 "Paid Collaboration Opportunity | d'Alba Global" (xem src/lib/outreachSubjects.ts) để tránh gửi
                 cùng 1 subject cho mọi creator.
               </p>
+            ) : stage === 'reminder_1' ? (
+              <p className="text-[11px] text-slate-400 italic">
+                Subject và nội dung không dùng ô bên dưới nữa — nhắc lần 1 tự chọn random từ bộ 50 mẫu
+                (xem src/lib/reminder1Variants.ts) để tránh gửi cùng 1 nội dung cho mọi creator trong đợt.
+              </p>
             ) : (
               <input
                 value={templates[stage]?.subject || ''}
@@ -92,12 +97,14 @@ export const OutreachTemplateSettings: React.FC = () => {
                 className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
               />
             )}
-            <textarea
-              rows={4}
-              value={templates[stage]?.body || ''}
-              onChange={e => updateTemplate(stage, { body: e.target.value })}
-              className="w-full p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white leading-relaxed font-mono text-[11px]"
-            />
+            {stage !== 'reminder_1' && (
+              <textarea
+                rows={4}
+                value={templates[stage]?.body || ''}
+                onChange={e => updateTemplate(stage, { body: e.target.value })}
+                className="w-full p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white leading-relaxed font-mono text-[11px]"
+              />
+            )}
           </div>
         ))}
 
