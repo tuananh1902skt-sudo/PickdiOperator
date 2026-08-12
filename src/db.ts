@@ -175,7 +175,7 @@ export function rowToOutreach(row: any): OutreachEmail {
     campaignId: row.campaignId || undefined,
     campaignName: row.campaignName || undefined,
     subject: row.subject,
-    body: row.body,
+    body: row.body ?? '',
     status: row.status,
     sentAt: row.sentAt || undefined,
     repliedAt: row.repliedAt || undefined,
@@ -221,6 +221,8 @@ export function rowToConversation(row: any): Conversation {
     messages: parseJson(row.messages, []),
     unread: Boolean(row.unread),
     isMock: row.isMock != null ? Boolean(row.isMock) : undefined,
+    lastMessagePreview: row.lastMessagePreview || undefined,
+    lastMessageSenderType: row.lastMessageSenderType || undefined,
   };
 }
 
@@ -558,6 +560,10 @@ export async function tryClaimBulkOutreachSendLock(job: BulkOutreachJob): Promis
 
 export async function saveConversation(c: Conversation): Promise<void> {
   const db = getDb();
+  // lastMessagePreview/lastMessageSenderType duy trì 1 bản sao gọn của message cuối — cho phép
+  // getConversationsForList() bỏ hẳn cột `messages` (toàn bộ nội dung thread) khi chỉ cần hiển
+  // thị preview 1 dòng, xem migration supabase/migrations/20260812072225_conversations_last_message_preview.sql.
+  const lastMsg = c.messages && c.messages.length > 0 ? c.messages[c.messages.length - 1] : undefined;
   check(await db.from('conversations').upsert({
     id: c.id,
     workspaceId: c.workspaceId ?? null,
@@ -570,6 +576,8 @@ export async function saveConversation(c: Conversation): Promise<void> {
     status: c.status,
     lastMessageAt: c.lastMessageAt,
     messages: c.messages ?? null,
+    lastMessagePreview: lastMsg?.content ?? null,
+    lastMessageSenderType: lastMsg?.senderType ?? null,
     unread: !!c.unread,
     isMock: !!c.isMock,
     created_at_ts: c.lastMessageAt ? new Date(c.lastMessageAt).getTime() || Date.now() : Date.now(),
@@ -989,6 +997,21 @@ export async function getCreatorsForList(filters?: CreatorListFilters): Promise<
   return filterCreatorsByNicheSearch(rows.map(rowToCreator), q);
 }
 
+// Select tối thiểu cho các UI chỉ cần "chọn 1 creator từ danh sách" chứ không hiển thị bảng CRM
+// đầy đủ — CommandPalette (⌘K search), AiDrawer (dropdown "Target Creator"). Trước đây các UI
+// này dùng chung state `creators` đã load CREATOR_LIST_COLUMNS (~40 cột) cho toàn bộ bảng, dù
+// chỉ render avatar/tên/handle/category/score. rowToCreator() tự default các cột thiếu (bio,
+// notes, tags,...) nên object trả về vẫn khớp type Creator — an toàn dùng làm placeholder khi
+// mở CreatorDetailDrawer (xem openCreatorDetail ở App.tsx, đã fetch lại đầy đủ ngay sau đó).
+// KHÔNG dùng list này để gửi thẳng cho AI research/email/reply — AiDrawer phải tự fetch full
+// creator qua /api/creators/:id trước khi gọi các route đó, vì AI cần bio/score/metrics thật.
+const CREATOR_MINI_COLUMNS = ['id', 'handle', '"displayName"', 'avatar', 'status', 'category', '"brandFitScore"'].join(', ');
+
+export async function getCreatorsMini(filters?: CreatorListFilters): Promise<Creator[]> {
+  const { rows, q } = await queryAllCreatorRows(CREATOR_MINI_COLUMNS, filters);
+  return filterCreatorsByNicheSearch(rows.map(rowToCreator), q);
+}
+
 // Chỉ lấy status của mọi creator (1 cột thay vì toàn bộ ~40 cột + JSONB blobs) — dùng cho
 // /api/dashboard vốn chỉ cần đếm theo status, không cần dữ liệu đầy đủ của từng creator.
 export async function getCreatorStatusCounts(): Promise<Record<string, number>> {
@@ -1130,6 +1153,27 @@ export async function getAllOutreach(): Promise<OutreachEmail[]> {
   return (data ?? []).map(rowToOutreach);
 }
 
+// Select trơn hơn cho bảng OutreachView (/api/outreach) — bỏ 'body' (nội dung HTML đầy đủ),
+// vốn chỉ dùng khi soạn email mới qua EmailComposerModal (tự lấy từ 1 lần gọi AI generation
+// riêng, không đọc từ outreachList). getAllOutreach() vẫn giữ nguyên đầy đủ vì server còn dùng
+// nội bộ (originalOutreach context cho AI agent ở bulk-generate/regenerate/outreach-agent).
+const OUTREACH_LIST_COLUMNS = [
+  'id', '"workspaceId"', '"creatorId"', '"creatorName"', '"creatorHandle"', '"campaignId"',
+  '"campaignName"', 'subject', 'status', '"sentAt"', '"repliedAt"', '"followUpCount"',
+  '"sequenceStage"', '"messageId"', '"isMock"',
+].join(', ');
+
+export async function getOutreachForList(): Promise<OutreachEmail[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('outreach_emails')
+    .select(OUTREACH_LIST_COLUMNS)
+    .order('created_at_ts', { ascending: false })
+    .order('rowid', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(rowToOutreach);
+}
+
 // Last-line-of-defense duplicate check for deliverOutreachEmail: a targeted, indexed lookup
 // (not a full-table getAllOutreach scan) for the most recent send to this
 // creator+campaign+sequenceStage, used to catch a same-item resend that slipped past the
@@ -1165,6 +1209,58 @@ export async function getAllConversations(): Promise<Conversation[]> {
   return (data ?? []).map(rowToConversation);
 }
 
+// Select trơn cho các UI chỉ cần danh sách hội thoại (Inbox list rows, Dashboard "recent
+// replies", badge đếm unread) — bỏ hẳn cột `messages` (jsonb chứa toàn bộ nội dung từng email
+// trong thread, cột nặng nhất bảng này). lastMessagePreview/lastMessageSenderType (duy trì bởi
+// saveConversation()) đủ để hiển thị preview 1 dòng. Khi cần xem trọn thread (mở Inbox tab / mở
+// 1 conversation cụ thể) hoặc tính báo cáo theo message (ReportsView) thì gọi getAllConversations()
+// full riêng — xem /api/conversations/full, App.tsx fetchFullConversations().
+const CONVERSATION_LIST_COLUMNS = [
+  'id', '"workspaceId"', '"creatorId"', '"creatorName"', '"creatorHandle"', '"creatorAvatar"',
+  '"campaignId"', '"campaignName"', 'status', '"lastMessageAt"', 'unread', '"isMock"',
+  '"lastMessagePreview"', '"lastMessageSenderType"',
+].join(', ');
+
+export async function getConversationsForList(): Promise<Conversation[]> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('conversations')
+    .select(CONVERSATION_LIST_COLUMNS)
+    .order('created_at_ts', { ascending: false })
+    .order('rowid', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((row: any) => rowToConversation({ ...row, messages: [] }));
+}
+
+// Bộ đếm số reply nhận được "hôm nay" (todayRepliesReceived KPI) — duy trì bằng cách tăng dần
+// tại đúng nơi 1 message CREATOR mới được lưu (xem incrementTodayReplyCounter() ở imapSync.ts +
+// server.ts /api/inbox/unmatched/:id/assign), thay vì quét lại `messages` của toàn bộ
+// conversations mỗi lần Dashboard load. Lưu trong app_config (bảng key-value có sẵn) — không
+// cần thêm bảng/cột mới. Tự "reset" khi ngày lưu khác ngày hôm nay, không cần cron dọn dẹp.
+// 1 bucket toàn cục (không tách theo workspace) — conversation hiện tại (IMAP sync, unmatched-
+// assign) không gán workspaceId, và theo inActiveWorkspace() ở App.tsx thì conversation không có
+// workspaceId vốn đã tính vào MỌI workspace, nên 1 số đếm chung là đúng ngữ nghĩa hiện tại.
+interface TodayReplyCounter {
+  date: string; // 'YYYY-MM-DD'
+  count: number;
+}
+
+const TODAY_REPLY_COUNTER_KEY = 'todayReplyCounter';
+
+export async function getTodayReplyCount(): Promise<number> {
+  const counter = await getAppConfig<TodayReplyCounter | null>(TODAY_REPLY_COUNTER_KEY, null);
+  const todayStr = new Date().toISOString().split('T')[0];
+  return counter && counter.date === todayStr ? counter.count : 0;
+}
+
+export async function incrementTodayReplyCounter(messageCreatedAt: string): Promise<void> {
+  const todayStr = new Date().toISOString().split('T')[0];
+  if (!messageCreatedAt.startsWith(todayStr)) return; // backfill/historic import — không tính vào "hôm nay"
+  const counter = await getAppConfig<TodayReplyCounter | null>(TODAY_REPLY_COUNTER_KEY, null);
+  const nextCount = counter && counter.date === todayStr ? counter.count + 1 : 1;
+  await setAppConfig(TODAY_REPLY_COUNTER_KEY, { date: todayStr, count: nextCount });
+}
+
 export async function getConversationById(id: string): Promise<Conversation | null> {
   const db = getDb();
   const { data, error } = await db.from('conversations').select('*').eq('id', id).maybeSingle();
@@ -1172,11 +1268,21 @@ export async function getConversationById(id: string): Promise<Conversation | nu
   return data ? rowToConversation(data) : null;
 }
 
+// feedbackNote/aiAnalysis: không đọc/ghi ở đâu trong app (cột chết) — vẫn lấy được qua
+// getReviewById nếu sau này hoá ra cần. checklist/feedback: chỉ ReviewDetailModal đọc khi mở
+// 1 review, không dùng ở lưới danh sách ReviewsView. videoThumbnail: không tham chiếu ở đâu,
+// thumbnailUrl mới là field thực sự hiển thị.
+const REVIEW_LIST_COLUMNS = [
+  'id', '"workspaceId"', '"creatorId"', '"creatorName"', '"creatorHandle"', '"creatorAvatar"',
+  '"campaignId"', '"campaignName"', '"videoTitle"', '"draftUrl"', '"thumbnailUrl"',
+  '"durationSeconds"', 'status', '"dueAt"', '"submittedAt"', '"isMock"',
+].join(', ');
+
 export async function getAllReviews(): Promise<ContentReview[]> {
   const db = getDb();
   const { data, error } = await db
     .from('content_reviews')
-    .select('*')
+    .select(REVIEW_LIST_COLUMNS)
     .order('created_at_ts', { ascending: false })
     .order('rowid', { ascending: false });
   if (error) throw error;

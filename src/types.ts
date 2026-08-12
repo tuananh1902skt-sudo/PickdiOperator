@@ -406,6 +406,13 @@ export interface Conversation {
   messages: Message[];
   unread: boolean;
   isMock?: boolean;
+  // Bản sao rút gọn của message cuối cùng — duy trì bởi saveConversation() mỗi lần lưu, dùng để
+  // hiển thị preview 1 dòng (Inbox list row, Dashboard recent replies) mà KHÔNG cần load cả mảng
+  // `messages` (toàn bộ nội dung email trong thread) — xem getConversationsForList() ở db.ts.
+  // Khi `messages` được load đầy đủ (fetchFullConversations), 2 field này không còn ý nghĩa —
+  // luôn ưu tiên messages[messages.length-1] nếu messages.length > 0.
+  lastMessagePreview?: string;
+  lastMessageSenderType?: Message['senderType'];
 }
 
 export interface ContentReview {

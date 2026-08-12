@@ -391,7 +391,7 @@ export const InboxView: React.FC<InboxViewProps> = ({
                         </span>
                       </div>
                       <p className={`truncate ${c.unread ? 'text-slate-900 dark:text-white font-semibold' : 'text-slate-600 dark:text-slate-300 font-medium'}`}>
-                        {c.messages[c.messages.length - 1]?.content || <span className="italic text-slate-400">No messages yet</span>}
+                        {c.messages[c.messages.length - 1]?.content || c.lastMessagePreview || <span className="italic text-slate-400">No messages yet</span>}
                       </p>
                       <div className="flex items-center flex-wrap gap-1 mt-1.5">
                         {c.campaignName && (

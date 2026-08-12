@@ -7,6 +7,7 @@ import {
   getAllOutreach,
   getAllConversations,
   saveConversation,
+  incrementTodayReplyCounter,
   getCreatorById,
   saveUnmatchedInboundEmail,
 } from '../db';
@@ -258,6 +259,7 @@ export async function checkInboxForReplies(): Promise<CheckInboxResult> {
       conversation.lastMessageAt = newMessage.createdAt;
 
       await saveConversation(conversation);
+      await incrementTodayReplyCounter(newMessage.createdAt);
       imported++;
     }
 

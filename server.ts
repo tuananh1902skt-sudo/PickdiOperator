@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import path from 'path';
 import dotenv from 'dotenv';
 import { ZipArchive } from 'archiver';
@@ -66,6 +67,7 @@ import {
   setKpis,
   getAllCreators,
   getCreatorsForList,
+  getCreatorsMini,
   getCreatorStatusCounts,
   getAllCreatorHandles,
   getCreatorsCount,
@@ -83,11 +85,15 @@ import {
   saveCampaign,
   archiveCampaign,
   getAllOutreach,
+  getOutreachForList,
   saveOutreach,
   getLatestOutreachForItem,
   getAllConversations,
+  getConversationsForList,
   getConversationById,
   saveConversation,
+  getTodayReplyCount,
+  incrementTodayReplyCounter,
   getAllReviews,
   getReviewById,
   saveReview,
@@ -187,6 +193,11 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// JSON responses (all these full-table fetches) compress very well — cuts the Express→browser
+// leg of egress substantially with zero change to route logic. Doesn't touch Supabase egress
+// (that's the separate Supabase→server leg), only the Vercel/Express→browser leg.
+app.use(compression());
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -327,6 +338,14 @@ app.get('/api/health', async (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString(), dbConnected: await isDbConnected() });
 });
 
+// todayRepliesReceived KPI — trước đây App.tsx tự tính bằng cách reduce qua `messages` của toàn
+// bộ conversations (buộc phải load full nội dung email mỗi lần app mount). Giờ đọc thẳng bộ đếm
+// duy trì ở incrementTodayReplyCounter() (xem db.ts), tách khỏi /api/conversations/dashboard vì
+// nó được gọi riêng lúc app mount và sau các action có thể tạo reply mới (check inbox, bulk outreach).
+app.get('/api/kpis/today-replies', async (req, res) => {
+  res.json({ success: true, data: { todayRepliesReceived: await getTodayReplyCount() } });
+});
+
 // Dashboard & KPIs
 app.get('/api/dashboard', async (req, res) => {
   // Safety net beyond the bulk-job modal's own polling: if the operator closed that modal
@@ -386,6 +405,15 @@ app.get('/api/creators', async (req, res) => {
     category: category ? String(category) : undefined,
   });
   res.json({ success: true, data: filtered, meta: { total: filtered.length } });
+});
+
+// Danh sách siêu nhẹ (id/handle/displayName/avatar/status/category/brandFitScore) cho các UI
+// chỉ cần chọn 1 creator (CommandPalette, AiDrawer) — không cần load ~40 cột CREATOR_LIST_COLUMNS
+// của /api/creators chỉ để hiển thị dropdown/typeahead. Đặt TRƯỚC /api/creators/:id vì Express
+// khớp route theo thứ tự khai báo, để lại sau thì "/api/creators/lite" sẽ bị :id nuốt mất.
+app.get('/api/creators/lite', async (req, res) => {
+  const list = await getCreatorsMini();
+  res.json({ success: true, data: list });
 });
 
 app.get('/api/creators/:id', async (req, res) => {
@@ -1252,6 +1280,7 @@ app.post('/api/inbox/unmatched/:id/assign', async (req, res) => {
   conv.status = 'Need Reply';
   conv.lastMessageAt = newMessage.createdAt;
   await saveConversation(conv);
+  await incrementTodayReplyCounter(newMessage.createdAt);
 
   record.resolved = true;
   await saveUnmatchedInboundEmail(record);
@@ -1262,7 +1291,7 @@ app.post('/api/inbox/unmatched/:id/assign', async (req, res) => {
 
 // Outreach & Email API
 app.get('/api/outreach', async (req, res) => {
-  res.json({ success: true, data: await getAllOutreach() });
+  res.json({ success: true, data: await getOutreachForList() });
 });
 
 // Shared by the single-creator composer (/api/outreach/send) and the bulk-outreach send
@@ -1999,8 +2028,26 @@ app.put('/api/settings/outreach-templates', async (req, res) => {
 });
 
 // Conversations API
+// Bản rút gọn (không có `messages`) — dùng cho fetch mặc định lúc app mount (App.tsx), phục vụ
+// Inbox list rows + badge đếm unread + Dashboard "recent replies". Trước đây route này trả full
+// `messages` (toàn bộ nội dung từng email) cho MỌI lần load app, bất kể operator có mở Inbox hay
+// không — nguồn egress Supabase lớn thứ 2 sau creators. Xem getConversationsForList() ở db.ts.
 app.get('/api/conversations', async (req, res) => {
+  res.json({ success: true, data: await getConversationsForList() });
+});
+
+// Full list kèm `messages` — chỉ gọi khi operator thực sự mở Inbox tab hoặc Reports tab (2 nơi
+// duy nhất cần đọc nội dung message), xem fetchFullConversations() ở App.tsx.
+app.get('/api/conversations/full', async (req, res) => {
   res.json({ success: true, data: await getAllConversations() });
+});
+
+app.get('/api/conversations/:id', async (req, res) => {
+  const conv = await getConversationById(req.params.id);
+  if (!conv) {
+    return res.status(404).json({ success: false, message: 'Conversation not found' });
+  }
+  res.json({ success: true, data: conv });
 });
 
 app.post('/api/conversations/:id/reply', async (req, res) => {
@@ -2072,6 +2119,16 @@ app.post('/api/conversations/:id/reply', async (req, res) => {
 // Content Reviews API
 app.get('/api/reviews', async (req, res) => {
   res.json({ success: true, data: await getAllReviews() });
+});
+
+// Full row (checklist/feedback/feedbackNote/aiAnalysis/videoThumbnail) — the list route above
+// returns a trimmed shape; ReviewDetailModal fetches this on open (see fetchFullReviewDetail).
+app.get('/api/reviews/:id', async (req, res) => {
+  const review = await getReviewById(req.params.id);
+  if (!review) {
+    return res.status(404).json({ success: false, message: 'Review not found' });
+  }
+  res.json({ success: true, data: review });
 });
 
 app.patch('/api/reviews/:id', async (req, res) => {

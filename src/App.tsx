@@ -148,9 +148,22 @@ export function App() {
 
   // Core Data Collections
   const [creators, setCreators] = useState<Creator[]>(INITIAL_CREATORS);
+  // Danh sách siêu nhẹ (id/handle/displayName/avatar/status/category/brandFitScore, xem
+  // /api/creators/lite) — dùng cho CommandPalette + AiDrawer, vốn chỉ cần chọn 1 creator từ
+  // danh sách chứ không hiển thị bảng CRM đầy đủ như CreatorListView. Tránh 2 UI đó phải ăn
+  // theo state `creators` (~40 cột, toàn bộ bảng) chỉ để render vài trăm byte mỗi dòng.
+  const [creatorsLite, setCreatorsLite] = useState<Creator[]>(INITIAL_CREATORS);
   const [campaigns, setCampaigns] = useState<Campaign[]>(INITIAL_CAMPAIGNS);
   const [outreachList, setOutreachList] = useState<OutreachEmail[]>(INITIAL_OUTREACH);
+  // Fetch mặc định (/api/conversations) giờ trả bản rút gọn KHÔNG có `messages` (xem
+  // getConversationsForList ở db.ts) — chỉ nạp full messages khi thực sự cần (mở tab Inbox/
+  // Reports, xem effect theo dõi activeTab bên dưới) thay vì tải toàn bộ nội dung email của
+  // MỌI conversation ngay lúc app mount.
   const [conversations, setConversations] = useState<Conversation[]>(INITIAL_CONVERSATIONS);
+  // todayRepliesReceived giờ đọc từ bộ đếm server-side (incrementTodayReplyCounter ở db.ts)
+  // thay vì reduce qua conversations[].messages — không còn cần load full messages chỉ để ra 1
+  // con số KPI.
+  const [todayRepliesReceived, setTodayRepliesReceived] = useState(0);
   const [reviews, setReviews] = useState<DraftReview[]>(INITIAL_REVIEWS);
   const [postedVideos, setPostedVideos] = useState<PostedVideo[]>([]);
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
@@ -202,6 +215,9 @@ export function App() {
   const workspaceCreators = creators
     .filter(c => creatorBelongsToActiveWorkspace(c.id))
     .map(resolveWorkspaceStatus);
+  const workspaceCreatorsLite = creatorsLite
+    .filter(c => creatorBelongsToActiveWorkspace(c.id))
+    .map(resolveWorkspaceStatus);
   const workspaceCampaigns = campaigns.filter(cmp => inActiveWorkspace(cmp.workspaceId));
   const workspaceOutreach = outreachList.filter(o => inActiveWorkspace(o.workspaceId));
   const workspaceConversations = conversations.filter(c => inActiveWorkspace(c.workspaceId));
@@ -250,6 +266,21 @@ export function App() {
     }
   };
 
+  // /api/reviews (state `reviews`) chỉ trả cột nhẹ cho lưới danh sách — checklist/feedback/
+  // feedbackNote/aiAnalysis/videoThumbnail CHỈ có khi fetch riêng /api/reviews/:id (getReviewById,
+  // full row). Gọi hàm này mỗi khi mở ReviewDetailModal để nạp đủ dữ liệu cho các field đó.
+  const fetchFullReviewDetail = async (id: string) => {
+    try {
+      const res = await fetch(`/api/reviews/${id}`);
+      const data = await res.json();
+      if (data.success && data.data) {
+        setSelectedReviewDetail(prev => (prev?.id === id ? data.data : prev));
+      }
+    } catch (err) {
+      console.error('Failed to fetch full review detail:', err);
+    }
+  };
+
   // Resolve id lấy từ URL (mount hoặc back/forward) thành object thật ngay khi data
   // collection tương ứng có sẵn — chạy lại mỗi khi creators/reviews/campaigns đổi vì lúc
   // mount data initial (mock) có thể chưa chứa id thật, phải chờ fetch xong mới tìm ra.
@@ -269,6 +300,7 @@ export function App() {
     if (found) {
       setSelectedReviewDetail(found);
       setPendingReviewId(null);
+      fetchFullReviewDetail(found.id);
     }
   }, [pendingReviewId, reviews]);
 
@@ -301,6 +333,9 @@ export function App() {
     setActiveTabState('reviews');
     setSelectedReviewDetail(r);
     navigateTo(`/reviews/${r.id}`);
+    // r thường tới từ list state đã trim cột nặng (xem fetchFullReviewDetail) — nạp lại đầy đủ
+    // dữ liệu ngay khi mở, modal hiện tạm với dữ liệu nhẹ trong lúc chờ.
+    fetchFullReviewDetail(r.id);
   };
   const closeReviewDetail = () => {
     setSelectedReviewDetail(null);
@@ -341,6 +376,40 @@ export function App() {
       }
     } catch (err) {
       console.error('[CRM Scraper Sync] Error fetching /api/creators:', err);
+    }
+
+    try {
+      const liteRes = await fetch('/api/creators/lite');
+      if (liteRes.ok && liteRes.headers.get('content-type')?.includes('application/json')) {
+        const liteData = await liteRes.json();
+        if (liteData && Array.isArray(liteData.data)) setCreatorsLite(liteData.data);
+      }
+    } catch (err) {
+      console.error('[CommandPalette/AiDrawer] Error refreshing /api/creators/lite:', err);
+    }
+  };
+
+  const fetchTodayRepliesReceived = async () => {
+    try {
+      const res = await fetch('/api/kpis/today-replies');
+      if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) return;
+      const data = await res.json();
+      if (data.success && data.data) setTodayRepliesReceived(data.data.todayRepliesReceived);
+    } catch (err) {
+      console.error('Error fetching today-replies KPI:', err);
+    }
+  };
+
+  // Chỉ gọi khi operator thực sự mở Inbox (đọc/trả lời thread) hoặc Reports (biểu đồ replies
+  // theo ngày) — 2 nơi duy nhất cần nội dung `messages` đầy đủ, xem /api/conversations/full.
+  const fetchFullConversations = async () => {
+    try {
+      const res = await fetch('/api/conversations/full');
+      if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) return;
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) setConversations(data.data);
+    } catch (err) {
+      console.error('Error fetching full conversations:', err);
     }
   };
 
@@ -410,6 +479,8 @@ export function App() {
       .then(data => { if (data && Array.isArray(data.data)) setConversations(data.data); })
       .catch(err => console.error(err));
 
+    fetchTodayRepliesReceived();
+
     fetch('/api/outreach')
       .then(res => res.ok && res.headers.get('content-type')?.includes('application/json') ? res.json() : null)
       .then(data => { if (data && Array.isArray(data.data)) setOutreachList(data.data); })
@@ -430,6 +501,15 @@ export function App() {
       return fresh || prev;
     });
   }, [creators]);
+
+  // conversations mặc định là bản rút gọn (không có messages) — nạp lại bản đầy đủ đúng lúc
+  // operator mở Inbox (đọc/trả lời thread) hoặc Reports (biểu đồ replies theo ngày cần message-
+  // level data), thay vì tải full messages ngay từ lúc app mount dù chưa chắc dùng đến.
+  useEffect(() => {
+    if (activeTab === 'inbox' || activeTab === 'reports') {
+      fetchFullConversations();
+    }
+  }, [activeTab]);
 
   // Dark mode class toggle
   useEffect(() => {
@@ -463,10 +543,7 @@ export function App() {
   const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
   const kpis: DashboardKPIs = {
     todayEmailsSent: workspaceOutreach.filter(o => o.sentAt && o.sentAt.startsWith(todayStr)).length,
-    todayRepliesReceived: workspaceConversations.reduce(
-      (count, c) => count + c.messages.filter(m => m.senderType === 'CREATOR' && m.createdAt.startsWith(todayStr)).length,
-      0
-    ),
+    todayRepliesReceived,
     pendingReviewsCount: workspaceReviews.filter(r => r.status === 'Pending Review').length,
     overdueTasksCount: workspaceTasks.filter(t => t.status !== 'Completed' && t.dueDate < todayStr).length,
     activeCampaignsCount: workspaceCampaigns.filter(c => c.status === 'Running').length,
@@ -581,6 +658,7 @@ export function App() {
       const data = await res.json();
       if (data.success && data.data) {
         setCreators(prev => [data.data, ...prev]);
+        setCreatorsLite(prev => [data.data, ...prev]);
         return true;
       }
       throw new Error(data.message || 'Failed to save creator');
@@ -691,18 +769,14 @@ export function App() {
       const res = await fetch('/api/inbox/check', { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.success) {
-        const [resConv, resOut] = await Promise.all([
-          fetch('/api/conversations'),
-          fetch('/api/outreach')
-        ]);
-        if (resConv.ok) {
-          const convData = await resConv.json();
-          if (convData.success) setConversations(convData.data);
-        }
+        // Gọi từ InboxView (operator đang xem thread) — nạp full messages luôn thay vì bản rút
+        // gọn, đỡ phải đợi thêm 1 round-trip nữa khi thread vừa có tin nhắn mới.
+        const [resOut] = await Promise.all([fetch('/api/outreach'), fetchFullConversations()]);
         if (resOut.ok) {
           const outData = await resOut.json();
           if (outData.success) setOutreachList(outData.data);
         }
+        fetchTodayRepliesReceived();
       }
       return data;
     } catch (err: any) {
@@ -1298,7 +1372,7 @@ export function App() {
       <AiDrawer
         isOpen={isAiDrawerOpen}
         onClose={() => setIsAiDrawerOpen(false)}
-        creators={workspaceCreators}
+        creators={workspaceCreatorsLite}
         campaigns={workspaceCampaigns}
         conversations={workspaceConversations}
         reviews={workspaceReviews}
@@ -1319,7 +1393,7 @@ export function App() {
       <CommandPalette
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
-        creators={workspaceCreators}
+        creators={workspaceCreatorsLite}
         campaigns={workspaceCampaigns}
         tasks={workspaceTasks}
         onSelectCreator={openCreatorDetail}

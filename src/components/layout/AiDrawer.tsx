@@ -100,6 +100,21 @@ Tôi có thể hỗ trợ bạn vận hành chương trình Affiliate TikTok Sho
   const currentCreator = creators.find(c => c.id === selectedCreatorId) || creators[0];
   const currentCampaign = campaigns.find(c => c.id === selectedCampaignId) || campaigns[0];
 
+  // `creators` ở đây là danh sách siêu nhẹ (id/handle/displayName/avatar/status/category/
+  // brandFitScore — xem /api/creators/lite, App.tsx `creatorsLite`), chỉ đủ để render dropdown
+  // "Target Creator". Trước khi gửi cho research/email/reply/review — vốn cần bio/engagementRate/
+  // score/metrics thật để AI phân tích đúng — phải fetch lại đầy đủ record qua /api/creators/:id.
+  const fetchFullCreator = async (id: string): Promise<Creator | undefined> => {
+    try {
+      const res = await fetch(`/api/creators/${id}`);
+      const data = await res.json();
+      return data.success && data.data ? data.data : undefined;
+    } catch (err) {
+      console.error('Failed to fetch full creator for AI request:', err);
+      return undefined;
+    }
+  };
+
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
@@ -190,25 +205,33 @@ Tôi có thể hỗ trợ bạn vận hành chương trình Affiliate TikTok Sho
 
     try {
       let res: Response;
+      // research/email/reply gửi thẳng object creator cho AI phân tích/soạn nội dung — cần bio/
+      // engagementRate/score/metrics thật, không phải bản lite dùng để render dropdown phía trên.
+      const fullCreator = currentCreator && (activeMode === 'research' || activeMode === 'email' || activeMode === 'reply')
+        ? await fetchFullCreator(currentCreator.id)
+        : undefined;
+      if (isStale()) return;
+      const creatorForAi = fullCreator || currentCreator;
+
       if (activeMode === 'research') {
-        if (!currentCreator) {
+        if (!creatorForAi) {
           setAiResult({ error: 'Chưa chọn Creator để phân tích.' });
           return;
         }
         res = await fetch('/api/ai/research', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ creator: currentCreator, campaignId: currentCampaign?.id })
+          body: JSON.stringify({ creator: creatorForAi, campaignId: currentCampaign?.id })
         });
       } else if (activeMode === 'email') {
-        if (!currentCreator) {
+        if (!creatorForAi) {
           setAiResult({ error: 'Chưa chọn Creator để viết mail.' });
           return;
         }
         res = await fetch('/api/ai/email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ creator: currentCreator, campaign: currentCampaign })
+          body: JSON.stringify({ creator: creatorForAi, campaign: currentCampaign })
         });
       } else if (activeMode === 'reply') {
         // Tìm cuộc hội thoại thực tế của Creator trong CRM
@@ -220,7 +243,7 @@ Tôi có thể hỗ trợ bạn vận hành chương trình Affiliate TikTok Sho
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            creator: currentCreator,
+            creator: creatorForAi,
             campaign: currentCampaign,
             conversation: realConv || { messages: [] }
           })

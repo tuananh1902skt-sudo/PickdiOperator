@@ -436,7 +436,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       </span>
                     </div>
                     <p className="text-slate-600 dark:text-slate-300 line-clamp-1 italic">
-                      "{r.messages[r.messages.length - 1]?.content}"
+                      "{r.messages[r.messages.length - 1]?.content || r.lastMessagePreview}"
                     </p>
                   </div>
                 </div>
