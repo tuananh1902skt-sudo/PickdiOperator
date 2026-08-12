@@ -1,0 +1,1 @@
+INSERT INTO "public"."settings" ("key", "value") VALUES ('kpis', '{"todayEmailsSent":554,"todayRepliesReceived":0,"pendingReviewsCount":0,"overdueTasksCount":0,"activeCampaignsCount":0,"creatorsAddedThisWeek":0,"conversionRate":0}');

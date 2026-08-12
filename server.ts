@@ -91,6 +91,7 @@ import {
   getAllConversations,
   getConversationsForList,
   getConversationById,
+  getConversationByCreatorId,
   saveConversation,
   getTodayReplyCount,
   incrementTodayReplyCounter,
@@ -362,7 +363,7 @@ app.get('/api/dashboard', async (req, res) => {
     getAllTasks(),
     getAllNotifications(),
     getAllActivities(),
-    getAllConversations(),
+    getConversationsForList(),
     getCreatorStatusCounts(),
   ]);
   const tasks = allTasks.filter(t => t.status !== 'Completed').slice(0, 5);
@@ -1249,8 +1250,7 @@ app.post('/api/inbox/unmatched/:id/assign', async (req, res) => {
     return res.status(404).json({ success: false, message: 'Creator không tồn tại' });
   }
 
-  const currentConvs = await getAllConversations();
-  let conv = currentConvs.find((c) => c.creatorId === creator.id);
+  let conv = await getConversationByCreatorId(creator.id);
   if (!conv) {
     conv = {
       id: `conv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -1333,8 +1333,7 @@ async function deliverOutreachEmail(payload: {
   // on file — harmless to include even when a mail client ends up starting a new thread
   // anyway, which is why reminder subjects/copy below no longer depend on it working: they
   // say "just following up" / "last chance" in plain language instead.
-  const currentConvs = await getAllConversations();
-  let conv = currentConvs.find((c) => c.creatorId === creatorId && (!workspaceId || c.workspaceId === workspaceId));
+  let conv = await getConversationByCreatorId(creatorId, workspaceId);
 
   const sendSubject = ensurePaidSubject(subject);
   let inReplyTo: string | undefined;
@@ -2468,7 +2467,7 @@ app.post('/api/ai/daily-summary', async (req, res) => {
 app.post('/api/ai/priority-suggestion', async (req, res) => {
   const { workspaceId } = req.body || {};
   const campaigns = scopedToWorkspace(await getAllCampaigns(), workspaceId).filter(c => c.status !== 'Completed' && c.status !== 'Archived');
-  const conversations = scopedToWorkspace(await getAllConversations(), workspaceId).filter(c => c.status !== 'Completed');
+  const conversations = scopedToWorkspace(await getConversationsForList(), workspaceId).filter(c => c.status !== 'Completed');
   const reviews = scopedToWorkspace(await getAllReviews(), workspaceId).filter(r => r.status === 'Pending Review');
   const tasks = scopedToWorkspace(await getAllTasks(), workspaceId).filter(t => t.status !== 'Completed');
 

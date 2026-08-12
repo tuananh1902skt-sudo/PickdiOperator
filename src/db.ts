@@ -1268,6 +1268,17 @@ export async function getConversationById(id: string): Promise<Conversation | nu
   return data ? rowToConversation(data) : null;
 }
 
+export async function getConversationByCreatorId(creatorId: string, workspaceId?: string): Promise<Conversation | null> {
+  const db = getDb();
+  let query = db.from('conversations').select('*').eq('creatorId', creatorId);
+  if (workspaceId) {
+    query = query.eq('workspaceId', workspaceId);
+  }
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  return data ? rowToConversation(data) : null;
+}
+
 // feedbackNote/aiAnalysis: không đọc/ghi ở đâu trong app (cột chết) — vẫn lấy được qua
 // getReviewById nếu sau này hoá ra cần. checklist/feedback: chỉ ReviewDetailModal đọc khi mở
 // 1 review, không dùng ở lưới danh sách ReviewsView. videoThumbnail: không tham chiếu ở đâu,
