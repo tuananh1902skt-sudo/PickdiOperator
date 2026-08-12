@@ -65,7 +65,7 @@ function bodyTextToHtml(bodyText: string): string {
     .split(/\n{2,}/)
     .map(block => escapeHtml(block.trim()).replace(/\n/g, '<br>'))
     .filter(Boolean)
-    .map(p => `<p style="margin:0 0 16px;">${p}</p>`)
+    .map(p => `<p style="margin:0 0 16px;word-wrap:break-word;overflow-wrap:break-word;">${p}</p>`)
     .join('\n');
 }
 
@@ -89,18 +89,20 @@ function ctaButtonHtml(href: string, label: string, gradientFrom: string, gradie
     </tr>`;
 }
 
-// Below ~480px (every phone in portrait), the fixed 32px side padding and the side-by-side
-// 130px product-image/text layout eat too much of the available width — text wraps into a
-// narrow, cramped column. This media query is ignored by clients that strip <style> (older
-// Outlook desktop), which just fall back to the desktop layout already used everywhere else
-// — never broken, just not optimized. Every mobile-aware client (Apple/Gmail/Outlook mobile
-// apps, most webmail) does honor it.
+// Below ~600px (covers every phone in portrait, including larger phablets, plus iOS/Android
+// text-size-boosted layouts that render wider than the raw device width), the fixed 32px side
+// padding and the side-by-side 130px product-image/text layout eat too much of the available
+// width — text wraps into a narrow, cramped column. This media query is ignored by clients
+// that strip <style> (older Outlook desktop), which just fall back to the desktop layout
+// already used everywhere else — never broken, just not optimized. Every mobile-aware client
+// (Apple/Gmail/Outlook mobile apps, most webmail) does honor it.
 const MOBILE_STYLE = `
   <style>
-    @media only screen and (max-width: 480px) {
+    @media only screen and (max-width: 600px) {
       .pd-outer { padding: 16px 8px !important; }
       .pd-pad-lg { padding-left: 20px !important; padding-right: 20px !important; }
       .pd-hero-title { font-size: 24px !important; }
+      .pd-hero-text { text-align: left !important; }
       .pd-product-img-cell { display: block !important; width: 100% !important; text-align: center !important; padding: 0 0 16px !important; }
       .pd-product-img-cell img { width: 100% !important; max-width: 220px !important; margin: 0 auto !important; }
       .pd-product-text-cell { display: block !important; width: 100% !important; }
@@ -117,7 +119,7 @@ function shell(headerHtml: string, middleHtml: string, footerHtml: string): stri
     <meta name="color-scheme" content="light">
     ${MOBILE_STYLE}
   </head>
-  <body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+  <body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="pd-outer" style="background:#f4f5f7;padding:32px 12px;">
       <tr>
         <td align="center">
@@ -159,7 +161,7 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
         <div class="pd-hero-title" style="font-family:Georgia,'Times New Roman',serif;font-size:30px;color:${primaryColor};margin-bottom:12px;">
           Hi ${creatorName},
         </div>
-        <p style="margin:0;font-size:15px;line-height:1.6;color:#4d4635;">
+        <p class="pd-hero-text" style="margin:0;font-size:15px;line-height:1.6;color:#4d4635;word-wrap:break-word;overflow-wrap:break-word;">
           ${data.introText ? escapeHtml(data.introText) : `This is ${senderName}, ${senderTitle} at ${brandName}. We'd love to propose a paid collaboration
           for our top-selling product on TikTok Shop.`}
         </p>
@@ -180,7 +182,7 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
 
   const productInfoHtml = `
     <span style="display:block;font-size:11px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:${primaryColor};margin-bottom:6px;">Signature Collection</span>
-    <span style="display:block;font-size:18px;line-height:1.3;font-weight:500;color:#1a1c1c;">${escapeHtml(data.productName || '')}</span>
+    <span style="display:block;font-size:18px;line-height:1.3;font-weight:500;color:#1a1c1c;word-wrap:break-word;overflow-wrap:break-word;">${escapeHtml(data.productName || '')}</span>
     ${ratingLine ? `<span style="display:block;margin-top:8px;font-size:13px;line-height:1.4;color:#8a7f30;">${ratingLine}</span>` : ''}
     ${highlightsHtml ? `<div style="margin-top:12px;font-size:14px;line-height:1.85;color:#4d4635;">${highlightsHtml}</div>` : ''}`;
 
@@ -219,7 +221,7 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
             <td align="left" style="padding:22px 24px 24px;">
               <div style="font-size:11px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:${primaryColor};margin-bottom:14px;">Collaboration Offer</div>
               <p style="margin:0 0 10px;font-size:15px;line-height:1.6;color:#1a1c1c;font-weight:bold;">&#128176; Flat Fee + Affiliate Commission</p>
-              ${data.compensationOffer ? `<p style="margin:0 0 10px;font-size:15px;line-height:1.6;color:#4d4635;">&#127909; Starting Offer: ${escapeHtml(data.compensationOffer)}</p>` : ''}
+              ${data.compensationOffer ? `<p style="margin:0 0 10px;font-size:15px;line-height:1.6;color:#4d4635;word-wrap:break-word;overflow-wrap:break-word;">&#127909; Starting Offer: ${escapeHtml(data.compensationOffer)}</p>` : ''}
               <p style="margin:0;font-size:15px;line-height:1.6;color:#4d4635;">&#129309; We're happy to discuss based on your rate.</p>
             </td>
           </tr>
