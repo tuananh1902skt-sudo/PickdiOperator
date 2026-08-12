@@ -8,3 +8,9 @@ coverage/
 !.env.example
 data/
 .vercel
+Database backup/
+*-backup.sql
+import-backup.js
+migrate-to-new-supabase.js
+schema.sql
+supabase/.temp/
