@@ -23,11 +23,11 @@ export type TaskStatus = 'Pending' | 'Completed';
 
 export type NotificationPriority = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
-// Ngưỡng chấm điểm sourcing riêng của workspace (vd tiêu chí d'Alba trong file d'Alba
-// Onboarding.xlsx, sheet Workflow!D22). Đây là cấu hình do operator tự nhập/sửa trong
-// Settings — KHÔNG hardcode trong scoring.ts — vì mỗi brand có tiêu chí GMV/audience khác
-// nhau và các mốc này thay đổi theo thời gian. Thiếu field nào thì scoring.ts loại field đó
-// khỏi nhóm tương ứng (theo đúng nguyên tắc thiếu-dữ-liệu chung của scoreCreator()).
+// Ngưỡng sourcing riêng của workspace (vd tiêu chí d'Alba trong file d'Alba Onboarding.xlsx,
+// sheet Workflow!D22). Đây là cấu hình do operator tự nhập/sửa trong Settings — dùng để tô màu
+// checklist d'Alba trong CreatorDetailDrawer (band pass/fail theo floor/ideal của từng field),
+// KHÔNG còn gắn với engine chấm điểm nào (đã bị xoá) — mỗi brand có tiêu chí GMV/audience khác
+// nhau và các mốc này thay đổi theo thời gian.
 export interface WorkspaceScoringCriteria {
   gmvTierTarget?: CreatorGmvTier;
   gpmFloor?: number;
@@ -79,31 +79,6 @@ export interface CreatorDemographics {
   topCountry?: string;
   ageDistribution?: { name: string; value: number }[];
   countryDistribution?: { name: string; value: number }[];
-}
-
-// Field riêng cho layout Creator detail thật của TikTok Shop Affiliate Center (TCM) — mỗi
-// nhóm ứng với 1 tab con thật trên trang (PPS/Sample score/Sales/Collaboration metrics/
-// Video/LIVE), lấy từ response marketplace/profile đã confirm field name (xem memory
-// tcm-scraper-endpoints). Field nào TCM chưa xác nhận tên JSON thật (vd avg video/LIVE
-// engagement rate riêng, products count, est post rate, time-series Trends) thì KHÔNG có
-// trong các interface này — UI phải tự hiển thị "Chưa có dữ liệu" khi field undefined,
-// không suy diễn/tính hộ từ field khác.
-export interface CreatorSampleScoreBreakdownItem {
-  key: 'postsWithSamples' | 'postFrequency' | 'salesGeneration' | 'contentQuality';
-  label: string;
-  score?: number; // 0-100
-  percentileText?: string; // vd "Higher than 72% creators" — TCM trả sẵn dạng rank, không tự tính percentile
-}
-
-export interface CreatorSampleScore {
-  total?: number; // 0-100
-  tier?: string; // vd "Excellent"
-  breakdown: CreatorSampleScoreBreakdownItem[];
-}
-
-export interface CreatorPps {
-  score?: number; // 0-5.0
-  tier?: string; // vd "Medium"
 }
 
 // content_groups: video_gmv/live_gmv (fraction) — % doanh thu theo kênh, KHÔNG phải %
@@ -163,9 +138,6 @@ export interface Creator {
   gmv30d?: number; // 30-day estimated GMV
   category?: string;
   niche?: string[];
-  brandFitScore?: number; // 0-100
-  commercialScore?: number; // 0-100
-  riskScore?: number; // 0-100
   status: CreatorStatus;
   owner: string;
   email?: string;
@@ -215,40 +187,11 @@ export interface Creator {
   // Chi tiết theo đúng layout tab thật của TCM creator detail — chỉ có khi metricsSource
   // là 'tcm' và extension đã cào được (xem tcm-scraper-endpoints memory). KHÔNG áp dụng cho
   // creator nhập từ Kalodata/manual.
-  pps?: CreatorPps;
-  sampleScore?: CreatorSampleScore;
   salesMetrics?: CreatorSalesMetrics;
   collabMetrics?: CreatorCollabMetrics;
   videoMetrics?: CreatorVideoMetrics;
   liveMetrics?: CreatorLiveMetrics;
   isMock?: boolean;
-  // Kết quả scoreCreator() (server/scoring.ts) — lưu lại để hiển thị breakdown chi tiết
-  // trong UI thay vì chỉ có brandFitScore tổng.
-  // brandFitScore/scoreBreakdown = điểm NỀN (baseline), tự động tính lại sau mỗi lần
-  // import/enrich, KHÔNG gắn với campaign nào — chỉ dùng các nhóm không cần biết campaign
-  // để có 1 con số tham khảo khi lướt cả kho creator.
-  scoreBreakdown?: CreatorScoreBreakdown;
-  // Điểm CHO TỪNG CAMPAIGN cụ thể — 1 creator dùng lại được cho nhiều campaign/brand khác
-  // nhau, mỗi campaign có Niche Fit/Audience Fit riêng nên không thể dùng chung 1 con số.
-  // Chỉ được ghi khi ai đó chủ động chấm cho đúng campaign đó (không tự động).
-  campaignScores?: { campaignId: string; breakdown: CreatorScoreBreakdown; scoredAt: string }[];
-}
-
-export interface CreatorScoreBreakdown {
-  totalScore: number;
-  recommendation: string;
-  groups: {
-    key: string;
-    label: string;
-    weightPct: number;
-    available: boolean;
-    scorePct: number | null; // 0-100, null nếu cả nhóm không đủ dữ liệu
-    items: { key: string; label: string; weightPct: number; value: number | null }[];
-  }[];
-  riskFlags: string[];
-  strengths: string[];
-  weaknesses: string[];
-  scoredAt: string;
 }
 
 export interface CreatorNote {

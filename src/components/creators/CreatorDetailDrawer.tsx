@@ -7,7 +7,6 @@ import {
   Archive,
   Bookmark,
   HelpCircle,
-  Play,
   ArrowDown,
   AlertTriangle,
   Pencil
@@ -36,9 +35,8 @@ import {
 import { cooperationModeForTier, cooperationModeLabel } from '../../lib/gmvTier';
 
 // Mốc mặc định để tô màu badge checklist d'Alba khi workspace chưa tự cấu hình Settings >
-// Sourcing Scoring Criteria — PHẢI khớp DEFAULT_SCORING_CRITERIA trong src/scoring.ts (không
-// import trực tiếp vì đó là module server-side dùng lại cho cả client, giữ 1 bản hằng số nhẹ
-// riêng ở đây cho UI). Sửa 1 nơi thì phải sửa cả 2.
+// Sourcing Scoring Criteria — giữ 1 bản hằng số nhẹ riêng ở đây cho UI, độc lập với mọi
+// logic scoring khác trong hệ thống.
 const DEFAULT_DALBA_CRITERIA: Required<Pick<WorkspaceScoringCriteria, 'genderFemaleFloor' | 'genderFemaleIdeal' | 'beautyCategoryRatioFloor' | 'beautyCategoryRatioIdeal' | 'avgViewsFloor' | 'avgViewsIdeal' | 'preferredAgeGroup'>> = {
   genderFemaleFloor: 60,
   genderFemaleIdeal: 80,
@@ -94,7 +92,6 @@ interface CreatorDetailDrawerProps {
   onOpenEmailComposer: (cr: Creator) => void;
   onArchiveCreator: (id: string) => void;
   onAddNote: (creatorId: string, content: string) => void;
-  onRunAiResearch: (cr: Creator) => void;
   onAssignCampaign?: (creatorId: string, campaignId: string) => void;
   onUnassignCampaign?: (assignmentId: string) => void;
   onUpdateAssignment?: (assignmentId: string, updates: Partial<CreatorCampaignAssignment>) => void;
@@ -111,7 +108,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
   onOpenEmailComposer,
   onArchiveCreator,
   onAddNote,
-  onRunAiResearch,
   onAssignCampaign,
   onUnassignCampaign,
   onUpdateAssignment,
@@ -123,8 +119,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
   const [bookmarked, setBookmarked] = useState(false);
   const [editingEmail, setEditingEmail] = useState(false);
   const [emailDraft, setEmailDraft] = useState('');
-  const [contentFilter, setContentFilter] = useState<'all' | 'branded' | 'non-branded'>('all');
-  const [trendSort, setTrendSort] = useState<'recent' | 'popular'>('recent');
   const [newNoteText, setNewNoteText] = useState('');
   // Ảnh bìa thật lấy lazy qua TikTok oEmbed API công khai (không cần login/API key) — TikTok One
   // network-intercept không trả field ảnh bìa nên phải bổ sung riêng theo video, cache theo id
@@ -138,16 +132,9 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
   useEffect(() => {
     const sectionIds = [
       'sec-campaigns',
-      'sec-pps',
-      'sec-sample-score',
       'sec-sales',
-      'sec-collab',
       'sec-video',
-      'sec-live',
       'sec-followers',
-      'sec-trend',
-      'sec-example-videos',
-      'sec-similar',
       'sec-notes'
     ];
 
@@ -220,8 +207,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
   useEffect(() => {
     setBookmarked(false);
     setNewNoteText('');
-    setContentFilter('all');
-    setTrendSort('recent');
     setPlayingVideo(null);
     setActiveSection('sec-campaigns');
     setEditingEmail(false);
@@ -282,44 +267,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
     }
   };
 
-  // Radar chart — only built from real score fields, no invented fallback numbers
-  // Videos Grid Data
-  const displayVideos = creator.recentVideos || [];
-
-  // Performance Trend Bar Chart Data — only built when real video views exist
-  const parseView = (val?: string | number) => {
-    if (val === undefined) return undefined;
-    if (typeof val === 'number') return val;
-    const s = String(val).toUpperCase().trim();
-    if (s.endsWith('M')) return parseFloat(s) * 1000000;
-    if (s.endsWith('K')) return parseFloat(s) * 1000;
-    const n = parseFloat(s);
-    return isNaN(n) ? undefined : n;
-  };
-
-  const trendBarData = displayVideos
-    .map((v, i) => {
-      const numViews = parseView(v.views) ?? 0;
-      return {
-        date: v.date ? (v.date.includes('/') ? v.date.split(' ')[0].slice(0, 5) : v.date) : `V${i + 1}`,
-        views: numViews,
-        branded: v.isBranded ? numViews : 0,
-        nonBranded: !v.isBranded ? numViews : 0
-      };
-    })
-    .sort((a, b) => (trendSort === 'popular' ? b.views - a.views : 0));
-
-  const filteredDisplayVideos = displayVideos.filter(v => {
-    if (contentFilter === 'branded') return !!v.isBranded;
-    if (contentFilter === 'non-branded') return !v.isBranded;
-    return true;
-  });
-
-  const sortedFilteredVideos =
-    trendSort === 'popular'
-      ? [...filteredDisplayVideos].sort((a, b) => (parseView(b.views) ?? 0) - (parseView(a.views) ?? 0))
-      : filteredDisplayVideos;
-
   // Donut chart colors
   const COLORS = ['#818cf8', '#0284c7', '#f472b6', '#b45309', '#0d9488', '#9333ea'];
 
@@ -332,14 +279,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
 
   const ageData = creator.demographics?.ageDistribution || [];
   const countryData = creator.demographics?.countryDistribution || [];
-
-  // Real view-count summary — undefined (not a fabricated number) when there's no video data
-  const parsedViews = displayVideos.map(v => parseView(v.views)).filter((v): v is number => v !== undefined);
-  const maxViewVal = parsedViews.length ? Math.max(...parsedViews) : undefined;
-  const minViewVal = parsedViews.length ? Math.min(...parsedViews) : undefined;
-  const avgViewVal = parsedViews.length
-    ? Math.round(parsedViews.reduce((a, b) => a + b, 0) / parsedViews.length)
-    : undefined;
 
   const handleNoteSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -368,12 +307,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
               className="py-1.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-xs transition-colors"
             >
               <Mail className="w-3.5 h-3.5" /> Generate Outreach
-            </button>
-            <button
-              onClick={() => onRunAiResearch(creator)}
-              className="py-1.5 px-3 bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 font-bold text-xs rounded-lg flex items-center gap-1 hover:bg-purple-100 dark:hover:bg-purple-900"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-purple-500" /> AI Research
             </button>
             <button
               onClick={() => onArchiveCreator(creator.id)}
@@ -569,17 +502,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 </div>
               </div>
 
-              <div>
-                <h4 className="font-bold text-slate-800 dark:text-slate-200 mb-1">d'Alba fit score</h4>
-                {creator.brandFitScore !== undefined ? (
-                  <span className="inline-block px-2.5 py-0.5 rounded-md bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300 font-bold text-sm">
-                    {creator.brandFitScore}
-                  </span>
-                ) : (
-                  <span className="text-slate-400 italic text-xs">{EMPTY}</span>
-                )}
-              </div>
-
               <div className="flex items-center gap-2 pt-2">
                 <button
                   onClick={() => onOpenEmailComposer(creator)}
@@ -657,30 +579,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
               </button>
 
               <button
-                id="tab-sec-pps"
-                onClick={() => scrollToSection('sec-pps')}
-                className={`py-1.5 px-3 rounded-lg whitespace-nowrap transition-all ${
-                  activeSection === 'sec-pps'
-                    ? 'bg-teal-600 text-white shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                }`}
-              >
-                PPS
-              </button>
-
-              <button
-                id="tab-sec-sample-score"
-                onClick={() => scrollToSection('sec-sample-score')}
-                className={`py-1.5 px-3 rounded-lg whitespace-nowrap transition-all ${
-                  activeSection === 'sec-sample-score'
-                    ? 'bg-teal-600 text-white shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                }`}
-              >
-                Sample score
-              </button>
-
-              <button
                 id="tab-sec-sales"
                 onClick={() => scrollToSection('sec-sales')}
                 className={`py-1.5 px-3 rounded-lg whitespace-nowrap transition-all ${
@@ -690,18 +588,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 }`}
               >
                 Sales
-              </button>
-
-              <button
-                id="tab-sec-collab"
-                onClick={() => scrollToSection('sec-collab')}
-                className={`py-1.5 px-3 rounded-lg whitespace-nowrap transition-all ${
-                  activeSection === 'sec-collab'
-                    ? 'bg-teal-600 text-white shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                }`}
-              >
-                Collaboration metrics
               </button>
 
               <button
@@ -717,18 +603,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
               </button>
 
               <button
-                id="tab-sec-live"
-                onClick={() => scrollToSection('sec-live')}
-                className={`py-1.5 px-3 rounded-lg whitespace-nowrap transition-all ${
-                  activeSection === 'sec-live'
-                    ? 'bg-teal-600 text-white shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                }`}
-              >
-                LIVE
-              </button>
-
-              <button
                 id="tab-sec-followers"
                 onClick={() => scrollToSection('sec-followers')}
                 className={`py-1.5 px-3 rounded-lg whitespace-nowrap transition-all ${
@@ -738,42 +612,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 }`}
               >
                 Followers
-              </button>
-
-              <button
-                id="tab-sec-trend"
-                onClick={() => scrollToSection('sec-trend')}
-                className={`py-1.5 px-3 rounded-lg whitespace-nowrap transition-all ${
-                  activeSection === 'sec-trend'
-                    ? 'bg-teal-600 text-white shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                }`}
-              >
-                Trends
-              </button>
-
-              <button
-                id="tab-sec-example-videos"
-                onClick={() => scrollToSection('sec-example-videos')}
-                className={`py-1.5 px-3 rounded-lg whitespace-nowrap transition-all ${
-                  activeSection === 'sec-example-videos'
-                    ? 'bg-teal-600 text-white shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                }`}
-              >
-                Example videos
-              </button>
-
-              <button
-                id="tab-sec-similar"
-                onClick={() => scrollToSection('sec-similar')}
-                className={`py-1.5 px-3 rounded-lg whitespace-nowrap transition-all ${
-                  activeSection === 'sec-similar'
-                    ? 'bg-teal-600 text-white shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                }`}
-              >
-                Similar creators
               </button>
 
               <button
@@ -1025,75 +863,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 })()}
               </section>
 
-              {/* SECTION: PPS (Promotion Performance Score) — điểm /5.0 thật của TCM, chỉ có khi
-                  metricsSource là 'tcm' và extension đã cào được pps_score. Tier text (vd "Medium")
-                  chưa xác nhận field JSON nên không hiển thị số dựng sẵn — chỉ hiện điểm thật. */}
-              <section id="sec-pps" className="space-y-4 pt-6 border-t border-slate-200 dark:border-slate-800">
-                <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-sky-500 inline-block" />
-                  PPS (Promotion Performance Score)
-                </h3>
-                {typeof creator.pps?.score === 'number' ? (
-                  <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 flex items-center gap-4">
-                    <p className="text-4xl font-black text-sky-600 dark:text-sky-400">
-                      {creator.pps.score.toFixed(1)}<span className="text-base font-normal text-slate-400">/5.0</span>
-                    </p>
-                    {creator.pps.tier && (
-                      <span className="px-2.5 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 text-xs font-bold">
-                        {creator.pps.tier}
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <div className="p-6 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-slate-400 text-xs italic">
-                    {EMPTY} — chỉ có khi import từ TikTok Creator Marketplace
-                  </div>
-                )}
-              </section>
-
-              {/* SECTION: SAMPLE SCORE — điểm /100 + breakdown 4 mục thật của TCM tab "Sample
-                  score". Field JSON thô của 4 mục con dùng tên khác UI hiển thị (xem comment map
-                  trong extension/popup.js) — nhãn hiển thị theo đúng UI TCM, giá trị lấy từ field
-                  gần nghĩa nhất đã xác nhận. */}
-              <section id="sec-sample-score" className="space-y-4 pt-6 border-t border-slate-200 dark:border-slate-800">
-                <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-cyan-500 inline-block" />
-                  Sample score
-                </h3>
-                {creator.sampleScore ? (
-                  <div className="space-y-4">
-                    <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 flex items-center gap-4">
-                      <p className="text-4xl font-black text-cyan-600 dark:text-cyan-400">
-                        {typeof creator.sampleScore.total === 'number' ? creator.sampleScore.total : <span className="text-sm text-slate-400 italic font-normal">{EMPTY}</span>}
-                        {typeof creator.sampleScore.total === 'number' && <span className="text-base font-normal text-slate-400">/100</span>}
-                      </p>
-                      {creator.sampleScore.tier && (
-                        <span className="px-2.5 py-1 rounded-lg bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 text-xs font-bold">
-                          {creator.sampleScore.tier}
-                        </span>
-                      )}
-                    </div>
-                    {creator.sampleScore.breakdown && creator.sampleScore.breakdown.length > 0 && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {creator.sampleScore.breakdown.map(item => (
-                          <div key={item.key} className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
-                            <p className="text-xs font-bold text-slate-700 dark:text-slate-300">{item.label}</p>
-                            <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
-                              {typeof item.score === 'number' ? `${item.score}/100` : EMPTY}
-                            </p>
-                            {item.percentileText && <p className="text-[11px] text-slate-400 mt-0.5">{item.percentileText}</p>}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="p-6 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-slate-400 text-xs italic">
-                    {EMPTY} — chỉ có khi import từ TikTok Creator Marketplace
-                  </div>
-                )}
-              </section>
-
               {/* SECTION: SALES — GMV/Items sold/GPM/GMV per customer + donut kênh (Video/LIVE)
                   và donut ngành hàng (nguồn thật cho beautyCategoryRatio). */}
               <section id="sec-sales" className="space-y-4 pt-6 border-t border-slate-200 dark:border-slate-800">
@@ -1193,60 +962,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                 )}
               </section>
 
-              {/* SECTION: COLLABORATION METRICS */}
-              <section id="sec-collab" className="space-y-4 pt-6 border-t border-slate-200 dark:border-slate-800">
-                <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-amber-500 inline-block" />
-                  Collaboration metrics
-                </h3>
-                {creator.collabMetrics ? (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
-                        <span className="text-xs text-slate-500 font-medium">Est. post rate</span>
-                        <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
-                          {typeof creator.collabMetrics.estPostRatePct === 'number' ? `${creator.collabMetrics.estPostRatePct}%` : EMPTY}
-                        </p>
-                      </div>
-                      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
-                        <span className="text-xs text-slate-500 font-medium">Avg. commission rate</span>
-                        <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
-                          {typeof creator.collabMetrics.avgCommissionRatePct === 'number' ? `${creator.collabMetrics.avgCommissionRatePct}%` : EMPTY}
-                        </p>
-                      </div>
-                      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
-                        <span className="text-xs text-slate-500 font-medium">Products</span>
-                        <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
-                          {typeof creator.collabMetrics.productsCount === 'number' ? creator.collabMetrics.productsCount : EMPTY}
-                        </p>
-                      </div>
-                      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
-                        <span className="text-xs text-slate-500 font-medium">Brand collaborations</span>
-                        <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
-                          {typeof creator.collabMetrics.brandCollabCount === 'number' ? creator.collabMetrics.brandCollabCount : EMPTY}
-                        </p>
-                      </div>
-                    </div>
-                    {creator.collabMetrics.brandPartners && creator.collabMetrics.brandPartners.length > 0 && (
-                      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
-                        <p className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">Top brands đã hợp tác</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {creator.collabMetrics.brandPartners.map(b => (
-                            <span key={b.id} className="px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 text-[11px] font-semibold">
-                              {b.name}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="p-6 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-slate-400 text-xs italic">
-                    {EMPTY} — chỉ có khi import từ TikTok Creator Marketplace
-                  </div>
-                )}
-              </section>
-
               {/* SECTION: VIDEO */}
               <section id="sec-video" className="space-y-4 pt-6 border-t border-slate-200 dark:border-slate-800">
                 <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
@@ -1278,258 +993,6 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                       {typeof creator.videoMetrics?.engagementRatePct === 'number' ? `${creator.videoMetrics.engagementRatePct}%` : EMPTY}
                     </p>
                   </div>
-                </div>
-              </section>
-
-              {/* SECTION: LIVE */}
-              <section id="sec-live" className="space-y-4 pt-6 border-t border-slate-200 dark:border-slate-800">
-                <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-rose-500 inline-block" />
-                  LIVE
-                </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
-                    <span className="text-xs text-slate-500 font-medium">LIVE GPM</span>
-                    <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
-                      {typeof creator.liveMetrics?.gpm === 'number' ? `$${creator.liveMetrics.gpm}` : EMPTY}
-                    </p>
-                  </div>
-                  <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
-                    <span className="text-xs text-slate-500 font-medium">LIVE streams (30d)</span>
-                    <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
-                      {typeof creator.liveMetrics?.streamsCount === 'number' ? creator.liveMetrics.streamsCount : EMPTY}
-                    </p>
-                  </div>
-                  <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
-                    <span className="text-xs text-slate-500 font-medium">Avg. LIVE views</span>
-                    <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
-                      {typeof creator.liveMetrics?.avgViews === 'number' ? creator.liveMetrics.avgViews.toLocaleString() : EMPTY}
-                    </p>
-                  </div>
-                  <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
-                    <span className="text-xs text-slate-500 font-medium">Avg. LIVE engagement rate</span>
-                    <p className="text-xl font-black text-slate-900 dark:text-white mt-1">
-                      {typeof creator.liveMetrics?.engagementRatePct === 'number' ? `${creator.liveMetrics.engagementRatePct}%` : EMPTY}
-                    </p>
-                  </div>
-                </div>
-              </section>
-
-              {/* SECTION 3: PERFORMANCE TREND */}
-              <section id="sec-trend" className="space-y-6 pt-6 border-t border-slate-200 dark:border-slate-800">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <div>
-                    <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                      <span className="w-3 h-3 rounded-full bg-purple-500 inline-block" />
-                      Trends
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Chỉ có Video views theo thời gian — TCM còn cho chuyển GMV/Items sold/Followers/Engagement
-                      rate nhưng hệ thống chưa cào được time-series các chỉ số đó.
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center bg-slate-200/60 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold">
-                      <button
-                        onClick={() => setTrendSort('recent')}
-                        className={`px-3 py-1 rounded-lg transition-colors ${
-                          trendSort === 'recent'
-                            ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                            : 'text-slate-500'
-                        }`}
-                      >
-                        Most recent
-                      </button>
-                      <button
-                        onClick={() => setTrendSort('popular')}
-                        className={`px-3 py-1 rounded-lg transition-colors ${
-                          trendSort === 'popular'
-                            ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                            : 'text-slate-500'
-                        }`}
-                      >
-                        Most popular
-                      </button>
-                    </div>
-
-                    <select className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-medium">
-                      <option>Video views</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Summary row */}
-                <div className="flex flex-wrap items-center gap-6 text-xs text-slate-500">
-                  <div>
-                    Highest video view <strong className="text-slate-900 dark:text-white ml-1">{formatNumber(maxViewVal)}</strong>
-                  </div>
-                  <div className="h-3 w-px bg-slate-300 dark:bg-slate-700" />
-                  <div>
-                    Lowest video view <strong className="text-slate-900 dark:text-white ml-1">{formatNumber(minViewVal)}</strong>
-                  </div>
-                  <div className="h-3 w-px bg-slate-300 dark:bg-slate-700" />
-                  <div>
-                    Average video view <strong className="text-slate-900 dark:text-white ml-1">{formatNumber(avgViewVal)}</strong>
-                  </div>
-                </div>
-
-                {/* Bar Chart */}
-                <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 space-y-4">
-                  {trendBarData.length > 0 ? (
-                    <>
-                      <div className="h-72 w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={trendBarData}>
-                            <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} />
-                            <YAxis stroke="#94a3b8" fontSize={11} tickFormatter={v => `${(v / 1000).toFixed(0)}K`} />
-                            <Tooltip
-                              formatter={(val: any) => [`${(Number(val) / 1000).toFixed(1)}K`, 'Views']}
-                              contentStyle={{ borderRadius: '12px', fontSize: '12px' }}
-                            />
-                            <Bar dataKey="branded" stackId="a" fill="#c084fc" radius={[4, 4, 0, 0]} />
-                            <Bar dataKey="nonBranded" stackId="a" fill="#818cf8" radius={[4, 4, 0, 0]} />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-
-                      <div className="flex flex-wrap gap-4 text-xs font-medium text-slate-600 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
-                        <span className="flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full bg-purple-400" /> Branded content
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full bg-indigo-400" /> Non-branded content
-                        </span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="h-40 w-full flex items-center justify-center text-slate-400 text-xs italic">
-                      {EMPTY} — chưa cào được video nào
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              {/* SECTION: EXAMPLE VIDEOS — 2 cột thật của TCM tab "Example videos": Videos vs
-                  Videos with product (isBranded = video có gắn sản phẩm). */}
-              <section id="sec-example-videos" className="space-y-6 pt-6 border-t border-slate-200 dark:border-slate-800">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full bg-pink-500 inline-block" />
-                    Example videos
-                  </h3>
-
-                  <div className="flex items-center bg-slate-200/60 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold">
-                    <button
-                      onClick={() => setTrendSort('recent')}
-                      className={`px-3 py-1.5 rounded-lg transition-colors ${
-                        trendSort === 'recent'
-                          ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                          : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                    >
-                      Most recent
-                    </button>
-                    <button
-                      onClick={() => setTrendSort('popular')}
-                      className={`px-3 py-1.5 rounded-lg transition-colors ${
-                        trendSort === 'popular'
-                          ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                          : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                    >
-                      Most popular
-                    </button>
-                  </div>
-                </div>
-
-                {sortedFilteredVideos.length === 0 ? (
-                  <div className="p-8 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-slate-400 text-xs italic">
-                    {EMPTY} — chưa cào được video nào từ TikTok
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {(['non-branded', 'branded'] as const).map(col => {
-                      const colVideos = sortedFilteredVideos.filter(v => (col === 'branded' ? !!v.isBranded : !v.isBranded));
-                      return (
-                        <div key={col} className="space-y-3">
-                          <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                            {col === 'branded' ? 'Videos with product' : 'Videos'} ({colVideos.length})
-                          </h4>
-                          {colVideos.length === 0 ? (
-                            <div className="p-6 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-slate-400 text-xs italic">
-                              {EMPTY}
-                            </div>
-                          ) : (
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                              {colVideos.map(vid => {
-                                const thumbUrl = vid.thumb || thumbCache[vid.id];
-                                const itemIdMatch = vid.videoUrl && vid.videoUrl.match(/\/video\/(\d+)/);
-                                return (
-                                  <button
-                                    key={vid.id}
-                                    type="button"
-                                    onClick={() => {
-                                      if (itemIdMatch) {
-                                        setPlayingVideo({ itemID: itemIdMatch[1], title: vid.title });
-                                      } else {
-                                        window.open(
-                                          vid.videoUrl || creator.profileUrl || `https://www.tiktok.com/@${(creator.handle || '').replace(/^@/, '')}`,
-                                          '_blank',
-                                          'noopener,noreferrer'
-                                        );
-                                      }
-                                    }}
-                                    className="group text-left bg-white dark:bg-slate-900 rounded-2xl overflow-hidden border border-slate-200/80 dark:border-slate-800 flex flex-col shadow-xs hover:shadow-md transition-all hover:-translate-y-0.5 cursor-pointer"
-                                  >
-                                    <div className="relative aspect-[3/4] bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                                      {thumbUrl ? (
-                                        <img
-                                          src={thumbUrl}
-                                          alt={vid.title}
-                                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                        />
-                                      ) : (
-                                        // Đang lazy-fetch ảnh bìa thật qua TikTok oEmbed (xem useEffect ở trên) — hiện
-                                        // placeholder trong lúc chờ hoặc khi video đã bị xoá/riêng tư (oEmbed lỗi).
-                                        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-800 group-hover:scale-105 transition-transform duration-300">
-                                          <Play className="w-8 h-8 text-white/70 fill-white/70" />
-                                        </div>
-                                      )}
-                                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-                                      <div className="absolute bottom-2 left-2 flex items-center gap-1 text-white text-xs font-bold bg-black/40 backdrop-blur-xs px-2 py-0.5 rounded-full">
-                                        <Play className="w-3 h-3 fill-white text-white" />
-                                        {typeof vid.views === 'number' ? formatNumber(vid.views) : vid.views}
-                                      </div>
-                                    </div>
-                                    <div className="p-3 flex-1 flex flex-col justify-between space-y-2">
-                                      <p className="text-xs font-medium text-slate-800 dark:text-slate-200 line-clamp-2 group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
-                                        {vid.title}
-                                      </p>
-                                      <p className="text-[10px] text-slate-400 font-mono">{vid.date}</p>
-                                    </div>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </section>
-
-              {/* SECTION: SIMILAR CREATORS — chỉ hiển thị tham khảo trên TCM, không lưu vào DB
-                  nên không có field nào trên Creator để render danh sách thật ở đây. */}
-              <section id="sec-similar" className="space-y-4 pt-6 border-t border-slate-200 dark:border-slate-800">
-                <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-violet-500 inline-block" />
-                  Similar creators
-                </h3>
-                <div className="p-6 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-slate-400 text-xs italic">
-                  Tab tham khảo trên TCM, hệ thống không lưu creator gợi ý — mở trực tiếp trang chi tiết creator này
-                  trên TikTok Creator Marketplace để xem.
                 </div>
               </section>
 

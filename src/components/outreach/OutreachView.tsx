@@ -298,11 +298,6 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
                             </span>
                             <span className="text-[11px] text-slate-400 truncate">@{cr.handle}</span>
                           </div>
-                          {cr.brandFitScore !== undefined && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
-                              Score {cr.brandFitScore}
-                            </span>
-                          )}
                         </div>
 
                         <div className="text-[11px] text-slate-500 line-clamp-1">

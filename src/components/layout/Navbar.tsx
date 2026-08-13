@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import {
   Search,
-  Sparkles,
   Bell,
   Sun,
   Moon,
@@ -13,7 +12,6 @@ import { Workspace } from '../../types';
 
 interface NavbarProps {
   openCommandPalette: () => void;
-  openAiDrawer: () => void;
   openNotifDrawer: () => void;
   unreadNotifsCount: number;
   darkMode: boolean;
@@ -26,7 +24,6 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({
   openCommandPalette,
-  openAiDrawer,
   openNotifDrawer,
   unreadNotifsCount,
   darkMode,
@@ -141,17 +138,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Right Action Icons */}
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* AI Assistant Button */}
-        <button
-          id="ai-assistant-header-btn"
-          onClick={openAiDrawer}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/80 text-xs font-medium transition-all"
-          title="Open AI Assistant"
-        >
-          <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400 animate-pulse" />
-          <span className="hidden md:inline font-semibold">AI Copilot</span>
-        </button>
-
         {/* Notification Bell */}
         <button
           id="notif-bell-btn"

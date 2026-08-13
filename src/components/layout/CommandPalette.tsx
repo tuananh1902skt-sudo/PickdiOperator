@@ -3,15 +3,11 @@ import {
   Search,
   Users,
   Target,
-  CheckSquare,
-  Sparkles,
   Plus,
   ArrowRight,
-  X,
-  FileCheck2,
-  BarChart3
+  X
 } from 'lucide-react';
-import { Creator, Campaign, Task } from '../../types';
+import { Creator, Campaign } from '../../types';
 import { ActiveTab } from './Sidebar';
 
 interface CommandPaletteProps {
@@ -19,12 +15,10 @@ interface CommandPaletteProps {
   onClose: () => void;
   creators: Creator[];
   campaigns: Campaign[];
-  tasks: Task[];
   onSelectCreator: (cr: Creator) => void;
   onSelectCampaign: (cmp: Campaign) => void;
   onSelectTab: (tab: ActiveTab) => void;
   onOpenQuickAdd: () => void;
-  onOpenAi: () => void;
 }
 
 export const CommandPalette: React.FC<CommandPaletteProps> = ({
@@ -32,12 +26,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onClose,
   creators,
   campaigns,
-  tasks,
   onSelectCreator,
   onSelectCampaign,
   onSelectTab,
-  onOpenQuickAdd,
-  onOpenAi
+  onOpenQuickAdd
 }) => {
   const [query, setQuery] = useState('');
 
@@ -74,10 +66,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         c => c.name.toLowerCase().includes(q) || c.brand.toLowerCase().includes(q)
       )
     : campaigns.slice(0, 2);
-
-  const matchedTasks = q
-    ? tasks.filter(t => t.title.toLowerCase().includes(q))
-    : tasks.slice(0, 2);
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-start justify-center pt-20 px-4">
@@ -137,48 +125,12 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                 <button
                   onClick={() => {
                     onClose();
-                    onOpenAi();
-                  }}
-                  className="w-full px-3 py-2 rounded-lg flex items-center gap-3 text-xs text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                >
-                  <Sparkles className="w-4 h-4 text-indigo-500" />
-                  <span className="font-semibold">Ask AI Assistant Copilot</span>
-                  <span className="ml-auto text-[10px] text-slate-400">AI Command</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    onClose();
                     onSelectTab('creators');
                   }}
                   className="w-full px-3 py-2 rounded-lg flex items-center gap-3 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                 >
                   <Users className="w-4 h-4 text-slate-400" />
                   <span>Go to Creators CRM</span>
-                  <ArrowRight className="w-3.5 h-3.5 ml-auto text-slate-400" />
-                </button>
-
-                <button
-                  onClick={() => {
-                    onClose();
-                    onSelectTab('reviews');
-                  }}
-                  className="w-full px-3 py-2 rounded-lg flex items-center gap-3 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                >
-                  <FileCheck2 className="w-4 h-4 text-slate-400" />
-                  <span>Go to Draft Content Reviews</span>
-                  <ArrowRight className="w-3.5 h-3.5 ml-auto text-slate-400" />
-                </button>
-
-                <button
-                  onClick={() => {
-                    onClose();
-                    onSelectTab('reports');
-                  }}
-                  className="w-full px-3 py-2 rounded-lg flex items-center gap-3 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                >
-                  <BarChart3 className="w-4 h-4 text-slate-400" />
-                  <span>Go to Reports & Analytics</span>
                   <ArrowRight className="w-3.5 h-3.5 ml-auto text-slate-400" />
                 </button>
               </div>
@@ -206,9 +158,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       <span className="font-semibold truncate">{cr.displayName}</span>
                       <span className="text-[11px] text-slate-400 truncate">@{cr.handle} • {cr.category}</span>
                     </div>
-                    <span className="ml-auto shrink-0 px-2 py-0.5 text-[10px] font-semibold rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                      Score: {cr.brandFitScore}
-                    </span>
                   </button>
                 ))}
               </div>
@@ -238,33 +187,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       <span className="font-semibold">{cmp.name}</span>
                       <span className="text-[11px] text-slate-400">{cmp.brand} • Budget: ${cmp.budget}</span>
                     </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Tasks Section */}
-          {matchedTasks.length > 0 && (
-            <div>
-              <div className="px-3 py-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <CheckSquare className="w-3.5 h-3.5" /> Tasks ({matchedTasks.length})
-              </div>
-              <div className="space-y-1">
-                {matchedTasks.map(tsk => (
-                  <button
-                    key={tsk.id}
-                    onClick={() => {
-                      onClose();
-                      onSelectTab('tasks');
-                    }}
-                    className="w-full px-3 py-2 rounded-lg flex items-center gap-3 text-xs text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                  >
-                    <CheckSquare className="w-4 h-4 text-slate-400 shrink-0" />
-                    <span className="truncate text-left font-medium">{tsk.title}</span>
-                    <span className="ml-auto text-[10px] px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 font-medium">
-                      Due {tsk.dueDate}
-                    </span>
                   </button>
                 ))}
               </div>

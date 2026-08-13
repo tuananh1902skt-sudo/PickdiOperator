@@ -224,13 +224,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   onUnassignCampaign,
   onOpenBulkOutreach
 }) => {
-  // "Brand Fit" cũ đọc như 1 điểm content-quality chung chung — đổi tên cho đúng ý nghĩa
-  // thật của brandFitScore: điểm phù hợp với TIÊU CHÍ SOURCING d'Alba (GMV tier, GPM, %
-  // audience nữ, % beauty category, avg views — xem src/scoring.ts), không phải điểm
-  // content/production quality.
-  const scoreColumnLabel = "d'Alba Fit";
-  const getScoreValue = (cr: Creator) => cr.brandFitScore;
-
   const [isRefreshing, setIsRefreshing] = useState(false);
   const handleRefresh = async () => {
     if (!onRefresh || isRefreshing) return;
@@ -256,9 +249,9 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   const [selectedImportDate, setSelectedImportDate] = useState('ALL');
 
   // Sort theo cột — bấm vào tiêu đề cột trong bảng (Creator, Category & Niche, Email,
-  // Followers, Avg Views, ER %, d'Alba Fit, Brands, Campaigns, Status) để sort tăng/giảm,
+  // Followers, Avg Views, ER %, Brands, Campaigns, Status) để sort tăng/giảm,
   // bấm lại lần nữa trên cùng cột để đảo chiều. null = giữ nguyên thứ tự gốc.
-  type SortKey = 'creator' | 'category' | 'email' | 'followers' | 'avgViews' | 'er' | 'gmv' | 'score' | 'brands' | 'campaigns' | 'status';
+  type SortKey = 'creator' | 'category' | 'email' | 'followers' | 'avgViews' | 'er' | 'gmv' | 'brands' | 'campaigns' | 'status';
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const toggleSort = (key: SortKey) => {
@@ -272,12 +265,10 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
 
   // Bộ lọc nâng cao — gắn trực tiếp với 2 chức năng quét data TCM (tìm cid / cào chi tiết) để
   // operator lọc ra đúng nhóm creator cần chạy hàng đợi tiếp theo, cộng thêm range lọc theo các
-  // chỉ số sourcing hay dùng nhất (d'Alba Fit, ER%, Avg Views, Followers) thay vì phải lướt cả
+  // chỉ số sourcing hay dùng nhất (ER%, Avg Views, Followers) thay vì phải lướt cả
   // bảng để tìm bằng mắt.
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [tcmScrapeFilter, setTcmScrapeFilter] = useState<'ALL' | 'NO_CID' | 'HAS_CID_NO_DETAIL' | 'HAS_DETAIL' | 'NOT_FOUND' | 'MISSING_AVATAR'>('ALL');
-  const [minScore, setMinScore] = useState('');
-  const [maxScore, setMaxScore] = useState('');
   const [minEr, setMinEr] = useState('');
   const [maxEr, setMaxEr] = useState('');
   const [minAvgViews, setMinAvgViews] = useState('');
@@ -291,8 +282,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
 
   const advancedFilterCount = [
     tcmScrapeFilter !== 'ALL',
-    minScore !== '',
-    maxScore !== '',
     minEr !== '',
     maxEr !== '',
     minAvgViews !== '',
@@ -307,8 +296,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
 
   const clearAdvancedFilters = () => {
     setTcmScrapeFilter('ALL');
-    setMinScore('');
-    setMaxScore('');
     setMinEr('');
     setMaxEr('');
     setMinAvgViews('');
@@ -483,14 +470,15 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   };
 
   // "Thiếu detail" = đã có cid TCM (đủ điều kiện mở trang chi tiết) nhưng chưa từng cào — dùng
-  // sampleScore làm cờ đại diện vì field này CHỈ có ở detail-endpoint, không có ở list-endpoint.
-  const creatorsMissingTcmDetail = useMemo(() => creators.filter(c => !!c.tcmCreatorOecuid && !c.sampleScore), [creators]);
+  // collabMetrics làm cờ đại diện vì field này CHỈ được normalizeTcmProfileDetail() set (detail
+  // endpoint), KHÔNG bao giờ được set bởi normalizeCreator() (list/handle-search endpoint).
+  const creatorsMissingTcmDetail = useMemo(() => creators.filter(c => !!c.tcmCreatorOecuid && !c.collabMetrics), [creators]);
   // Creator chỉ có TikTok handle, chưa từng khớp với TCM (Kalodata/manual/file import) — ứng
   // viên cho hàng đợi "tìm cid theo handle".
   const creatorsMissingTcmCid = useMemo(() => creators.filter(c => !c.tcmCreatorOecuid), [creators]);
   // "Thiếu avatar" khác với "thiếu detail": avatar được tải NGẦM sau khi cào (server.ts
   // batch-import), có thể fail âm thầm (CDN hết hạn, content-type lạ, quá dung lượng) mà không
-  // để lại dấu vết nào trên sampleScore — nên 1 creator đã cào chi tiết xong vẫn có thể trắng
+  // để lại dấu vết nào trên collabMetrics — nên 1 creator đã cào chi tiết xong vẫn có thể trắng
   // avatar mãi mãi nếu không có cách chủ động cào lại. Chỉ tính creator đã có cid TCM vì đó là
   // điều kiện duy nhất để mở lại trang chi tiết qua extension.
   const creatorsMissingAvatar = useMemo(() => creators.filter(c => !!c.tcmCreatorOecuid && !c.avatar), [creators]);
@@ -575,14 +563,10 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     // tiết" phía trên (creatorsMissingTcmCid / creatorsMissingTcmDetail) để filter luôn khớp
     // với những gì 2 nút đó sẽ thực sự xử lý.
     if (tcmScrapeFilter === 'NO_CID' && c.tcmCreatorOecuid) return false;
-    if (tcmScrapeFilter === 'HAS_CID_NO_DETAIL' && !(c.tcmCreatorOecuid && !c.sampleScore)) return false;
-    if (tcmScrapeFilter === 'HAS_DETAIL' && !(c.tcmCreatorOecuid && !!c.sampleScore)) return false;
+    if (tcmScrapeFilter === 'HAS_CID_NO_DETAIL' && !(c.tcmCreatorOecuid && !c.collabMetrics)) return false;
+    if (tcmScrapeFilter === 'HAS_DETAIL' && !(c.tcmCreatorOecuid && !!c.collabMetrics)) return false;
     if (tcmScrapeFilter === 'NOT_FOUND' && !(!c.tcmCreatorOecuid && c.tcmNotFoundAt)) return false;
     if (tcmScrapeFilter === 'MISSING_AVATAR' && !(c.tcmCreatorOecuid && !c.avatar)) return false;
-
-    const scoreVal = getScoreValue(c);
-    if (minScore !== '' && (scoreVal === undefined || scoreVal < Number(minScore))) return false;
-    if (maxScore !== '' && (scoreVal === undefined || scoreVal > Number(maxScore))) return false;
 
     if (minEr !== '' && (c.engagementRate === undefined || c.engagementRate < Number(minEr))) return false;
     if (maxEr !== '' && (c.engagementRate === undefined || c.engagementRate > Number(maxEr))) return false;
@@ -609,8 +593,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     selectedOwner,
     selectedImportDate,
     tcmScrapeFilter,
-    minScore,
-    maxScore,
     minEr,
     maxEr,
     minAvgViews,
@@ -657,9 +639,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
               case 'gmv':
                 cmp = (a.gmv30d ?? -1) - (b.gmv30d ?? -1);
                 break;
-              case 'score':
-                cmp = (getScoreValue(a) ?? -1) - (getScoreValue(b) ?? -1);
-                break;
               case 'brands':
                 cmp = getBrandCount(a) - getBrandCount(b);
                 break;
@@ -701,8 +680,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     sortKey,
     sortDir,
     tcmScrapeFilter,
-    minScore,
-    maxScore,
     minEr,
     maxEr,
     minAvgViews,
@@ -1112,32 +1089,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                 </select>
               </div>
 
-              {/* d'Alba Fit */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-semibold text-slate-500 uppercase">{scoreColumnLabel}</label>
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={minScore}
-                    onChange={e => setMinScore(e.target.value)}
-                    placeholder="Min"
-                    className="w-20 p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs"
-                  />
-                  <span className="text-slate-400">–</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={maxScore}
-                    onChange={e => setMaxScore(e.target.value)}
-                    placeholder="Max"
-                    className="w-20 p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs"
-                  />
-                </div>
-              </div>
-
               {/* Engagement Rate */}
               <div className="flex flex-col gap-1">
                 <label className="text-[10px] font-semibold text-slate-500 uppercase">ER %</label>
@@ -1335,7 +1286,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                     triggerClassName="px-2.5 py-1 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 font-semibold rounded-lg flex items-center gap-1 hover:bg-indigo-100"
                     findCidCount={selectedCreators.filter(c => !c.tcmCreatorOecuid).length}
                     onFindCid={() => handleFindTcmCid(selectedCreators)}
-                    scrapeDetailCount={selectedCreators.filter(c => !!c.tcmCreatorOecuid && !c.sampleScore).length}
+                    scrapeDetailCount={selectedCreators.filter(c => !!c.tcmCreatorOecuid && !c.collabMetrics).length}
                     onScrapeDetail={() => handleAutoScrapeDetail(selectedCreators)}
                     missingAvatarCount={selectedCreators.filter(c => !!c.tcmCreatorOecuid && !c.avatar).length}
                     onScrapeMissingAvatar={() => handleAutoScrapeDetail(selectedCreators.filter(c => !!c.tcmCreatorOecuid && !c.avatar))}
@@ -1395,7 +1346,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                 {renderSortableTh('Avg Views', 'avgViews', 'py-3 px-4 text-right whitespace-nowrap')}
                 {renderSortableTh('ER %', 'er', 'py-3 px-4 text-center whitespace-nowrap')}
                 {renderSortableTh('GMV (30d)', 'gmv', 'py-3 px-4 text-right whitespace-nowrap')}
-                {renderSortableTh(scoreColumnLabel, 'score', 'py-3 px-4 text-center whitespace-nowrap')}
                 {renderSortableTh('Brands', 'brands', 'py-3 px-4 min-w-[110px]')}
                 {renderSortableTh('Campaigns', 'campaigns', 'py-3 px-4 min-w-[200px]')}
                 {renderSortableTh('Status', 'status', 'py-3 px-4 whitespace-nowrap')}
@@ -1506,29 +1456,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                       {/* GMV (30d) */}
                       <td className="py-3.5 px-4 text-right font-semibold text-slate-900 dark:text-white">
                         {cr.gmv30d !== undefined ? `$${formatNumber(cr.gmv30d)}` : '—'}
-                      </td>
-
-                      {/* Score Badge — Brand Fit (điểm nền tự tính, xem src/scoring.ts) */}
-                      <td className="py-3.5 px-4 text-center">
-                        {(() => {
-                          const scoreVal = getScoreValue(cr);
-                          return scoreVal !== undefined ? (
-                            <span
-                              className={`px-2 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1 ${
-                                scoreVal >= 90
-                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                                  : scoreVal >= 80
-                                  ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
-                                  : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                              }`}
-                            >
-                              <Sparkles className="w-3 h-3" />
-                              {scoreVal}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 text-xs italic">—</span>
-                          );
-                        })()}
                       </td>
 
                       {/* Brands — suy ra tự động từ các campaign creator này đang chạy, không còn

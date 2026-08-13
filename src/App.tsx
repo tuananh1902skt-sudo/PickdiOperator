@@ -19,14 +19,8 @@ import { InboxView } from './components/inbox/InboxView';
 import { CampaignsView } from './components/campaigns/CampaignsView';
 import { CreateCampaignModal } from './components/campaigns/CreateCampaignModal';
 
-import { ReviewsView } from './components/reviews/ReviewsView';
-import { ReviewDetailModal } from './components/reviews/ReviewDetailModal';
 import { PostedVideoModal, PostedVideoFormData } from './components/reviews/PostedVideoModal';
 
-import { TasksView } from './components/tasks/TasksView';
-import { CreateTaskModal } from './components/tasks/CreateTaskModal';
-
-import { ReportsView } from './components/reports/ReportsView';
 import { ExportView } from './components/export/ExportView';
 import { SettingsView } from './components/settings/SettingsView';
 
@@ -67,11 +61,7 @@ const TAB_PATHS: Record<ActiveTab, string> = {
   outreach: '/outreach',
   inbox: '/inbox',
   campaigns: '/campaigns',
-  reviews: '/reviews',
-  tasks: '/tasks',
-  reports: '/reports',
   export: '/export',
-  ai: '/ai',
   notifications: '/notifications',
   settings: '/settings'
 };
@@ -79,15 +69,14 @@ const PATH_TO_TAB: Record<string, ActiveTab> = Object.fromEntries(
   Object.entries(TAB_PATHS).map(([tab, path]) => [path, tab as ActiveTab])
 ) as Record<string, ActiveTab>;
 
-// 1 lớp sâu hơn cho 3 chi tiết hay mở nhất — /creators/:id, /reviews/:id,
-// /campaigns/:id/edit — parse trực tiếp từ pathname thay vì tra bảng cố định như trên.
-type RouteParams = { creatorId?: string; reviewId?: string; campaignEditId?: string };
+// 1 lớp sâu hơn cho 2 chi tiết hay mở nhất — /creators/:id, /campaigns/:id/edit — parse trực
+// tiếp từ pathname thay vì tra bảng cố định như trên.
+type RouteParams = { creatorId?: string; campaignEditId?: string };
 type ParsedRoute = { tab: ActiveTab } & RouteParams;
 
 const parseRoute = (pathname: string): ParsedRoute => {
   const parts = pathname.split('/').filter(Boolean);
   if (parts[0] === 'creators' && parts[1]) return { tab: 'creators', creatorId: parts[1] };
-  if (parts[0] === 'reviews' && parts[1]) return { tab: 'reviews', reviewId: parts[1] };
   if (parts[0] === 'campaigns' && parts[1] && parts[2] === 'edit') return { tab: 'campaigns', campaignEditId: parts[1] };
   return { tab: PATH_TO_TAB['/' + (parts[0] || 'dashboard')] || 'dashboard' };
 };
@@ -99,7 +88,6 @@ export function App() {
   // reviews/campaigns fetch bất đồng bộ) — giữ tạm ở đây, effect riêng theo từng data
   // collection sẽ resolve thành object thật + tự dọn khi data đã load xong.
   const [pendingCreatorId, setPendingCreatorId] = useState<string | null>(initialRoute.creatorId || null);
-  const [pendingReviewId, setPendingReviewId] = useState<string | null>(initialRoute.reviewId || null);
   const [pendingCampaignEditId, setPendingCampaignEditId] = useState<string | null>(initialRoute.campaignEditId || null);
 
   const navigateTo = (path: string) => {
@@ -127,8 +115,6 @@ export function App() {
       setActiveTabState(route.tab);
       setSelectedCreatorDetail(null);
       setPendingCreatorId(route.creatorId || null);
-      setSelectedReviewDetail(null);
-      setPendingReviewId(route.reviewId || null);
       setEditingCampaign(null);
       setPendingCampaignEditId(route.campaignEditId || null);
     };
@@ -148,7 +134,7 @@ export function App() {
 
   // Core Data Collections
   const [creators, setCreators] = useState<Creator[]>(INITIAL_CREATORS);
-  // Danh sách siêu nhẹ (id/handle/displayName/avatar/status/category/brandFitScore, xem
+  // Danh sách siêu nhẹ (id/handle/displayName/avatar/status/category, xem
   // /api/creators/lite) — dùng cho CommandPalette + AiDrawer, vốn chỉ cần chọn 1 creator từ
   // danh sách chứ không hiển thị bảng CRM đầy đủ như CreatorListView. Tránh 2 UI đó phải ăn
   // theo state `creators` (~40 cột, toàn bộ bảng) chỉ để render vài trăm byte mỗi dòng.
@@ -235,7 +221,6 @@ export function App() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isCreateCampaignModalOpen, setIsCreateCampaignModalOpen] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
-  const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState(false);
 
   // Selected Detail states
   const [selectedCreatorForEmail, setSelectedCreatorForEmail] = useState<Creator | null>(null);
@@ -247,12 +232,11 @@ export function App() {
   } | null>(null);
   const [selectedCreatorDetail, setSelectedCreatorDetail] = useState<Creator | null>(null);
   const [preselectCampaignId, setPreselectCampaignId] = useState<string | null>(null);
-  const [selectedReviewDetail, setSelectedReviewDetail] = useState<DraftReview | null>(null);
   const [reviewForPostedVideo, setReviewForPostedVideo] = useState<DraftReview | null>(null);
 
   // /api/creators (state `creators`) chỉ trả cột nhẹ cho bảng danh sách — bio/recentVideos/
-  // demographics/scoreBreakdown/pps/sampleScore đầy đủ/salesMetrics/collabMetrics/videoMetrics/
-  // liveMetrics/notes/tags CHỈ có khi fetch riêng /api/creators/:id (getCreatorById, full row).
+  // demographics/salesMetrics/videoMetrics/liveMetrics/notes/tags CHỈ có khi fetch riêng
+  // /api/creators/:id (getCreatorById, full row).
   // Gọi hàm này mỗi khi mở CreatorDetailDrawer để nạp đủ dữ liệu cho các field đó.
   const fetchFullCreatorDetail = async (id: string) => {
     try {
@@ -263,21 +247,6 @@ export function App() {
       }
     } catch (err) {
       console.error('Failed to fetch full creator detail:', err);
-    }
-  };
-
-  // /api/reviews (state `reviews`) chỉ trả cột nhẹ cho lưới danh sách — checklist/feedback/
-  // feedbackNote/aiAnalysis/videoThumbnail CHỈ có khi fetch riêng /api/reviews/:id (getReviewById,
-  // full row). Gọi hàm này mỗi khi mở ReviewDetailModal để nạp đủ dữ liệu cho các field đó.
-  const fetchFullReviewDetail = async (id: string) => {
-    try {
-      const res = await fetch(`/api/reviews/${id}`);
-      const data = await res.json();
-      if (data.success && data.data) {
-        setSelectedReviewDetail(prev => (prev?.id === id ? data.data : prev));
-      }
-    } catch (err) {
-      console.error('Failed to fetch full review detail:', err);
     }
   };
 
@@ -293,16 +262,6 @@ export function App() {
       fetchFullCreatorDetail(found.id);
     }
   }, [pendingCreatorId, creators]);
-
-  useEffect(() => {
-    if (!pendingReviewId) return;
-    const found = reviews.find(r => r.id === pendingReviewId);
-    if (found) {
-      setSelectedReviewDetail(found);
-      setPendingReviewId(null);
-      fetchFullReviewDetail(found.id);
-    }
-  }, [pendingReviewId, reviews]);
 
   useEffect(() => {
     if (!pendingCampaignEditId) return;
@@ -327,19 +286,6 @@ export function App() {
   const closeCreatorDetail = () => {
     setSelectedCreatorDetail(null);
     navigateTo(TAB_PATHS.creators);
-  };
-
-  const openReviewDetail = (r: DraftReview) => {
-    setActiveTabState('reviews');
-    setSelectedReviewDetail(r);
-    navigateTo(`/reviews/${r.id}`);
-    // r thường tới từ list state đã trim cột nặng (xem fetchFullReviewDetail) — nạp lại đầy đủ
-    // dữ liệu ngay khi mở, modal hiện tạm với dữ liệu nhẹ trong lúc chờ.
-    fetchFullReviewDetail(r.id);
-  };
-  const closeReviewDetail = () => {
-    setSelectedReviewDetail(null);
-    navigateTo(TAB_PATHS.reviews);
   };
 
   const openCampaignEdit = (c: Campaign) => {
@@ -503,10 +449,10 @@ export function App() {
   }, [creators]);
 
   // conversations mặc định là bản rút gọn (không có messages) — nạp lại bản đầy đủ đúng lúc
-  // operator mở Inbox (đọc/trả lời thread) hoặc Reports (biểu đồ replies theo ngày cần message-
-  // level data), thay vì tải full messages ngay từ lúc app mount dù chưa chắc dùng đến.
+  // operator mở Inbox (đọc/trả lời thread), thay vì tải full messages ngay từ lúc app mount dù
+  // chưa chắc dùng đến.
   useEffect(() => {
-    if (activeTab === 'inbox' || activeTab === 'reports') {
+    if (activeTab === 'inbox') {
       fetchFullConversations();
     }
   }, [activeTab]);
@@ -875,30 +821,6 @@ export function App() {
     }
   };
 
-  const handleCreateTask = (taskData: any) => {
-    const newTask: Task = {
-      id: `task-${Date.now()}`,
-      ...taskData,
-      status: 'Pending',
-      createdAt: new Date().toISOString()
-    };
-    setTasks(prev => [newTask, ...prev]);
-  };
-
-  const handleToggleTask = (taskId: string) => {
-    setTasks(prev =>
-      prev.map(t =>
-        t.id === taskId
-          ? { ...t, status: t.status === 'Pending' ? 'Completed' : 'Pending' }
-          : t
-      )
-    );
-  };
-
-  const handleDeleteTask = (taskId: string) => {
-    setTasks(prev => prev.filter(t => t.id !== taskId));
-  };
-
   // Cả archive và đổi trạng thái pipeline (kéo-thả kanban) đều phải ghi vào đúng assignment
   // của workspace đang mở — xem POST /api/creators/:id/workspace-status ở server.ts — để
   // hành động ở workspace này không ảnh hưởng tới cách creator hiện ra ở workspace khác.
@@ -1053,47 +975,6 @@ export function App() {
     }
   };
 
-  // Chấm điểm creator CHO 1 campaign cụ thể (Niche/Audience Fit khớp đúng campaign đó) —
-  // lưu riêng vào creator.campaignScores, không đụng brandFitScore (điểm nền) vì cùng 1
-  // creator còn dùng lại cho campaign/brand khác.
-  const handleScoreCreatorForCampaign = async (creatorId: string, campaignId: string) => {
-    try {
-      const res = await fetch(`/api/creators/${creatorId}/score`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaignId })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setCreators(prev => prev.map(c => (c.id === creatorId ? data.data.creator : c)));
-      }
-    } catch (err) {
-      console.error('Error scoring creator for campaign:', err);
-    }
-  };
-
-  const handleUpdateReviewStatus = async (
-    reviewId: string,
-    status: DraftReview['status'],
-    feedback?: string,
-    checklist?: DraftReview['checklist']
-  ) => {
-    closeReviewDetail();
-    try {
-      const res = await fetch(`/api/reviews/${reviewId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, feedback, checklist })
-      });
-      const data = await res.json();
-      if (data.success && data.data) {
-        setReviews(prev => prev.map(r => (r.id === reviewId ? data.data : r)));
-      }
-    } catch (err) {
-      console.error('Error updating review status:', err);
-    }
-  };
-
   const handleSubmitPostedVideo = async (reviewId: string, form: PostedVideoFormData) => {
     setReviewForPostedVideo(null);
     const review = reviews.find(r => r.id === reviewId);
@@ -1204,7 +1085,6 @@ export function App() {
         unreadNotifsCount={workspaceNotifications.filter(n => !n.isRead).length}
         creatorsCount={workspaceCreators.length}
         unreadInboxCount={workspaceConversations.filter(c => c.unread).length}
-        openAiDrawer={() => setIsAiDrawerOpen(true)}
         openNotifDrawer={() => setIsNotificationDrawerOpen(true)}
       />
 
@@ -1213,7 +1093,6 @@ export function App() {
         {/* Top Navbar */}
         <Navbar
           openCommandPalette={() => setIsCommandPaletteOpen(true)}
-          openAiDrawer={() => setIsAiDrawerOpen(true)}
           openNotifDrawer={() => setIsNotificationDrawerOpen(true)}
           unreadNotifsCount={workspaceNotifications.filter(n => !n.isRead).length}
           darkMode={darkMode}
@@ -1244,7 +1123,6 @@ export function App() {
               onSelectCreator={openCreatorDetail}
               onOpenQuickAdd={() => setIsQuickAddModalOpen(true)}
               onOpenAi={() => setIsAiDrawerOpen(true)}
-              onCompleteTask={handleToggleTask}
             />
           )}
 
@@ -1313,36 +1191,8 @@ export function App() {
               onEditCampaign={openCampaignEdit}
               onArchiveCampaign={handleArchiveCampaign}
               onSelectCreator={openCreatorDetail}
-              onScoreCreator={handleScoreCreatorForCampaign}
               preselectCampaignId={preselectCampaignId}
               onOpenBulkOutreach={(creatorIds, campaignId) => setBulkOutreachConfig({ creatorIds, defaultCampaignId: campaignId })}
-            />
-          )}
-
-          {activeTab === 'reviews' && (
-            <ReviewsView
-              reviews={workspaceReviews}
-              postedVideos={workspacePostedVideos}
-              onSelectReview={openReviewDetail}
-              onMarkAsPosted={setReviewForPostedVideo}
-            />
-          )}
-
-          {activeTab === 'tasks' && (
-            <TasksView
-              tasks={workspaceTasks}
-              onToggleComplete={handleToggleTask}
-              onOpenCreateTask={() => setIsCreateTaskModalOpen(true)}
-              onDeleteTask={handleDeleteTask}
-            />
-          )}
-
-          {activeTab === 'reports' && (
-            <ReportsView
-              creators={workspaceCreators}
-              campaigns={workspaceCampaigns}
-              outreachList={workspaceOutreach}
-              conversations={workspaceConversations}
             />
           )}
 
@@ -1395,7 +1245,6 @@ export function App() {
         onClose={() => setIsCommandPaletteOpen(false)}
         creators={workspaceCreatorsLite}
         campaigns={workspaceCampaigns}
-        tasks={workspaceTasks}
         onSelectCreator={openCreatorDetail}
         onSelectCampaign={cmp => {
           setPreselectCampaignId(cmp.id);
@@ -1403,7 +1252,6 @@ export function App() {
         }}
         onSelectTab={setActiveTab}
         onOpenQuickAdd={() => setIsQuickAddModalOpen(true)}
-        onOpenAi={() => setIsAiDrawerOpen(true)}
       />
 
       <QuickAddCreatorModal
@@ -1433,13 +1281,6 @@ export function App() {
         onSubmit={campData => {
           if (editingCampaign) handleUpdateCampaign(editingCampaign.id, campData);
         }}
-      />
-
-      <CreateTaskModal
-        isOpen={isCreateTaskModalOpen}
-        onClose={() => setIsCreateTaskModalOpen(false)}
-        creators={creators}
-        onSubmit={handleCreateTask}
       />
 
       <EmailComposerModal
@@ -1475,17 +1316,10 @@ export function App() {
         }}
         onArchiveCreator={handleArchiveCreator}
         onAddNote={handleAddCreatorNote}
-        onRunAiResearch={() => setIsAiDrawerOpen(true)}
         onAssignCampaign={handleAssignCampaignToCreator}
         onUnassignCampaign={handleUnassignCreatorCampaign}
         onUpdateAssignment={handleUpdateAssignment}
         onUpdateEmail={handleUpdateCreatorEmail}
-      />
-
-      <ReviewDetailModal
-        review={selectedReviewDetail}
-        onClose={closeReviewDetail}
-        onUpdateStatus={handleUpdateReviewStatus}
       />
 
       <PostedVideoModal

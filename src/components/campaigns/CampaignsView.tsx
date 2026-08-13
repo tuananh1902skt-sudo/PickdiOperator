@@ -6,8 +6,6 @@ import {
   Calendar,
   Package,
   ExternalLink,
-  Sparkles,
-  RefreshCw,
   Pencil,
   Archive
 } from 'lucide-react';
@@ -26,7 +24,6 @@ interface CampaignsViewProps {
   onEditCampaign: (campaign: Campaign) => void;
   onArchiveCampaign: (campaignId: string) => void;
   onSelectCreator: (cr: Creator) => void;
-  onScoreCreator: (creatorId: string, campaignId: string) => Promise<void>;
   preselectCampaignId?: string | null;
   onOpenBulkOutreach?: (creatorIds: string[], campaignId: string) => void;
 }
@@ -45,12 +42,10 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
   onEditCampaign,
   onArchiveCampaign,
   onSelectCreator,
-  onScoreCreator,
   preselectCampaignId,
   onOpenBulkOutreach
 }) => {
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>(campaigns[0]?.id || '');
-  const [scoringId, setScoringId] = useState<string | null>(null);
 
   // A campaign picked elsewhere (e.g. the ⌘K command palette) should open here selected,
   // not just switch to this tab and leave whatever was already selected.
@@ -328,7 +323,6 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
                     <th className="p-3">Creator</th>
                     <th className="p-3">Category</th>
                     <th className="p-3 text-right">Followers</th>
-                    <th className="p-3 text-center">Brand Fit (campaign này)</th>
                     <th className="p-3">Status</th>
                     <th className="p-3 text-right">Action</th>
                   </tr>
@@ -336,25 +330,17 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {assignedCreators.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center py-8 text-slate-400">
+                      <td colSpan={5} className="text-center py-8 text-slate-400">
                         No creators assigned to this campaign yet. Assign creators from Creators CRM list!
                       </td>
                     </tr>
                   ) : (
                     assignedCreators.map(cr => {
-                      const campaignScore = cr.campaignScores?.find(s => s.campaignId === selectedCampaign.id);
-                      const isScoring = scoringId === cr.id;
                       // Trạng thái RIÊNG cho lần hợp tác này (creator có thể "Negotiating" ở
                       // campaign khác nhưng "Posted" ở đây) — fallback về status chung của
                       // creator nếu vì lý do gì đó chưa có assignment record khớp.
                       const assignmentStatus =
                         assignments.find(a => a.creatorId === cr.id && a.campaignId === selectedCampaign.id)?.status || cr.status;
-
-                      const handleScoreClick = async () => {
-                        setScoringId(cr.id);
-                        await onScoreCreator(cr.id, selectedCampaign.id);
-                        setScoringId(null);
-                      };
 
                       return (
                         <tr key={cr.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
@@ -369,32 +355,6 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
                           </td>
                           <td className="p-3 text-slate-700 dark:text-slate-300">{cr.category || '—'}</td>
                           <td className="p-3 text-right font-semibold">{cr.followers !== undefined ? `${(cr.followers / 1000).toFixed(0)}K` : '—'}</td>
-                          <td className="p-3 text-center">
-                            {campaignScore ? (
-                              <span className="inline-flex items-center gap-1.5">
-                                <span className="font-bold text-indigo-600" title={campaignScore.breakdown.recommendation}>
-                                  {campaignScore.breakdown.totalScore}/100
-                                </span>
-                                <button
-                                  onClick={handleScoreClick}
-                                  disabled={isScoring}
-                                  title="Chấm lại (dữ liệu creator có thể đã cập nhật)"
-                                  className="p-0.5 text-slate-400 hover:text-indigo-600 disabled:opacity-50"
-                                >
-                                  <RefreshCw className={`w-3 h-3 ${isScoring ? 'animate-spin' : ''}`} />
-                                </button>
-                              </span>
-                            ) : (
-                              <button
-                                onClick={handleScoreClick}
-                                disabled={isScoring}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 text-[11px] font-bold hover:bg-indigo-50 dark:hover:bg-indigo-950 disabled:opacity-50"
-                              >
-                                <Sparkles className="w-3 h-3" />
-                                {isScoring ? 'Đang chấm...' : 'Chấm điểm'}
-                              </button>
-                            )}
-                          </td>
                           <td className="p-3">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${getCreatorStatusBadge(assignmentStatus)}`}>
                               {assignmentStatus}

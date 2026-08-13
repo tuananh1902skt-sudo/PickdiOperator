@@ -5,10 +5,6 @@ import {
   Send,
   Inbox,
   Target,
-  FileCheck2,
-  CheckSquare,
-  BarChart3,
-  Sparkles,
   Bell,
   Settings,
   ChevronLeft,
@@ -24,11 +20,7 @@ export type ActiveTab =
   | 'outreach'
   | 'inbox'
   | 'campaigns'
-  | 'reviews'
-  | 'tasks'
-  | 'reports'
   | 'export'
-  | 'ai'
   | 'notifications'
   | 'settings';
 
@@ -40,7 +32,6 @@ interface SidebarProps {
   unreadNotifsCount: number;
   creatorsCount?: number;
   unreadInboxCount?: number;
-  openAiDrawer: () => void;
   openNotifDrawer?: () => void;
 }
 
@@ -52,7 +43,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   unreadNotifsCount,
   creatorsCount = 0,
   unreadInboxCount = 0,
-  openAiDrawer,
   openNotifDrawer
 }) => {
   const navItems = [
@@ -61,11 +51,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'outreach' as ActiveTab, label: 'Outreach & Pipeline', icon: Send },
     { id: 'inbox' as ActiveTab, label: 'Inbox', icon: Inbox, count: unreadInboxCount },
     { id: 'campaigns' as ActiveTab, label: 'Campaigns', icon: Target },
-    { id: 'reviews' as ActiveTab, label: 'Content Reviews', icon: FileCheck2 },
-    { id: 'tasks' as ActiveTab, label: 'Tasks', icon: CheckSquare },
-    { id: 'reports' as ActiveTab, label: 'Reports & Analytics', icon: BarChart3 },
     { id: 'export' as ActiveTab, label: 'Xuất Google Sheet', icon: FileSpreadsheet },
-    { id: 'ai' as ActiveTab, label: 'AI Assistant', icon: Sparkles, badge: 'PRO' },
     { id: 'notifications' as ActiveTab, label: 'Notifications', icon: Bell, count: unreadNotifsCount },
     { id: 'settings' as ActiveTab, label: 'Settings', icon: Settings },
   ];
@@ -115,9 +101,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               key={item.id}
               id={`nav-item-${item.id}`}
               onClick={() => {
-                if (item.id === 'ai') {
-                  openAiDrawer();
-                } else if (item.id === 'notifications') {
+                if (item.id === 'notifications') {
                   if (openNotifDrawer) openNotifDrawer();
                   else setActiveTab(item.id);
                 } else {
@@ -145,12 +129,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {!collapsed && item.count ? (
                 <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-rose-500 text-white">
                   {item.count}
-                </span>
-              ) : null}
-
-              {!collapsed && item.badge ? (
-                <span className="px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
-                  {item.badge}
                 </span>
               ) : null}
             </button>

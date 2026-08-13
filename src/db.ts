@@ -99,9 +99,6 @@ export function rowToCreator(row: any): Creator {
     gmv30d: row.gmv30d != null ? Number(row.gmv30d) : undefined,
     category: row.category || undefined,
     niche: parseJson(row.niche, undefined),
-    brandFitScore: row.brandFitScore != null ? Number(row.brandFitScore) : undefined,
-    commercialScore: row.commercialScore != null ? Number(row.commercialScore) : undefined,
-    riskScore: row.riskScore != null ? Number(row.riskScore) : undefined,
     status: row.status,
     owner: row.owner,
     email: row.email || undefined,
@@ -122,8 +119,6 @@ export function rowToCreator(row: any): Creator {
     recentVideos: parseJson(row.recentVideos, undefined),
     demographics: parseJson(row.demographics, undefined),
     isMock: row.isMock != null ? Boolean(row.isMock) : undefined,
-    scoreBreakdown: parseJson(row.scoreBreakdown, undefined),
-    campaignScores: parseJson(row.campaignScores, undefined),
     gmvTier: row.gmvTier || undefined,
     gpm: row.gpm != null ? Number(row.gpm) : undefined,
     beautyCategoryRatio: row.beautyCategoryRatio != null ? Number(row.beautyCategoryRatio) : undefined,
@@ -133,8 +128,6 @@ export function rowToCreator(row: any): Creator {
     importedAt: row.importedAt || undefined,
     tcmCreatorOecuid: row.tcmCreatorOecuid || undefined,
     tcmNotFoundAt: row.tcmNotFoundAt || undefined,
-    pps: parseJson(row.pps, undefined),
-    sampleScore: parseJson(row.sampleScore, undefined),
     salesMetrics: parseJson(row.salesMetrics, undefined),
     collabMetrics: parseJson(row.collabMetrics, undefined),
     videoMetrics: parseJson(row.videoMetrics, undefined),
@@ -407,9 +400,6 @@ export async function saveCreator(c: Creator): Promise<void> {
     gmv30d: c.gmv30d ?? null,
     category: c.category ?? null,
     niche: c.niche ?? null,
-    brandFitScore: c.brandFitScore ?? null,
-    commercialScore: c.commercialScore ?? null,
-    riskScore: c.riskScore ?? null,
     status: c.status,
     owner: c.owner,
     email: c.email ?? null,
@@ -430,8 +420,6 @@ export async function saveCreator(c: Creator): Promise<void> {
     recentVideos: c.recentVideos ?? null,
     demographics: c.demographics ?? null,
     isMock: !!c.isMock,
-    scoreBreakdown: c.scoreBreakdown ?? null,
-    campaignScores: c.campaignScores ?? null,
     gmvTier: gmvTier ?? null,
     gpm: c.gpm ?? null,
     beautyCategoryRatio: c.beautyCategoryRatio ?? null,
@@ -441,8 +429,6 @@ export async function saveCreator(c: Creator): Promise<void> {
     importedAt: c.importedAt ?? null,
     tcmCreatorOecuid: c.tcmCreatorOecuid ?? null,
     tcmNotFoundAt: c.tcmNotFoundAt ?? null,
-    pps: c.pps ?? null,
-    sampleScore: c.sampleScore ?? null,
     salesMetrics: c.salesMetrics ?? null,
     collabMetrics: c.collabMetrics ?? null,
     videoMetrics: c.videoMetrics ?? null,
@@ -977,19 +963,27 @@ export async function getAllCreators(filters?: CreatorListFilters): Promise<Crea
 
 // Select trơn hơn cho trang danh sách CRM (/api/creators, App.tsx global `creators` state) —
 // bỏ các cột JSONB nặng chỉ dùng ở CreatorDetailDrawer (notes/tags/recentVideos/demographics/
-// scoreBreakdown/pps/salesMetrics/collabMetrics/videoMetrics/liveMetrics), vốn được fetch riêng
-// qua getCreatorById khi operator mở chi tiết 1 creator (xem CreatorDetailDrawer + App.tsx).
-// Giữ lại niche (dùng cho search + cột Category trong bảng), sampleScore (cờ hiện badge "đã cào
-// TCM"), campaignScores (badge điểm theo từng campaign ở CampaignsView) vì list-level UI đọc
-// thẳng các field này mà không fetch lại — xem báo cáo audit trước khi trim.
+// salesMetrics/videoMetrics/liveMetrics), vốn được fetch riêng qua getCreatorById khi operator
+// mở chi tiết 1 creator (xem CreatorDetailDrawer + App.tsx).
+// Giữ lại niche (dùng cho search + cột Category trong bảng), collabMetrics (cờ hiện badge "đã
+// cào chi tiết TCM" ở CreatorListView — field này CHỈ được normalizeTcmProfileDetail() set, KHÔNG
+// bao giờ được set bởi flow list/handle-search dùng normalizeCreator(), nên là cờ đáng tin cậy
+// hơn tcmCreatorOecuid/metricsSyncedAt vốn cũng bị set bởi flow "tìm cid" — xem extension/shared.js)
+// vì list-level UI đọc thẳng field này mà không fetch lại — xem báo cáo audit trước khi trim.
+// Đã rà lại (2026-08-13) từng field so với usage thật của CreatorListView.tsx + mọi view khác
+// dùng chung state creators (OutreachView/CampaignsView/ExportView/InboxView/DashboardView) —
+// bỏ 17 field không được list-level UI nào đọc tới (source/platform/language/bio/phone/
+// instagram/rateCard/createdAt/updatedAt/followerGrowthRate/postingFrequency30d/maxMinRatio/
+// lastVideoDate/erFollower/medianViews/gpm/hasAffiliateGmv/isMock — toàn bộ chỉ cần khi mở
+// CreatorDetailDrawer, nơi đã fetch lại full row qua getCreatorById() rồi). Field nào còn giữ
+// lại đều có usage thật (render/filter/sort/tooltip) đã grep xác nhận, xem báo cáo audit.
 const CREATOR_LIST_COLUMNS = [
-  'id', '"workspaceId"', 'source', 'handle', '"displayName"', 'avatar', 'platform', 'country', 'language',
-  'bio', '"profileUrl"', 'followers', '"avgViews"', '"engagementRate"', 'gmv30d', 'category', 'niche',
-  '"brandFitScore"', '"commercialScore"', '"riskScore"', 'status', 'owner', 'email', 'phone', 'instagram',
-  '"rateCard"', '"lastContactAt"', '"createdAt"', '"updatedAt"', '"followerGrowthRate"', '"postingFrequency30d"',
-  '"maxMinRatio"', '"lastVideoDate"', '"erFollower"', '"medianViews"', '"isMock"', '"campaignScores"',
-  '"gmvTier"', 'gpm', '"beautyCategoryRatio"', '"hasAffiliateGmv"', '"metricsSource"', '"metricsSyncedAt"',
-  '"importedAt"', '"tcmCreatorOecuid"', '"tcmNotFoundAt"', '"sampleScore"',
+  'id', '"workspaceId"', 'handle', '"displayName"', 'avatar', 'country',
+  '"profileUrl"', 'followers', '"avgViews"', '"engagementRate"', 'gmv30d', 'category', 'niche',
+  'status', 'owner', 'email',
+  '"lastContactAt"',
+  '"gmvTier"', '"beautyCategoryRatio"', '"metricsSource"', '"metricsSyncedAt"',
+  '"importedAt"', '"tcmCreatorOecuid"', '"tcmNotFoundAt"', '"collabMetrics"',
 ].join(', ');
 
 export async function getCreatorsForList(filters?: CreatorListFilters): Promise<Creator[]> {
@@ -1000,34 +994,16 @@ export async function getCreatorsForList(filters?: CreatorListFilters): Promise<
 // Select tối thiểu cho các UI chỉ cần "chọn 1 creator từ danh sách" chứ không hiển thị bảng CRM
 // đầy đủ — CommandPalette (⌘K search), AiDrawer (dropdown "Target Creator"). Trước đây các UI
 // này dùng chung state `creators` đã load CREATOR_LIST_COLUMNS (~40 cột) cho toàn bộ bảng, dù
-// chỉ render avatar/tên/handle/category/score. rowToCreator() tự default các cột thiếu (bio,
+// chỉ render avatar/tên/handle/category. rowToCreator() tự default các cột thiếu (bio,
 // notes, tags,...) nên object trả về vẫn khớp type Creator — an toàn dùng làm placeholder khi
 // mở CreatorDetailDrawer (xem openCreatorDetail ở App.tsx, đã fetch lại đầy đủ ngay sau đó).
 // KHÔNG dùng list này để gửi thẳng cho AI research/email/reply — AiDrawer phải tự fetch full
-// creator qua /api/creators/:id trước khi gọi các route đó, vì AI cần bio/score/metrics thật.
-const CREATOR_MINI_COLUMNS = ['id', 'handle', '"displayName"', 'avatar', 'status', 'category', '"brandFitScore"'].join(', ');
+// creator qua /api/creators/:id trước khi gọi các route đó, vì AI cần bio/metrics thật.
+const CREATOR_MINI_COLUMNS = ['id', 'handle', '"displayName"', 'avatar', 'status', 'category'].join(', ');
 
 export async function getCreatorsMini(filters?: CreatorListFilters): Promise<Creator[]> {
   const { rows, q } = await queryAllCreatorRows(CREATOR_MINI_COLUMNS, filters);
   return filterCreatorsByNicheSearch(rows.map(rowToCreator), q);
-}
-
-// Chỉ lấy status của mọi creator (1 cột thay vì toàn bộ ~40 cột + JSONB blobs) — dùng cho
-// /api/dashboard vốn chỉ cần đếm theo status, không cần dữ liệu đầy đủ của từng creator.
-export async function getCreatorStatusCounts(): Promise<Record<string, number>> {
-  const db = getDb();
-  const PAGE_SIZE = 1000;
-  const counts: Record<string, number> = {};
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await db.from('creators').select('status').range(from, from + PAGE_SIZE - 1);
-    if (error) throw error;
-    for (const row of data ?? []) {
-      const key = row.status || 'Unknown';
-      counts[key] = (counts[key] || 0) + 1;
-    }
-    if (!data || data.length < PAGE_SIZE) break;
-  }
-  return counts;
 }
 
 // Chỉ lấy id + handle (dùng cho dedup-map khi batch-import) — tránh kéo toàn bộ row (kể cả

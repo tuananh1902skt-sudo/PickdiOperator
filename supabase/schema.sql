@@ -44,9 +44,8 @@ create table if not exists creators (
   gmv30d double precision,
   category text,
   niche jsonb,
-  "brandFitScore" double precision,
-  "commercialScore" double precision,
-  "riskScore" double precision,
+  -- brandFitScore/commercialScore/riskScore: creator-scoring feature removed (2026-08-13) —
+  -- see DROP COLUMN migration at the end of this file, must be run manually in prod.
   status text,
   owner text,
   email text,
@@ -82,8 +81,8 @@ create table if not exists creators (
   -- "topVideos" jsonb,
   -- "recentVideosFull" jsonb,
   -- "brandPartners" jsonb,
-  "scoreBreakdown" jsonb,
-  "campaignScores" jsonb,
+  -- scoreBreakdown/campaignScores: creator-scoring feature removed (2026-08-13) — see DROP
+  -- COLUMN migration at the end of this file, must be run manually in prod.
   created_at_ts bigint,
   rowid bigserial
 );
@@ -110,10 +109,10 @@ alter table creators add column if not exists "metricsSyncedAt" text;
 -- qua TCM extension), xem comment Creator.importedAt trong src/types.ts.
 alter table creators add column if not exists "importedAt" text;
 
--- Chi tiết theo đúng tab thật của TikTok Creator Marketplace creator detail (PPS/Sample
--- score/Sales/Collaboration metrics/Video/LIVE) — thêm sau Session 5 UI redesign.
-alter table creators add column if not exists pps jsonb;
-alter table creators add column if not exists "sampleScore" jsonb;
+-- Chi tiết theo đúng tab thật của TikTok Creator Marketplace creator detail (Sales/
+-- Collaboration metrics/Video/LIVE) — thêm sau Session 5 UI redesign.
+-- pps/sampleScore (TCM "PPS" / "Sample Credit Score" tabs): creator-scoring feature removed
+-- (2026-08-13) — see DROP COLUMN migration at the end of this file, must be run manually in prod.
 alter table creators add column if not exists "salesMetrics" jsonb;
 alter table creators add column if not exists "collabMetrics" jsonb;
 alter table creators add column if not exists "videoMetrics" jsonb;
@@ -401,3 +400,17 @@ alter table bulk_outreach_jobs add column if not exists "sendLockUntil" text;
 -- reminder sent later in that conversation even though the subject line still looks correct.
 -- Safe to re-run.
 alter table unmatched_inbound_emails add column if not exists "messageId" text;
+
+-- Migration (2026-08-13): creator-scoring feature removed entirely (scoreCreator() engine,
+-- the "AI Research" agent that reasoned over the score breakdown, and the TCM-sourced PPS/
+-- Sample Credit Score fields — all decided out of scope by the user, see conversation).
+-- App code no longer reads or writes any of these 7 columns — safe to drop from prod.
+-- NOT executed automatically (no live Supabase access from this environment) — a human must
+-- run this manually in the Supabase SQL editor.
+-- alter table creators drop column if exists "brandFitScore";
+-- alter table creators drop column if exists "commercialScore";
+-- alter table creators drop column if exists "riskScore";
+-- alter table creators drop column if exists "scoreBreakdown";
+-- alter table creators drop column if exists "campaignScores";
+-- alter table creators drop column if exists "pps";
+-- alter table creators drop column if exists "sampleScore";

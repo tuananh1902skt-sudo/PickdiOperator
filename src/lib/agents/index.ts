@@ -11,9 +11,6 @@ export {
 } from './outreach';
 export type { OutreachEmailContext, ReminderContext, NegotiationReplyContext } from './outreach';
 
-export { creatorDeepResearchAgent } from './creator';
-export type { CreatorResearchContext } from './creator';
-
 export { reviewComplianceChecklistAgent } from './review';
 export type { ReviewComplianceContext } from './review';
 
@@ -26,7 +23,6 @@ export type { CopilotChatContext } from './chat';
 // Full registry keyed by agent id — used by the "Agent Playground" tab in AiDrawer to list
 // every trained agent and let the operator test one directly.
 import { outreachFirstContactAgent, outreachReminder1Agent, outreachReminder2Agent, outreachReminder3Agent, negotiationReplyAgent } from './outreach';
-import { creatorDeepResearchAgent } from './creator';
 import { reviewComplianceChecklistAgent } from './review';
 import { opsDailySummaryAgent, opsPrioritySuggesterAgent } from './ops';
 import { copilotChatAgent } from './chat';
@@ -38,7 +34,6 @@ export const AGENT_REGISTRY: Record<string, AgentDefinition<any>> = {
   [outreachReminder2Agent.id]: outreachReminder2Agent,
   [outreachReminder3Agent.id]: outreachReminder3Agent,
   [negotiationReplyAgent.id]: negotiationReplyAgent,
-  [creatorDeepResearchAgent.id]: creatorDeepResearchAgent,
   [reviewComplianceChecklistAgent.id]: reviewComplianceChecklistAgent,
   [opsDailySummaryAgent.id]: opsDailySummaryAgent,
   [opsPrioritySuggesterAgent.id]: opsPrioritySuggesterAgent,

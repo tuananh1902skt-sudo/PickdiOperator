@@ -99,14 +99,11 @@ function whyThisCreator(creator?: Creator): string {
 
   if (facts.length === 0) return '';
 
-  const riskFlags = creator.scoreBreakdown?.riskFlags;
   const collabCount = creator.collabMetrics?.brandCollabCount;
   const isTopTier = creator.gmvTier === 'L4' || creator.gmvTier === 'L5';
 
   let conclusion = '';
-  if (riskFlags && riskFlags.length > 0) {
-    conclusion = `review carefully before partnering (${riskFlags[0]})`;
-  } else if (isTopTier && (creator.riskScore === undefined || creator.riskScore < 40)) {
+  if (isTopTier) {
     conclusion = collabCount ? `safe pick, already collabed with ${collabCount} other brands` : 'safe pick';
   } else if (beautyRatio !== undefined && beautyRatio >= 50) {
     conclusion = 'strong fit for the category';
@@ -147,7 +144,7 @@ const COLUMNS: ExportColumn[] = [
   { section: '1. Sourcing', header: 'Main Category (top 2)', get: ({ creator }) => categoryTop2(creator) },
   { section: '1. Sourcing', header: 'Demographic', get: ({ creator }) => demographicStr(creator) },
   { section: '1. Sourcing', header: 'GMV/Video, Last 30d ($)', get: ({ creator }) => formatUsdShort(creator?.gmv30d) },
-  { section: '1. Sourcing', header: 'Why This Creator', get: ({ creator }) => whyThisCreator(creator) || fmt(creator?.scoreBreakdown?.strengths?.join('; ')) },
+  { section: '1. Sourcing', header: 'Why This Creator', get: ({ creator }) => whyThisCreator(creator) },
   { header: 'O/X & Reason', get: () => '' },
   { section: '2. Outreach', header: '1st Email Sent', get: ({ emails }) => {
     const first = [...emails].filter(e => e.sentAt).sort((a, b) => new Date(a.sentAt!).getTime() - new Date(b.sentAt!).getTime())[0];

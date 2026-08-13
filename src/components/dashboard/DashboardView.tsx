@@ -8,9 +8,6 @@ import {
   Target,
   Sparkles,
   ArrowRight,
-  CheckCircle2,
-  Clock,
-  ChevronRight,
   Plus,
   Users,
   Video
@@ -48,7 +45,6 @@ interface DashboardViewProps {
   onSelectCreator: (cr: Creator) => void;
   onOpenQuickAdd: () => void;
   onOpenAi: () => void;
-  onCompleteTask: (id: string) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -67,8 +63,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onSelectTab,
   onSelectCreator,
   onOpenQuickAdd,
-  onOpenAi,
-  onCompleteTask
+  onOpenAi
 }) => {
   const [prioritySuggestion, setPrioritySuggestion] = useState<{ priorityAction: string; reasoning?: string } | null>(null);
 
@@ -259,10 +254,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Main Grid: Pipeline Funnel + Today Tasks */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Creator Pipeline Funnel (2 Cols) */}
-        <div className="lg:col-span-2 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs space-y-4">
+      {/* Creator Pipeline Funnel */}
+      <div className="grid grid-cols-1 gap-6">
+        <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="font-bold text-slate-900 dark:text-white text-base">
@@ -338,65 +332,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </button>
             </div>
           )}
-        </div>
-
-        {/* Today's Tasks Sidebar (1 Col) */}
-        <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs flex flex-col justify-between space-y-4">
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
-                Today's Tasks
-              </h3>
-              <button
-                onClick={() => onSelectTab('tasks')}
-                className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
-              >
-                View all ({tasks.length})
-              </button>
-            </div>
-
-            <div className="space-y-2.5">
-              {tasks.length === 0 ? (
-                <div className="text-center py-8 text-xs text-slate-400">All tasks completed!</div>
-              ) : (
-                tasks.map(t => (
-                  <div
-                    key={t.id}
-                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex items-start gap-2.5 text-xs hover:border-slate-300 dark:hover:border-slate-700 transition-all"
-                  >
-                    <button
-                      onClick={() => onCompleteTask(t.id)}
-                      className="mt-0.5 p-0.5 text-slate-300 hover:text-emerald-500 rounded"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                    </button>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-bold text-slate-800 dark:text-slate-200 leading-snug truncate">
-                        {t.title}
-                      </p>
-                      <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400">
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" /> Due {t.dueDate}
-                        </span>
-                        {t.relatedCreatorName && (
-                          <span className="text-indigo-600 dark:text-indigo-400 font-medium truncate">
-                            • {t.relatedCreatorName}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <button
-            onClick={() => onSelectTab('tasks')}
-            className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl text-xs flex items-center justify-center gap-1 transition-colors"
-          >
-            Manage Operational Tasks <ChevronRight className="w-4 h-4" />
-          </button>
         </div>
       </div>
 

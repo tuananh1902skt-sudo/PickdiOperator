@@ -36,8 +36,7 @@ export const CreateCampaignModal: React.FC<CreateCampaignModalProps> = ({
   const [productHighlights, setProductHighlights] = useState((campaign?.products?.[0]?.highlights || []).join('\n'));
   const [compensationOffer, setCompensationOffer] = useState(campaign?.products?.[0]?.compensationOffer || '');
 
-  // Target audience — dùng để chấm Audience Fit trong scoreCreator() (src/scoring.ts).
-  // Không bắt buộc: bỏ trống thì nhóm Audience Fit tự bị loại khỏi công thức chấm điểm.
+  // Target audience — mô tả chân dung audience mong muốn cho campaign này. Không bắt buộc.
   const [targetGender, setTargetGender] = useState<'Any' | 'Male' | 'Female'>(campaign?.targetAudience?.gender || 'Any');
   const [targetAgeGroups, setTargetAgeGroups] = useState<string[]>(campaign?.targetAudience?.ageGroups || []);
   const [targetCountries, setTargetCountries] = useState((campaign?.targetAudience?.countries || []).join(', '));

@@ -124,10 +124,8 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
               <div
                 key={n.id}
                 onClick={() => {
-                  if (n.category === 'Review') onSelectTab('reviews');
-                  else if (n.category === 'Outreach') onSelectTab('outreach');
+                  if (n.category === 'Outreach') onSelectTab('outreach');
                   else if (n.category === 'Campaign') onSelectTab('campaigns');
-                  else if (n.category === 'Task') onSelectTab('tasks');
                   onClose();
                 }}
                 className={`p-3.5 rounded-xl border transition-all cursor-pointer ${

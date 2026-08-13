@@ -3,7 +3,6 @@ import compression from 'compression';
 import path from 'path';
 import dotenv from 'dotenv';
 import { ZipArchive } from 'archiver';
-import { scoreCreator } from './src/scoring';
 import { getEmailConfig, saveEmailConfig, DEFAULT_SENDER_NAME } from './src/lib/emailConfig';
 import { sendEmail } from './src/lib/mailer';
 import { renderFirstContactEmailHtml } from './src/lib/emailTemplate';
@@ -19,7 +18,6 @@ import {
   classifyAgentError,
   OUTREACH_SEQUENCE_AGENTS,
   negotiationReplyAgent,
-  creatorDeepResearchAgent,
   reviewComplianceChecklistAgent,
   opsDailySummaryAgent,
   opsPrioritySuggesterAgent,
@@ -38,8 +36,6 @@ import {
   Campaign,
   OutreachEmail,
   Conversation,
-  ContentReview,
-  Task,
   NotificationItem,
   ActivityItem,
   BulkOutreachJob,
@@ -68,7 +64,6 @@ import {
   getAllCreators,
   getCreatorsForList,
   getCreatorsMini,
-  getCreatorStatusCounts,
   getAllCreatorHandles,
   getCreatorsCount,
   getFirstCreator,
@@ -96,15 +91,10 @@ import {
   getTodayReplyCount,
   incrementTodayReplyCounter,
   getAllReviews,
-  getReviewById,
-  saveReview,
   getAllTasks,
-  getTaskById,
-  saveTask,
   getAllNotifications,
   saveNotification,
   markAllNotificationsRead,
-  getAllActivities,
   addActivity,
   normalizeCreatorStoreInDb,
   searchAll,
@@ -118,7 +108,6 @@ import {
   unassignCreatorFromCampaign,
   saveBulkOutreachJob,
   getBulkOutreachJobById,
-  getSendingBulkOutreachJobs,
   tryClaimBulkOutreachSendLock,
   getAllPostedVideos,
   getPostedVideoById,
@@ -347,54 +336,6 @@ app.get('/api/kpis/today-replies', async (req, res) => {
   res.json({ success: true, data: { todayRepliesReceived: await getTodayReplyCount() } });
 });
 
-// Dashboard & KPIs
-app.get('/api/dashboard', async (req, res) => {
-  // Safety net beyond the bulk-job modal's own polling: if the operator closed that modal
-  // and comes back later via the dashboard, any job stalled past its nextSendAt still gets
-  // nudged forward here instead of staying stuck until someone reopens that exact job.
-  getSendingBulkOutreachJobs()
-    .then(jobs => jobs.forEach(job => maybeResumeBulkJob(job).catch(err => console.error(`Bulk outreach job ${job.id} resume-on-poll failed:`, err))))
-    .catch(err => console.error('Bulk outreach resume sweep failed:', err));
-
-  // Không phụ thuộc lẫn nhau — chạy song song thay vì 6 round-trip Supabase nối tiếp
-  // (mỗi round-trip ~0.5-1s, tuần tự cộng dồn là nguyên nhân chính khiến dashboard chậm).
-  const [kpis, allTasks, allNotifications, allActivities, conversations, statusCounts] = await Promise.all([
-    getKpis(INITIAL_KPIS),
-    getAllTasks(),
-    getAllNotifications(),
-    getAllActivities(),
-    getConversationsForList(),
-    getCreatorStatusCounts(),
-  ]);
-  const tasks = allTasks.filter(t => t.status !== 'Completed').slice(0, 5);
-  const notifications = allNotifications.slice(0, 5);
-  const activities = allActivities.slice(0, 8);
-  const recentReplies = conversations.filter(c => c.unread || c.status === 'Negotiating').slice(0, 5);
-
-  res.json({
-    success: true,
-    data: {
-      kpis,
-      tasks,
-      notifications,
-      activities,
-      recentReplies,
-      creatorsByStatus: {
-        NewLead: statusCounts['New Lead'] || 0,
-        Researching: statusCounts['Researching'] || 0,
-        Qualified: statusCounts['Qualified'] || 0,
-        ContactLan1: statusCounts['Contact lần 1'] || 0,
-        ContactLan2: statusCounts['Contact lần 2'] || 0,
-        ContactLan3: statusCounts['Contact lần 3'] || 0,
-        Negotiating: statusCounts['Negotiating'] || 0,
-        Approved: statusCounts['Approved'] || 0,
-        DraftSubmitted: statusCounts['Draft Submitted'] || 0,
-        Completed: statusCounts['Completed'] || 0,
-      }
-    }
-  });
-});
-
 // Creators API
 app.get('/api/creators', async (req, res) => {
   const { keyword, status, country, category, search } = req.query;
@@ -408,7 +349,7 @@ app.get('/api/creators', async (req, res) => {
   res.json({ success: true, data: filtered, meta: { total: filtered.length } });
 });
 
-// Danh sách siêu nhẹ (id/handle/displayName/avatar/status/category/brandFitScore) cho các UI
+// Danh sách siêu nhẹ (id/handle/displayName/avatar/status/category) cho các UI
 // chỉ cần chọn 1 creator (CommandPalette, AiDrawer) — không cần load ~40 cột CREATOR_LIST_COLUMNS
 // của /api/creators chỉ để hiển thị dropdown/typeahead. Đặt TRƯỚC /api/creators/:id vì Express
 // khớp route theo thứ tự khai báo, để lại sau thì "/api/creators/lite" sẽ bị :id nuốt mất.
@@ -456,9 +397,6 @@ app.post('/api/creators', async (req, res) => {
     engagementRate: toFiniteNumber(req.body.engagementRate),
     category: req.body.category || undefined,
     niche: Array.isArray(req.body.niche) ? req.body.niche : undefined,
-    brandFitScore: toFiniteNumber(req.body.brandFitScore),
-    commercialScore: toFiniteNumber(req.body.commercialScore),
-    riskScore: toFiniteNumber(req.body.riskScore),
     status: req.body.status || 'New Lead',
     owner: req.body.owner || 'Anh Tuan',
     email: req.body.email || undefined,
@@ -663,18 +601,6 @@ app.post('/api/creators/batch-import', async (req, res) => {
   for (const c of await getAllCreators()) {
     existingByHandle.set(c.handle.toLowerCase(), c);
   }
-  // Cache scoring criteria theo workspace — đa số dòng trong 1 lần import cùng chung workspace
-  // đích, gọi lại getWorkspaceById cho từng dòng (như applyScore vẫn làm) là round-trip thừa.
-  const criteriaCache = new Map<string, any>();
-  async function getCachedCriteria(wsId: string | undefined) {
-    if (!wsId) return undefined;
-    if (!criteriaCache.has(wsId)) {
-      const ws = await getWorkspaceById(wsId);
-      criteriaCache.set(wsId, ws?.scoringCriteria);
-    }
-    return criteriaCache.get(wsId);
-  }
-
   for (const item of batchList as any[]) {
    try {
     const rawHandle = (
@@ -770,10 +696,8 @@ app.post('/api/creators/batch-import', async (req, res) => {
         gpm: toFiniteNumber(item.gpm) ?? existing.gpm,
         beautyCategoryRatio: toFiniteNumber(item.beautyCategoryRatio) ?? existing.beautyCategoryRatio,
         hasAffiliateGmv: item.hasAffiliateGmv !== undefined ? item.hasAffiliateGmv : existing.hasAffiliateGmv,
-        // Chi tiết theo tab thật của TCM (PPS/Sample score/Sales/Collaboration/Video/LIVE) —
-        // popup.js đã chuẩn hoá đúng shape Creator, chỉ forward nguyên object, không parse lại.
-        pps: item.pps || existing.pps,
-        sampleScore: item.sampleScore || existing.sampleScore,
+        // Chi tiết theo tab thật của TCM (Sales/Collaboration/Video/LIVE) — popup.js đã chuẩn
+        // hoá đúng shape Creator, chỉ forward nguyên object, không parse lại.
         salesMetrics: item.salesMetrics || existing.salesMetrics,
         collabMetrics: item.collabMetrics || existing.collabMetrics,
         videoMetrics: item.videoMetrics || existing.videoMetrics,
@@ -788,10 +712,6 @@ app.post('/api/creators/batch-import', async (req, res) => {
         tags: Array.from(new Set([...(existing.tags || []), 'Scraper Enriched', source || 'Pickdi Extension'])),
         updatedAt: new Date().toISOString()
       };
-      const criteria = await getCachedCriteria(updated.workspaceId);
-      const breakdown = scoreCreator(updated, undefined, criteria);
-      updated.scoreBreakdown = breakdown;
-      updated.brandFitScore = breakdown.totalScore;
       toSave.push({ creator: updated, kind: 'updated' });
       // Ghi đè lại map ngay — nếu file import có 2 dòng trùng handle, dòng thứ 2 phải update lên
       // trên bản dòng 1 vừa build (chưa lưu DB), không phải update lên bản cũ trước khi import.
@@ -821,9 +741,6 @@ app.post('/api/creators/batch-import', async (req, res) => {
         gmv30d: toFiniteNumber(scrapedGmv),
         category: (typeof item.category === 'string' && item.category) ? item.category : undefined,
         niche: item.niche ? (Array.isArray(item.niche) ? item.niche : item.niche.split(',')) : undefined,
-        brandFitScore: toFiniteNumber(item.brandFitScore),
-        commercialScore: toFiniteNumber(item.commercialScore),
-        riskScore: toFiniteNumber(item.riskScore),
         status: 'New Lead',
         owner: 'Anh Tuan (Scraper Bot)',
         email: item.email || item.contact_email || undefined,
@@ -836,8 +753,6 @@ app.post('/api/creators/batch-import', async (req, res) => {
         gpm: toFiniteNumber(item.gpm),
         beautyCategoryRatio: toFiniteNumber(item.beautyCategoryRatio),
         hasAffiliateGmv: item.hasAffiliateGmv,
-        pps: item.pps || undefined,
-        sampleScore: item.sampleScore || undefined,
         salesMetrics: item.salesMetrics || undefined,
         collabMetrics: item.collabMetrics || undefined,
         videoMetrics: item.videoMetrics || undefined,
@@ -847,10 +762,6 @@ app.post('/api/creators/batch-import', async (req, res) => {
         importedAt: isFileImport ? nowIso : undefined,
         tcmCreatorOecuid: item.tcmCreatorOecuid || undefined
       };
-      const criteria = await getCachedCriteria(newCr.workspaceId);
-      const breakdown = scoreCreator(newCr, undefined, criteria);
-      newCr.scoreBreakdown = breakdown;
-      newCr.brandFitScore = breakdown.totalScore;
       toSave.push({ creator: newCr, kind: 'new' });
       existingByHandle.set(rawHandle.toLowerCase(), newCr);
     }
@@ -2115,34 +2026,11 @@ app.post('/api/conversations/:id/reply', async (req, res) => {
   }
 });
 
-// Content Reviews API
+// Content Reviews API — list route stays: Dashboard's pendingReviewsCount KPI + the AI
+// Copilot drawer (AiDrawer) still read from it even though the dedicated Review detail/
+// approval UI was removed.
 app.get('/api/reviews', async (req, res) => {
   res.json({ success: true, data: await getAllReviews() });
-});
-
-// Full row (checklist/feedback/feedbackNote/aiAnalysis/videoThumbnail) — the list route above
-// returns a trimmed shape; ReviewDetailModal fetches this on open (see fetchFullReviewDetail).
-app.get('/api/reviews/:id', async (req, res) => {
-  const review = await getReviewById(req.params.id);
-  if (!review) {
-    return res.status(404).json({ success: false, message: 'Review not found' });
-  }
-  res.json({ success: true, data: review });
-});
-
-app.patch('/api/reviews/:id', async (req, res) => {
-  const rev = await getReviewById(req.params.id);
-  if (!rev) {
-    return res.status(404).json({ success: false, message: 'Review not found' });
-  }
-
-  rev.status = req.body.status;
-  if (req.body.feedback) rev.feedback = req.body.feedback;
-  if (req.body.checklist) rev.checklist = req.body.checklist;
-
-  await saveReview(rev);
-  await addActivity('Anh Tuan', `marked draft review as ${req.body.status}`, `${rev.creatorName} - ${rev.videoTitle}`, 'review', rev.id);
-  res.json({ success: true, data: rev });
 });
 
 // Posted Videos API — bảng "Uploaded" trong file d'Alba, video đã đăng chính thức + ROI.
@@ -2197,42 +2085,9 @@ app.patch('/api/posted-videos/:id', async (req, res) => {
   res.json({ success: true, data: updated });
 });
 
-// Tasks API
-app.get('/api/tasks', async (req, res) => {
-  res.json({ success: true, data: await getAllTasks() });
-});
-
-app.post('/api/tasks', async (req, res) => {
-  const newTask: Task = {
-    id: `tsk-${Date.now()}`,
-    title: req.body.title,
-    description: req.body.description || '',
-    priority: req.body.priority || 'MEDIUM',
-    status: 'Pending',
-    dueDate: req.body.dueDate || new Date().toISOString().split('T')[0],
-    owner: req.body.owner || 'Anh Tuan',
-    relatedCreatorId: req.body.relatedCreatorId,
-    relatedCreatorName: req.body.relatedCreatorName,
-    relatedCampaignId: req.body.relatedCampaignId,
-    relatedCampaignName: req.body.relatedCampaignName,
-    createdAt: new Date().toISOString()
-  };
-
-  await saveTask(newTask);
-  await addActivity('Anh Tuan', 'created task', newTask.title, 'task', newTask.id);
-  res.status(201).json({ success: true, data: newTask });
-});
-
-app.patch('/api/tasks/:id', async (req, res) => {
-  const task = await getTaskById(req.params.id);
-  if (!task) {
-    return res.status(404).json({ success: false, message: 'Task not found' });
-  }
-
-  const updatedTask: Task = { ...task, ...stripImmutableFields(req.body) };
-  await saveTask(updatedTask);
-  res.json({ success: true, data: updatedTask });
-});
+// Note: the dedicated Tasks CRUD API (GET/POST/PATCH /api/tasks) was removed along with the
+// Tasks feature UI. getAllTasks() (src/db.ts) is still used below by the AI daily-summary and
+// priority-suggestion endpoints, which treat tasks as a general workload signal.
 
 // Notifications API
 app.get('/api/notifications', async (req, res) => {
@@ -2249,100 +2104,6 @@ app.get('/api/search', async (req, res) => {
   const q = (req.query.q || '').toString();
   const data = await searchAll(q);
   res.json({ success: true, data });
-});
-
-// Deterministic Brand-Fit Scoring
-// Sourcing criteria (GMV tier target, gpm/gender/beauty/avgViews band) sống ở
-// Workspace.scoringCriteria (cấu hình trong Settings), không hardcode trong scoring.ts —
-// ưu tiên workspace của campaign (brand đang chạy) rồi mới tới workspace gốc của creator.
-async function getScoringCriteria(creator: Creator, campaign: Campaign | undefined) {
-  const workspaceId = campaign?.workspaceId || creator.workspaceId;
-  if (!workspaceId) return undefined;
-  const workspace = await getWorkspaceById(workspaceId);
-  return workspace?.scoringCriteria;
-}
-
-async function applyScore(creator: Creator, campaign: Campaign | undefined) {
-  const criteria = await getScoringCriteria(creator, campaign);
-  const breakdown = scoreCreator(creator, campaign, criteria);
-  if (campaign) {
-    const entry = { campaignId: campaign.id, breakdown, scoredAt: new Date().toISOString() };
-    creator.campaignScores = [...(creator.campaignScores || []).filter((s: any) => s.campaignId !== campaign.id), entry];
-  } else {
-    creator.scoreBreakdown = breakdown;
-    creator.brandFitScore = breakdown.totalScore;
-  }
-  creator.updatedAt = new Date().toISOString();
-  await saveCreator(creator);
-  return breakdown;
-}
-
-app.post('/api/creators/:id/score', async (req, res) => {
-  const creator = await getCreatorById(req.params.id);
-  if (!creator) {
-    return res.status(404).json({ success: false, message: 'Creator not found' });
-  }
-  const campaignId = req.body.campaignId as string | undefined;
-  const campaign = campaignId ? await getCampaignById(campaignId) : undefined;
-  if (campaignId && !campaign) {
-    return res.status(404).json({ success: false, message: 'Campaign not found' });
-  }
-
-  const breakdown = await applyScore(creator, campaign);
-  await addActivity('Anh Tuan', campaign ? `scored creator for campaign "${campaign.name}"` : 'scored creator (baseline)', `@${creator.handle}`, 'creator', creator.id);
-  res.json({ success: true, data: { creator, breakdown } });
-});
-
-// Deterministic fallback summary — used when GEMINI_API_KEY isn't configured or the LLM
-// call fails, so the drawer still shows something useful instead of erroring out.
-function buildDeterministicResearchSummary(breakdown: ReturnType<typeof scoreCreator>) {
-  const summary = breakdown.groups
-    .filter(g => g.available)
-    .map(g => `${g.label}: ${g.scorePct}/100`)
-    .join('. ') || 'Not enough scraped data to evaluate this creator yet.';
-
-  return {
-    summary,
-    strengths: breakdown.strengths.length ? breakdown.strengths : ['Chưa có đủ chỉ số lượt xem/follower để xác định thế mạnh'],
-    weaknesses: breakdown.weaknesses,
-    brandFitScore: breakdown.totalScore,
-    recommendation: breakdown.recommendation,
-    reasoning: breakdown.riskFlags.length ? `Cảnh báo rủi ro: ${breakdown.riskFlags.join('; ')}` : 'Không phát hiện rủi ro bất thường.',
-    breakdown,
-    source: 'deterministic' as const,
-  };
-}
-
-// Runs the deterministic scoreCreator() (unchanged — the score itself is never decided by
-// the LLM), then hands the breakdown + bio/tags/notes to creator.deep_research so the
-// "AI Research" button gives an actual reasoned judgment instead of just restating scores.
-app.post('/api/ai/research', async (req, res) => {
-  const { creator: creatorInput, campaignId } = req.body;
-  const creator = creatorInput?.id ? ((await getCreatorById(creatorInput.id)) || creatorInput) : creatorInput;
-  const campaign = campaignId ? await getCampaignById(campaignId) : undefined;
-
-  const stored = creator?.id ? await getCreatorById(creator.id) : null;
-  const breakdown = stored ? await applyScore(stored, campaign) : scoreCreator(creator, campaign, await getScoringCriteria(creator, campaign));
-
-  try {
-    const { data } = await runAgent(creatorDeepResearchAgent, { creator, campaign, breakdown });
-    res.json({
-      success: true,
-      data: {
-        summary: data.reasoning,
-        strengths: Array.isArray(data.opportunities) && data.opportunities.length ? data.opportunities : breakdown.strengths,
-        weaknesses: Array.isArray(data.risks) && data.risks.length ? data.risks : breakdown.weaknesses,
-        brandFitScore: breakdown.totalScore,
-        recommendation: data.recommendation || breakdown.recommendation,
-        reasoning: data.reasoning,
-        breakdown,
-        source: 'ai',
-      },
-    });
-  } catch (error: any) {
-    console.warn('creator.deep_research agent failed, using deterministic fallback:', error?.message);
-    res.json({ success: true, data: buildDeterministicResearchSummary(breakdown) });
-  }
 });
 
 app.post('/api/ai/chat', async (req, res) => {
@@ -2579,11 +2340,6 @@ async function buildSampleAgentContext(agentId: string) {
         creator: creator || { displayName: 'Sample Creator', handle: 'samplecreator' },
         campaign: campaign || { budget: 5000 },
       };
-    case 'creator.deep_research': {
-      const c = creator || { displayName: 'Sample Creator', handle: 'samplecreator', bio: 'Beauty & lifestyle content creator', tags: ['Beauty'], notes: [] } as any;
-      const breakdown = scoreCreator(c, campaign);
-      return { creator: c, campaign, breakdown };
-    }
     case 'review.compliance_checklist':
       return { videoTitle: 'Unbox sản phẩm mới #ad', campaignName: campaign?.name || 'Sample Campaign', draftUrl: 'https://tiktok.com/@sample/video/123' };
     case 'ops.daily_summary':

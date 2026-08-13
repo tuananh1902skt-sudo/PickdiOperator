@@ -3,7 +3,6 @@ import {
   Sparkles,
   X,
   Send,
-  UserCheck,
   Mail,
   MessageSquare,
   FileCheck2,
@@ -50,7 +49,7 @@ export const AiDrawer: React.FC<AiDrawerProps> = ({
   reviews = []
 }) => {
   const [activeMode, setActiveTabMode] = useState<
-    'chat' | 'research' | 'email' | 'reply' | 'review' | 'digest'
+    'chat' | 'email' | 'reply' | 'review' | 'digest'
   >('chat');
 
   // Input states
@@ -100,10 +99,10 @@ Tôi có thể hỗ trợ bạn vận hành chương trình Affiliate TikTok Sho
   const currentCreator = creators.find(c => c.id === selectedCreatorId) || creators[0];
   const currentCampaign = campaigns.find(c => c.id === selectedCampaignId) || campaigns[0];
 
-  // `creators` ở đây là danh sách siêu nhẹ (id/handle/displayName/avatar/status/category/
-  // brandFitScore — xem /api/creators/lite, App.tsx `creatorsLite`), chỉ đủ để render dropdown
-  // "Target Creator". Trước khi gửi cho research/email/reply/review — vốn cần bio/engagementRate/
-  // score/metrics thật để AI phân tích đúng — phải fetch lại đầy đủ record qua /api/creators/:id.
+  // `creators` ở đây là danh sách siêu nhẹ (id/handle/displayName/avatar/status/category —
+  // xem /api/creators/lite, App.tsx `creatorsLite`), chỉ đủ để render dropdown "Target Creator".
+  // Trước khi gửi cho email/reply/review — vốn cần bio/engagementRate/metrics thật để AI phân
+  // tích đúng — phải fetch lại đầy đủ record qua /api/creators/:id.
   const fetchFullCreator = async (id: string): Promise<Creator | undefined> => {
     try {
       const res = await fetch(`/api/creators/${id}`);
@@ -205,25 +204,15 @@ Tôi có thể hỗ trợ bạn vận hành chương trình Affiliate TikTok Sho
 
     try {
       let res: Response;
-      // research/email/reply gửi thẳng object creator cho AI phân tích/soạn nội dung — cần bio/
-      // engagementRate/score/metrics thật, không phải bản lite dùng để render dropdown phía trên.
-      const fullCreator = currentCreator && (activeMode === 'research' || activeMode === 'email' || activeMode === 'reply')
+      // email/reply gửi thẳng object creator cho AI phân tích/soạn nội dung — cần bio/
+      // engagementRate/metrics thật, không phải bản lite dùng để render dropdown phía trên.
+      const fullCreator = currentCreator && (activeMode === 'email' || activeMode === 'reply')
         ? await fetchFullCreator(currentCreator.id)
         : undefined;
       if (isStale()) return;
       const creatorForAi = fullCreator || currentCreator;
 
-      if (activeMode === 'research') {
-        if (!creatorForAi) {
-          setAiResult({ error: 'Chưa chọn Creator để phân tích.' });
-          return;
-        }
-        res = await fetch('/api/ai/research', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ creator: creatorForAi, campaignId: currentCampaign?.id })
-        });
-      } else if (activeMode === 'email') {
+      if (activeMode === 'email') {
         if (!creatorForAi) {
           setAiResult({ error: 'Chưa chọn Creator để viết mail.' });
           return;
@@ -314,7 +303,7 @@ Tôi có thể hỗ trợ bạn vận hành chương trình Affiliate TikTok Sho
                   Gemini 3.6
                 </span>
               </h3>
-              <p className="text-[11px] text-slate-300 mt-0.5">Automated research, outreach & reviews</p>
+              <p className="text-[11px] text-slate-300 mt-0.5">Automated outreach, replies & reviews</p>
             </div>
           </div>
           <button
@@ -326,7 +315,7 @@ Tôi có thể hỗ trợ bạn vận hành chương trình Affiliate TikTok Sho
         </div>
 
         {/* Feature Mode Selector */}
-        <div className="grid grid-cols-6 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/80 p-1 text-[11px] font-medium">
+        <div className="grid grid-cols-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/80 p-1 text-[11px] font-medium">
           <button
             onClick={() => { setActiveTabMode('chat'); setAiResult(null); }}
             className={`py-2 flex flex-col items-center gap-1 rounded-lg transition-all ${
@@ -335,16 +324,6 @@ Tôi có thể hỗ trợ bạn vận hành chương trình Affiliate TikTok Sho
           >
             <MessageSquare className="w-3.5 h-3.5" />
             <span>Chat</span>
-          </button>
-
-          <button
-            onClick={() => { setActiveTabMode('research'); setAiResult(null); }}
-            className={`py-2 flex flex-col items-center gap-1 rounded-lg transition-all ${
-              activeMode === 'research' ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 font-bold shadow-xs' : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <UserCheck className="w-3.5 h-3.5" />
-            <span>Research</span>
           </button>
 
           <button
@@ -389,7 +368,7 @@ Tôi có thể hỗ trợ bạn vận hành chương trình Affiliate TikTok Sho
         </div>
 
         {/* Target Selectors */}
-        {(activeMode === 'research' || activeMode === 'email' || activeMode === 'reply') && (
+        {(activeMode === 'email' || activeMode === 'reply') && (
           <div className="p-3 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900/50 grid grid-cols-2 gap-2 text-xs">
             <div>
               <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Target Creator</label>
@@ -515,26 +494,6 @@ Tôi có thể hỗ trợ bạn vận hành chương trình Affiliate TikTok Sho
                       {copied ? 'Copied' : 'Copy'}
                     </button>
                   </div>
-
-                  {/* Research render */}
-                  {activeMode === 'research' && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-slate-700 dark:text-slate-300">Brand Fit Score:</span>
-                        <span className="px-2 py-0.5 rounded font-bold bg-emerald-100 text-emerald-800">
-                          {aiResult.brandFitScore || 90}/100
-                        </span>
-                      </div>
-                      <p><strong>Summary:</strong> {aiResult.summary}</p>
-                      <div>
-                        <strong>Strengths:</strong>
-                        <ul className="list-disc pl-4 space-y-0.5 mt-1">
-                          {aiResult.strengths?.map((s: string, i: number) => <li key={i}>{s}</li>)}
-                        </ul>
-                      </div>
-                      <p><strong>Recommendation:</strong> <span className="font-bold text-indigo-600">{aiResult.recommendation}</span></p>
-                    </div>
-                  )}
 
                   {/* Email render */}
                   {activeMode === 'email' && (
