@@ -88,8 +88,6 @@ import {
   getConversationById,
   getConversationByCreatorId,
   saveConversation,
-  getTodayReplyCount,
-  incrementTodayReplyCounter,
   getAllReviews,
   getAllTasks,
   getAllNotifications,
@@ -326,14 +324,6 @@ function sanitizeCreatorDisplayName(displayName: string, handle: string): string
 // API Routes
 app.get('/api/health', async (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString(), dbConnected: await isDbConnected() });
-});
-
-// todayRepliesReceived KPI — trước đây App.tsx tự tính bằng cách reduce qua `messages` của toàn
-// bộ conversations (buộc phải load full nội dung email mỗi lần app mount). Giờ đọc thẳng bộ đếm
-// duy trì ở incrementTodayReplyCounter() (xem db.ts), tách khỏi /api/conversations/dashboard vì
-// nó được gọi riêng lúc app mount và sau các action có thể tạo reply mới (check inbox, bulk outreach).
-app.get('/api/kpis/today-replies', async (req, res) => {
-  res.json({ success: true, data: { todayRepliesReceived: await getTodayReplyCount() } });
 });
 
 // Creators API
@@ -1191,7 +1181,6 @@ app.post('/api/inbox/unmatched/:id/assign', async (req, res) => {
   conv.status = 'Need Reply';
   conv.lastMessageAt = newMessage.createdAt;
   await saveConversation(conv);
-  await incrementTodayReplyCounter(newMessage.createdAt);
 
   record.resolved = true;
   await saveUnmatchedInboundEmail(record);

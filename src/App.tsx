@@ -5,7 +5,6 @@ import { AiDrawer } from './components/layout/AiDrawer';
 import { NotificationDrawer } from './components/layout/NotificationDrawer';
 import { CommandPalette } from './components/layout/CommandPalette';
 
-import { DashboardView } from './components/dashboard/DashboardView';
 import { CreatorListView } from './components/creators/CreatorListView';
 import { CreatorDetailDrawer } from './components/creators/CreatorDetailDrawer';
 import { QuickAddCreatorModal } from './components/creators/QuickAddCreatorModal';
@@ -30,9 +29,7 @@ import {
   OutreachEmail,
   Conversation,
   DraftReview,
-  Task,
   NotificationItem,
-  DashboardKPIs,
   Workspace,
   CreatorCampaignAssignment,
   PostedVideo
@@ -45,15 +42,13 @@ import {
   INITIAL_OUTREACH,
   INITIAL_CONVERSATIONS,
   INITIAL_REVIEWS,
-  INITIAL_TASKS,
   INITIAL_NOTIFICATIONS
 } from './data/initialData';
 
 // Đồng bộ activeTab với URL (pathname) để reload/back-forward/bookmark giữ đúng trang thay
-// vì luôn rơi về Dashboard — mỗi tab ứng với 1 path riêng, path lạ/không khớp mặc định về
-// Dashboard.
+// vì luôn rơi về Creators — mỗi tab ứng với 1 path riêng, path lạ/không khớp mặc định về
+// Creators.
 const TAB_PATHS: Record<ActiveTab, string> = {
-  dashboard: '/dashboard',
   creators: '/creators',
   outreach: '/outreach',
   campaigns: '/campaigns',
@@ -74,7 +69,7 @@ const parseRoute = (pathname: string): ParsedRoute => {
   const parts = pathname.split('/').filter(Boolean);
   if (parts[0] === 'creators' && parts[1]) return { tab: 'creators', creatorId: parts[1] };
   if (parts[0] === 'campaigns' && parts[1] && parts[2] === 'edit') return { tab: 'campaigns', campaignEditId: parts[1] };
-  return { tab: PATH_TO_TAB['/' + (parts[0] || 'dashboard')] || 'dashboard' };
+  return { tab: PATH_TO_TAB['/' + (parts[0] || 'creators')] || 'creators' };
 };
 
 export function App() {
@@ -101,7 +96,7 @@ export function App() {
 
   useEffect(() => {
     if (window.location.pathname === '/') {
-      window.history.replaceState(null, '', TAB_PATHS.dashboard);
+      window.history.replaceState(null, '', TAB_PATHS.creators);
     }
     // Back/forward không tự resolve object — chỉ đặt lại tab + id đang chờ, các effect
     // theo dõi creators/reviews/campaigns bên dưới sẽ tìm đúng object (gần như ngay lập
@@ -137,13 +132,8 @@ export function App() {
   // Reports, xem effect theo dõi activeTab bên dưới) thay vì tải toàn bộ nội dung email của
   // MỌI conversation ngay lúc app mount.
   const [conversations, setConversations] = useState<Conversation[]>(INITIAL_CONVERSATIONS);
-  // todayRepliesReceived giờ đọc từ bộ đếm server-side (incrementTodayReplyCounter ở db.ts)
-  // thay vì reduce qua conversations[].messages — không còn cần load full messages chỉ để ra 1
-  // con số KPI.
-  const [todayRepliesReceived, setTodayRepliesReceived] = useState(0);
   const [reviews, setReviews] = useState<DraftReview[]>(INITIAL_REVIEWS);
   const [postedVideos, setPostedVideos] = useState<PostedVideo[]>([]);
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
   const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
   // Quan hệ nhiều-nhiều Creator ↔ Campaign — nguồn sự thật cho việc creator nào đang chạy
   // campaign nào ở brand nào (xem CreatorCampaignAssignment ở types.ts).
@@ -202,7 +192,6 @@ export function App() {
   const workspaceReviews = reviews.filter(r => inActiveWorkspace(r.workspaceId));
   const workspacePostedVideos = postedVideos.filter(v => inActiveWorkspace(v.workspaceId));
   const workspaceAssignments = assignments.filter(a => inActiveWorkspace(a.workspaceId));
-  const workspaceTasks = tasks.filter(t => inActiveWorkspace(t.workspaceId));
   const workspaceNotifications = notifications.filter(n => inActiveWorkspace(n.workspaceId));
 
   // Modals & Drawers state
@@ -317,17 +306,6 @@ export function App() {
     }
   };
 
-  const fetchTodayRepliesReceived = async () => {
-    try {
-      const res = await fetch('/api/kpis/today-replies');
-      if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) return;
-      const data = await res.json();
-      if (data.success && data.data) setTodayRepliesReceived(data.data.todayRepliesReceived);
-    } catch (err) {
-      console.error('Error fetching today-replies KPI:', err);
-    }
-  };
-
   // Bulk outreach sends run in the background server-side — once a batch finishes, pull
   // every record it could have touched (creators' lastContactAt, outreach history,
   // conversations, campaign assignment status) back in rather than trying to patch each
@@ -394,8 +372,6 @@ export function App() {
       .then(data => { if (data && Array.isArray(data.data)) setConversations(data.data); })
       .catch(err => console.error(err));
 
-    fetchTodayRepliesReceived();
-
     fetch('/api/outreach')
       .then(res => res.ok && res.headers.get('content-type')?.includes('application/json') ? res.json() : null)
       .then(data => { if (data && Array.isArray(data.data)) setOutreachList(data.data); })
@@ -437,27 +413,6 @@ export function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
-
-  const conversionRate = workspaceCreators.length > 0
-    ? Number(((workspaceCreators.filter(c => ['Approved', 'Completed'].includes(c.status)).length / workspaceCreators.length) * 100).toFixed(1))
-    : 0;
-
-  // Calculated Dashboard KPIs — all time-windowed fields are filtered against actual
-  // dates (previously these counted all-time totals/status matches mislabeled as "today"/"this week").
-  const todayStr = new Date().toISOString().split('T')[0];
-  const currentMonthStr = todayStr.slice(0, 7);
-  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
-  const kpis: DashboardKPIs = {
-    todayEmailsSent: workspaceOutreach.filter(o => o.sentAt && o.sentAt.startsWith(todayStr)).length,
-    todayRepliesReceived,
-    pendingReviewsCount: workspaceReviews.filter(r => r.status === 'Pending Review').length,
-    overdueTasksCount: workspaceTasks.filter(t => t.status !== 'Completed' && t.dueDate < todayStr).length,
-    activeCampaignsCount: workspaceCampaigns.filter(c => c.status === 'Running').length,
-    creatorsAddedThisWeek: workspaceCreators.filter(c => c.createdAt && new Date(c.createdAt) >= sevenDaysAgo).length,
-    conversionRate: conversionRate
-  };
-  const creatorsAddedToday = workspaceCreators.filter(c => c.createdAt && c.createdAt.startsWith(todayStr)).length;
-  const videosPostedThisMonth = workspacePostedVideos.filter(v => v.postedAt && v.postedAt.startsWith(currentMonthStr)).length;
 
   // HANDLERS
   const WORKSPACE_COLOR_CYCLE: Workspace['color'][] = ['indigo', 'rose', 'emerald', 'amber'];
@@ -1019,26 +974,6 @@ export function App() {
 
         {/* View Body */}
         <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
-          {activeTab === 'dashboard' && (
-            <DashboardView
-              kpis={kpis}
-              tasks={workspaceTasks.filter(t => t.status === 'Pending')}
-              recentReplies={workspaceConversations}
-              creators={workspaceCreators}
-              creatorsAddedToday={creatorsAddedToday}
-              videosPostedThisMonth={videosPostedThisMonth}
-              activeWorkspace={activeWorkspace}
-              workspaces={workspaces}
-              onSelectWorkspace={id => setActiveWorkspaceId(id)}
-              onOpenSettings={() => setActiveTab('settings')}
-              activeCampaignCount={workspaceCampaigns.length}
-              onSelectTab={setActiveTab}
-              onSelectCreator={openCreatorDetail}
-              onOpenQuickAdd={() => setIsQuickAddModalOpen(true)}
-              onOpenAi={() => setIsAiDrawerOpen(true)}
-            />
-          )}
-
           {activeTab === 'creators' && (
             <CreatorListView
               creators={workspaceCreators}

@@ -1208,35 +1208,6 @@ export async function getConversationsForList(): Promise<Conversation[]> {
   return (data ?? []).map((row: any) => rowToConversation({ ...row, messages: [] }));
 }
 
-// Bộ đếm số reply nhận được "hôm nay" (todayRepliesReceived KPI) — duy trì bằng cách tăng dần
-// tại đúng nơi 1 message CREATOR mới được lưu (xem incrementTodayReplyCounter() ở imapSync.ts +
-// server.ts /api/inbox/unmatched/:id/assign), thay vì quét lại `messages` của toàn bộ
-// conversations mỗi lần Dashboard load. Lưu trong app_config (bảng key-value có sẵn) — không
-// cần thêm bảng/cột mới. Tự "reset" khi ngày lưu khác ngày hôm nay, không cần cron dọn dẹp.
-// 1 bucket toàn cục (không tách theo workspace) — conversation hiện tại (IMAP sync, unmatched-
-// assign) không gán workspaceId, và theo inActiveWorkspace() ở App.tsx thì conversation không có
-// workspaceId vốn đã tính vào MỌI workspace, nên 1 số đếm chung là đúng ngữ nghĩa hiện tại.
-interface TodayReplyCounter {
-  date: string; // 'YYYY-MM-DD'
-  count: number;
-}
-
-const TODAY_REPLY_COUNTER_KEY = 'todayReplyCounter';
-
-export async function getTodayReplyCount(): Promise<number> {
-  const counter = await getAppConfig<TodayReplyCounter | null>(TODAY_REPLY_COUNTER_KEY, null);
-  const todayStr = new Date().toISOString().split('T')[0];
-  return counter && counter.date === todayStr ? counter.count : 0;
-}
-
-export async function incrementTodayReplyCounter(messageCreatedAt: string): Promise<void> {
-  const todayStr = new Date().toISOString().split('T')[0];
-  if (!messageCreatedAt.startsWith(todayStr)) return; // backfill/historic import — không tính vào "hôm nay"
-  const counter = await getAppConfig<TodayReplyCounter | null>(TODAY_REPLY_COUNTER_KEY, null);
-  const nextCount = counter && counter.date === todayStr ? counter.count + 1 : 1;
-  await setAppConfig(TODAY_REPLY_COUNTER_KEY, { date: todayStr, count: nextCount });
-}
-
 export async function getConversationById(id: string): Promise<Conversation | null> {
   const db = getDb();
   const { data, error } = await db.from('conversations').select('*').eq('id', id).maybeSingle();

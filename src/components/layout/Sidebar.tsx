@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  LayoutGrid,
   Users,
   Send,
   Target,
@@ -14,7 +13,6 @@ import {
 } from 'lucide-react';
 
 export type ActiveTab =
-  | 'dashboard'
   | 'creators'
   | 'outreach'
   | 'campaigns'
@@ -42,7 +40,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   openNotifDrawer
 }) => {
   const navItems = [
-    { id: 'dashboard' as ActiveTab, label: 'Dashboard', icon: LayoutGrid },
     { id: 'creators' as ActiveTab, label: 'Creators CRM', icon: Users, countText: creatorsCount > 0 ? `${creatorsCount}` : undefined },
     { id: 'outreach' as ActiveTab, label: 'Outreach & Pipeline', icon: Send },
     { id: 'campaigns' as ActiveTab, label: 'Campaigns', icon: Target },
