@@ -99,8 +99,8 @@ Tôi có thể hỗ trợ bạn vận hành chương trình Affiliate TikTok Sho
   const currentCreator = creators.find(c => c.id === selectedCreatorId) || creators[0];
   const currentCampaign = campaigns.find(c => c.id === selectedCampaignId) || campaigns[0];
 
-  // `creators` ở đây là danh sách siêu nhẹ (id/handle/displayName/avatar/status/category —
-  // xem /api/creators/lite, App.tsx `creatorsLite`), chỉ đủ để render dropdown "Target Creator".
+  // `creators` ở đây là state `creators`/`workspaceCreators` của App.tsx (cột CREATOR_LIST_
+  // COLUMNS, không có bio/notes/tags/metrics JSONB) — đủ để render dropdown "Target Creator".
   // Trước khi gửi cho email/reply/review — vốn cần bio/engagementRate/metrics thật để AI phân
   // tích đúng — phải fetch lại đầy đủ record qua /api/creators/:id.
   const fetchFullCreator = async (id: string): Promise<Creator | undefined> => {

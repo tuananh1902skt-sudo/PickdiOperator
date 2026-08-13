@@ -15,7 +15,6 @@ import {
 import {
   DashboardKPIs,
   Task,
-  ActivityItem,
   Conversation,
   Creator,
   Workspace
@@ -31,7 +30,6 @@ const MONTHLY_VIDEO_POSTED_TARGET_MAX = 500;
 interface DashboardViewProps {
   kpis: DashboardKPIs;
   tasks: Task[];
-  activities: ActivityItem[];
   recentReplies: Conversation[];
   creators: Creator[];
   creatorsAddedToday: number;
@@ -50,7 +48,6 @@ interface DashboardViewProps {
 export const DashboardView: React.FC<DashboardViewProps> = ({
   kpis,
   tasks,
-  activities,
   recentReplies,
   creators,
   creatorsAddedToday,
@@ -332,81 +329,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </button>
             </div>
           )}
-        </div>
-      </div>
-
-      {/* Bottom Row: Recent Activity & Pending Replies */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Inbound Creator Replies */}
-        <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
-              <MessageSquare className="w-4 h-4 text-emerald-500" />
-              Recent Creator Replies
-            </h3>
-            <button
-              onClick={() => onSelectTab('outreach')}
-              className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
-            >
-              Open Inbox →
-            </button>
-          </div>
-
-          <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1 -mr-1">
-            {recentReplies.length === 0 ? (
-              <p className="text-xs text-slate-400 py-4">No unread replies</p>
-            ) : (
-              recentReplies.map(r => (
-                <div
-                  key={r.id}
-                  onClick={() => onSelectTab('outreach')}
-                  className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/30 flex items-start gap-3 hover:border-indigo-300 dark:hover:border-indigo-800 cursor-pointer transition-all"
-                >
-                  <img src={r.creatorAvatar} alt={r.creatorName} className="w-9 h-9 rounded-full object-cover shrink-0" />
-                  <div className="flex-1 min-w-0 text-xs">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-bold text-slate-900 dark:text-white">{r.creatorName}</span>
-                      <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-100 text-amber-800">
-                        {r.status}
-                      </span>
-                    </div>
-                    <p className="text-slate-600 dark:text-slate-300 line-clamp-1 italic">
-                      "{r.messages[r.messages.length - 1]?.content || r.lastMessagePreview}"
-                    </p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Activity Timeline Stream */}
-        <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xs space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-slate-900 dark:text-white text-base">
-              Recent Workspace Audit Activity
-            </h3>
-            <span className="text-xs text-slate-400">Real-time log</span>
-          </div>
-
-          <div className="space-y-3">
-            {activities.length === 0 ? (
-              <p className="text-xs text-slate-400 py-4 text-center">Chưa có hoạt động nào được ghi nhận</p>
-            ) : (
-              activities.map(a => (
-                <div key={a.id} className="flex items-start gap-3 text-xs">
-                  <div className="w-2 h-2 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
-                  <div className="flex-1">
-                    <p className="text-slate-800 dark:text-slate-200">
-                      <strong className="font-semibold">{a.actor}</strong> {a.action}{' '}
-                      <span className="text-indigo-600 dark:text-indigo-400 font-medium">{a.target}</span>
-                    </p>
-                    <span className="text-[10px] text-slate-400">{new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
         </div>
       </div>
     </div>
