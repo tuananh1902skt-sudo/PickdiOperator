@@ -89,13 +89,17 @@ function ctaButtonHtml(href: string, label: string, gradientFrom: string, gradie
     </tr>`;
 }
 
-// Below ~600px (covers every phone in portrait, including larger phablets, plus iOS/Android
-// text-size-boosted layouts that render wider than the raw device width), the fixed 32px side
-// padding and the side-by-side 130px product-image/text layout eat too much of the available
-// width — text wraps into a narrow, cramped column. This media query is ignored by clients
-// that strip <style> (older Outlook desktop), which just fall back to the desktop layout
-// already used everywhere else — never broken, just not optimized. Every mobile-aware client
-// (Apple/Gmail/Outlook mobile apps, most webmail) does honor it.
+// Product-image/text is stacked (image centered on top, text below) unconditionally rather
+// than only under a mobile @media query — many mobile and webmail clients (Naver Works Mail,
+// most in-app browsers, corporate mail gateways) strip <style> blocks entirely, which used to
+// fall back to a fixed 130px-image + squeezed-text side-by-side row that wrapped into an
+// unreadably narrow column on any phone-width screen. Stacking unconditionally means the card
+// renders correctly with zero dependency on media-query support, at the cost of the same
+// layout on desktop too (an acceptable trade — still reads fine at 560px).
+//
+// The remaining @media rules below are pure enhancement (padding/font-size on genuinely
+// mobile-only clients that DO honor <style>) — safe to ignore if stripped, never required for
+// correctness.
 const MOBILE_STYLE = `
   <style>
     @media only screen and (max-width: 600px) {
@@ -103,9 +107,6 @@ const MOBILE_STYLE = `
       .pd-pad-lg { padding-left: 20px !important; padding-right: 20px !important; }
       .pd-hero-title { font-size: 24px !important; }
       .pd-hero-text { text-align: left !important; }
-      .pd-product-img-cell { display: block !important; width: 100% !important; text-align: center !important; padding: 0 0 16px !important; }
-      .pd-product-img-cell img { width: 100% !important; max-width: 220px !important; margin: 0 auto !important; }
-      .pd-product-text-cell { display: block !important; width: 100% !important; }
       .pd-cta-link { display: block !important; width: 100% !important; box-sizing: border-box !important; text-align: center !important; }
     }
   </style>`;
@@ -181,32 +182,24 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
     : '';
 
   const productInfoHtml = `
-    <span style="display:block;font-size:11px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:${primaryColor};margin-bottom:6px;">Signature Collection</span>
-    <span style="display:block;font-size:18px;line-height:1.3;font-weight:500;color:#1a1c1c;word-wrap:break-word;overflow-wrap:break-word;">${escapeHtml(data.productName || '')}</span>
-    ${ratingLine ? `<span style="display:block;margin-top:8px;font-size:13px;line-height:1.4;color:#8a7f30;">${ratingLine}</span>` : ''}
-    ${highlightsHtml ? `<div style="margin-top:12px;font-size:14px;line-height:1.85;color:#4d4635;">${highlightsHtml}</div>` : ''}`;
+    <span style="display:block;text-align:center;font-size:11px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:${primaryColor};margin-bottom:8px;">Signature Collection</span>
+    <span style="display:block;text-align:center;font-size:17px;line-height:1.4;font-weight:500;color:#1a1c1c;word-wrap:break-word;overflow-wrap:break-word;">${escapeHtml(data.productName || '')}</span>
+    ${ratingLine ? `<span style="display:block;text-align:center;margin-top:10px;font-size:13px;line-height:1.4;color:#8a7f30;">${ratingLine}</span>` : ''}
+    ${highlightsHtml ? `<div style="margin-top:16px;text-align:left;width:100%;font-size:14px;line-height:1.85;color:#4d4635;">${highlightsHtml}</div>` : ''}`;
 
+  // Image always centered on top, text always below — never side-by-side — so the card
+  // renders correctly with zero dependency on @media support (see MOBILE_STYLE comment).
   const productBlock = data.productName
     ? `
     <tr>
       <td class="pd-pad-lg" style="padding:24px 32px 0;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid rgba(26,26,26,0.1);">
           <tr>
-            <td style="padding:24px;">
+            <td align="center" style="padding:24px;">
               ${data.productImageUrl ? `
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td width="130" valign="middle" class="pd-product-img-cell" style="padding-right:20px;">
-                    <img src="${escapeHtml(data.productImageUrl)}" alt="${escapeHtml(data.productName)}" width="130" style="display:block;width:130px;max-width:100%;height:auto;border:0;object-fit:contain;">
-                  </td>
-                  <td valign="middle" class="pd-product-text-cell">
-                    ${productInfoHtml}
-                  </td>
-                </tr>
-              </table>` : `
-              <div style="text-align:center;">
-                ${productInfoHtml}
-              </div>`}
+              <img src="${escapeHtml(data.productImageUrl)}" alt="${escapeHtml(data.productName)}" width="180" style="display:block;width:180px;max-width:60%;height:auto;border:0;object-fit:contain;margin:0 auto 20px;">
+              ` : ''}
+              ${productInfoHtml}
             </td>
           </tr>
         </table>
