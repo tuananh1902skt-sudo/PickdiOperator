@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   Send,
   Kanban,
-  Clock,
   Mail,
   Users
 } from 'lucide-react';
@@ -141,16 +140,6 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
             >
               <Kanban className="w-4 h-4" />
               Pipeline Kanban
-            </button>
-
-            <button
-              onClick={() => setActiveTab('history')}
-              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all ${
-                activeTab === 'history' ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs font-bold' : ''
-              }`}
-            >
-              <Clock className="w-4 h-4" />
-              Sent History ({outreachList.length})
             </button>
           </div>
         </div>
