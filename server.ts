@@ -298,7 +298,9 @@ function isValidCreatorHandle(handleStr: string): boolean {
   if (/^[0-9]+$/i.test(clean)) return false;
   
   const lower = clean.toLowerCase();
-  if (/followers|follower|người theo dõi|fans|views|xem|engagement|tương tác|collaborate|usd|\$/i.test(lower)) return false;
+  // Word-boundary match — a plain substring match here used to reject legitimate handles
+  // that happen to contain one of these words mid-string (e.g. "rphreviews" contains "views").
+  if (/\b(followers|follower|người theo dõi|fans|views|xem|engagement|tương tác|collaborate|usd)\b|\$/i.test(lower)) return false;
 
   const noiseList = ['profile', 'explore', 'search', 'select', 'filter', 'category', 'copyright', 'undefined', 'pickdi', 'keyword', 'recommended', 'tools', 'payment', 'sort', 'relevance'];
   if (noiseList.some(n => lower === n || lower.includes('undefined'))) return false;
