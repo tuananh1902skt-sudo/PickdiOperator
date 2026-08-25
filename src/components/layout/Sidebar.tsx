@@ -2,7 +2,6 @@ import React from 'react';
 import {
   Users,
   Send,
-  Inbox,
   Target,
   Bell,
   Settings,
@@ -16,7 +15,6 @@ import {
 export type ActiveTab =
   | 'creators'
   | 'outreach'
-  | 'inbox'
   | 'campaigns'
   | 'export'
   | 'notifications'
@@ -29,7 +27,6 @@ interface SidebarProps {
   setCollapsed: (collapsed: boolean) => void;
   unreadNotifsCount: number;
   creatorsCount?: number;
-  unreadInboxCount?: number;
   openNotifDrawer?: () => void;
 }
 
@@ -40,13 +37,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setCollapsed,
   unreadNotifsCount,
   creatorsCount = 0,
-  unreadInboxCount = 0,
   openNotifDrawer
 }) => {
   const navItems = [
     { id: 'creators' as ActiveTab, label: 'Creators CRM', icon: Users, countText: creatorsCount > 0 ? `${creatorsCount}` : undefined },
     { id: 'outreach' as ActiveTab, label: 'Outreach & Pipeline', icon: Send },
-    { id: 'inbox' as ActiveTab, label: 'Inbox', icon: Inbox, count: unreadInboxCount },
     { id: 'campaigns' as ActiveTab, label: 'Campaigns', icon: Target },
     { id: 'export' as ActiveTab, label: 'Xuất Google Sheet', icon: FileSpreadsheet },
     { id: 'notifications' as ActiveTab, label: 'Notifications', icon: Bell, count: unreadNotifsCount },
