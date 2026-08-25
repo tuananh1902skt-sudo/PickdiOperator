@@ -13,6 +13,7 @@ import { ImportWizardModal } from './components/creators/ImportWizardModal';
 import { OutreachView } from './components/outreach/OutreachView';
 import { EmailComposerModal } from './components/outreach/EmailComposerModal';
 import { BulkOutreachModal } from './components/outreach/BulkOutreachModal';
+import { InboxView } from './components/inbox/InboxView';
 
 import { CampaignsView } from './components/campaigns/CampaignsView';
 import { CreateCampaignModal } from './components/campaigns/CreateCampaignModal';
@@ -51,6 +52,7 @@ import {
 const TAB_PATHS: Record<ActiveTab, string> = {
   creators: '/creators',
   outreach: '/outreach',
+  inbox: '/inbox',
   campaigns: '/campaigns',
   export: '/export',
   notifications: '/notifications',
@@ -339,6 +341,19 @@ export function App() {
     }
   };
 
+  // Chỉ gọi khi operator thực sự mở Inbox (đọc/trả lời thread) hoặc Reports (biểu đồ replies
+  // theo ngày) — 2 nơi duy nhất cần nội dung `messages` đầy đủ, xem /api/conversations/full.
+  const fetchFullConversations = async () => {
+    try {
+      const res = await fetch('/api/conversations/full');
+      if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) return;
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) setConversations(data.data);
+    } catch (err) {
+      console.error('Error fetching full conversations:', err);
+    }
+  };
+
   useEffect(() => {
     refreshCreators();
 
@@ -392,6 +407,15 @@ export function App() {
       return fresh || prev;
     });
   }, [creators]);
+
+  // conversations mặc định là bản rút gọn (không có messages) — nạp lại bản đầy đủ đúng lúc
+  // operator mở Inbox (đọc/trả lời thread), thay vì tải full messages ngay từ lúc app mount dù
+  // chưa chắc dùng đến.
+  useEffect(() => {
+    if (activeTab === 'inbox') {
+      fetchFullConversations();
+    }
+  }, [activeTab]);
 
   // Dark mode class toggle
   useEffect(() => {
@@ -598,6 +622,49 @@ export function App() {
       console.error('Send email error:', err);
       alert('Không thể gửi email. Vui lòng kiểm tra kết nối mạng và cấu hình Gmail rồi thử lại.');
       return false;
+    }
+  };
+
+  const handleSendReply = async (convId: string, content: string, isAiGenerated?: boolean) => {
+    try {
+      const res = await fetch(`/api/conversations/${convId}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, isAiGenerated })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Gửi reply thất bại');
+      }
+
+      setConversations(prev =>
+        prev.map(c => (c.id === convId ? data.data : c))
+      );
+      return true;
+    } catch (err: any) {
+      console.error('Send reply error:', err);
+      alert('Không thể gửi phản hồi. Vui lòng thử lại sau.');
+      return false;
+    }
+  };
+
+  const handleCheckInbox = async () => {
+    try {
+      const res = await fetch('/api/inbox/check', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        // Gọi từ InboxView (operator đang xem thread) — nạp full messages luôn thay vì bản rút
+        // gọn, đỡ phải đợi thêm 1 round-trip nữa khi thread vừa có tin nhắn mới.
+        const [resOut] = await Promise.all([fetch('/api/outreach'), fetchFullConversations()]);
+        if (resOut.ok) {
+          const outData = await resOut.json();
+          if (outData.success) setOutreachList(outData.data);
+        }
+      }
+      return data;
+    } catch (err: any) {
+      console.error('Check inbox error:', err);
+      return { success: false, message: 'Không thể kết nối tới máy chủ. Vui lòng thử lại.' };
     }
   };
 
@@ -954,6 +1021,7 @@ export function App() {
         setCollapsed={setCollapsed}
         unreadNotifsCount={workspaceNotifications.filter(n => !n.isRead).length}
         creatorsCount={workspaceCreators.length}
+        unreadInboxCount={workspaceConversations.filter(c => c.unread).length}
         openNotifDrawer={() => setIsNotificationDrawerOpen(true)}
       />
 
@@ -1015,6 +1083,17 @@ export function App() {
             />
           )}
 
+          {activeTab === 'inbox' && (
+            <InboxView
+              creators={workspaceCreators}
+              campaigns={workspaceCampaigns}
+              conversations={workspaceConversations}
+              workspaces={workspaces}
+              onSendReply={handleSendReply}
+              onCheckInbox={handleCheckInbox}
+            />
+          )}
+
           {activeTab === 'campaigns' && (
             <CampaignsView
               campaigns={workspaceCampaigns}
@@ -1040,6 +1119,7 @@ export function App() {
               assignments={workspaceAssignments}
               outreachList={workspaceOutreach}
               postedVideos={workspacePostedVideos}
+              conversations={workspaceConversations}
             />
           )}
 
