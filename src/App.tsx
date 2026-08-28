@@ -996,6 +996,7 @@ export function App() {
               onAssignCampaign={handleAssignCampaignToCreator}
               onUnassignCampaign={handleUnassignCreatorCampaign}
               onOpenBulkOutreach={creatorIds => setBulkOutreachConfig({ creatorIds })}
+              onUpdateStatus={handleUpdateCreatorStatus}
             />
           )}
 

@@ -8,9 +8,33 @@ import {
   getAllConversations,
   saveConversation,
   getCreatorById,
+  saveCreator,
   saveUnmatchedInboundEmail,
 } from '../db';
-import { Message, Conversation, CheckInboxResult, UnmatchedInboundEmail } from '../types';
+import { Message, Conversation, CheckInboxResult, UnmatchedInboundEmail, CreatorStatus } from '../types';
+
+// Các status trước "đàm phán" — creator reply mail lần đầu ở giai đoạn nào trong nhóm này
+// cũng được tự động đẩy sang 'Negotiating'. Không đụng tới creator đã qua Negotiating (Approved,
+// Sample Sent, Posted...) hay đã Rejected/Archived, để tránh việc reply muộn kéo lùi pipeline.
+const PRE_NEGOTIATION_STATUSES: CreatorStatus[] = [
+  'New Lead',
+  'Researching',
+  'Qualified',
+  'Contact lần 1',
+  'Contact lần 2',
+  'Contact lần 3',
+  'Interested',
+];
+
+// Đoán reply có đang đàm phán giá không (rate card, báo giá, thương lượng) để tự chuyển
+// Conversation.status sang 'Negotiating' — phục vụ cột "Reply Status" trong Export Google Sheet.
+// Cố tình lỏng tay (OR giữa 2 nhóm) vì đây chỉ là gợi ý để operator xem lại, không phải kết luận cuối.
+function looksLikeRateNegotiation(text: string): boolean {
+  if (!text) return false;
+  const priceLike = /(\$|usd|₫)\s?\d|\d[\d.,]*\s?(usd|k\b|nghìn|triệu|vnd|đô)/i.test(text);
+  const negotiationKeyword = /(rate card|price per|per video|per post|per story|quote|negotiat|budget|báo giá|thương lượng|mức giá|mức phí|phí hợp tác|đàm phán)/i.test(text);
+  return priceLike || negotiationKeyword;
+}
 
 export async function checkInboxForReplies(): Promise<CheckInboxResult> {
   const config = await getEmailConfig();
@@ -240,6 +264,7 @@ export async function checkInboxForReplies(): Promise<CheckInboxResult> {
           unread: true,
         };
       }
+      const newStatus = looksLikeRateNegotiation(cleanedContent) ? 'Negotiating' : 'Need Reply';
 
       const newMessage: Message = {
         id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -254,10 +279,19 @@ export async function checkInboxForReplies(): Promise<CheckInboxResult> {
 
       conversation.messages.push(newMessage);
       conversation.unread = true;
-      conversation.status = 'Need Reply';
+      conversation.status = newStatus;
       conversation.lastMessageAt = newMessage.createdAt;
 
       await saveConversation(conversation);
+
+      // Creator rep mail lần đầu -> tự chuyển sang Negotiating (chỉ khi còn ở giai đoạn
+      // trước đàm phán; không kéo lùi creator đã Approved/Rejected/Archived...).
+      if (PRE_NEGOTIATION_STATUSES.includes(matchedCreator.status)) {
+        matchedCreator.status = 'Negotiating';
+        matchedCreator.updatedAt = new Date().toISOString();
+        await saveCreator(matchedCreator);
+      }
+
       imported++;
     }
 

@@ -7,6 +7,7 @@ export type CreatorStatus =
   | 'Contact lần 3'
   | 'Interested'
   | 'Negotiating'
+  | 'Rejected'
   | 'Approved'
   | 'Sample Sent'
   | 'Draft Submitted'
@@ -170,7 +171,7 @@ export interface Creator {
   // Nhãn nguồn dữ liệu metrics — Kalodata/Cruva là platform sourcing tương tự nhau (import file/sheet
   // thủ công), TCM là cào trực tiếp qua extension. 'cruva' chưa có luồng import riêng, tạm dùng qua
   // tab Generic CSV của ImportWizardModal với metricsSource gán cứng 'cruva'.
-  metricsSource?: 'kalodata' | 'tcm' | 'cruva' | 'manual';
+  metricsSource?: 'kalodata' | 'tcm' | 'cruva' | 'tiktokOne' | 'manual';
   // Ngày cào — set khi có scrape event thật (hiện chỉ TCM extension), KHÔNG set khi import file.
   metricsSyncedAt?: string;
   // Ngày import — set khi creator được nhập từ file/sheet (Kalodata/Cruva/Generic CSV) qua

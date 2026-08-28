@@ -22,7 +22,7 @@ import {
   Image as ImageIcon,
   RefreshCw
 } from 'lucide-react';
-import { Creator, Campaign, Workspace, CreatorCampaignAssignment } from '../../types';
+import { Creator, Campaign, Workspace, CreatorCampaignAssignment, CreatorStatus } from '../../types';
 import { WorkspaceBanner } from '../layout/WorkspaceBanner';
 import {
   getStoredExtensionId,
@@ -40,6 +40,13 @@ import {
 // Menu dùng chung cho cả header ("toàn bộ workspace") và bulk-action bar ("creator đã chọn") —
 // gộp 2 thao tác TCM (tìm cid theo handle / cào chi tiết) + cấu hình Extension ID vào 1 dropdown
 // duy nhất thay vì rải nút lẻ, để header/bulk bar không bị rối khi thêm tính năng mới.
+
+const ALL_CREATOR_STATUSES: CreatorStatus[] = [
+  'New Lead', 'Researching', 'Qualified', 'Contact lần 1', 'Contact lần 2', 'Contact lần 3',
+  'Interested', 'Negotiating', 'Rejected', 'Approved', 'Sample Sent', 'Draft Submitted',
+  'Revision Requested', 'Approved Draft', 'Posted', 'Completed', 'Archived'
+];
+
 interface TcmActionsMenuProps {
   triggerLabel: string;
   triggerClassName: string;
@@ -203,6 +210,7 @@ interface CreatorListViewProps {
   onAssignCampaign: (crId: string, cmpId: string) => void;
   onUnassignCampaign?: (assignmentId: string) => void;
   onOpenBulkOutreach?: (creatorIds: string[]) => void;
+  onUpdateStatus?: (creatorId: string, status: CreatorStatus) => void;
 }
 
 export const CreatorListView: React.FC<CreatorListViewProps> = ({
@@ -222,7 +230,8 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   onRunAiScore,
   onAssignCampaign,
   onUnassignCampaign,
-  onOpenBulkOutreach
+  onOpenBulkOutreach,
+  onUpdateStatus
 }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const handleRefresh = async () => {
@@ -731,6 +740,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     kalodata: { label: 'KD', className: 'bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300' },
     tcm: { label: 'TCM', className: 'bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300' },
     cruva: { label: 'CV', className: 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300' },
+    tiktokOne: { label: 'TTO', className: 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300' },
     manual: { label: 'MAN', className: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' }
   };
 
@@ -738,7 +748,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     if (!cr.metricsSource) return null;
     const meta = METRICS_SOURCE_META[cr.metricsSource];
     if (!meta) return null;
-    const fullLabel = cr.metricsSource === 'kalodata' ? 'Kalodata' : cr.metricsSource === 'tcm' ? 'TCM' : cr.metricsSource === 'cruva' ? 'Cruva' : 'Manual';
+    const fullLabel = cr.metricsSource === 'kalodata' ? 'Kalodata' : cr.metricsSource === 'tcm' ? 'TCM' : cr.metricsSource === 'cruva' ? 'Cruva' : cr.metricsSource === 'tiktokOne' ? 'TikTok One' : 'Manual';
     const tooltipParts = [`Nguồn: ${fullLabel}`];
     if (cr.importedAt) tooltipParts.push(`Import: ${new Date(cr.importedAt).toLocaleDateString()}`);
     if (cr.metricsSyncedAt) tooltipParts.push(`Cào: ${new Date(cr.metricsSyncedAt).toLocaleDateString()}`);
@@ -987,6 +997,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
               <option value="Contact lần 2">Contact lần 2</option>
               <option value="Contact lần 3">Contact lần 3</option>
               <option value="Negotiating">Negotiating</option>
+              <option value="Rejected">Rejected</option>
               <option value="Approved">Approved</option>
               <option value="Draft Submitted">Draft Submitted</option>
               <option value="Completed">Completed</option>
@@ -1532,19 +1543,38 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
 
                       {/* Status */}
                       <td className="py-3.5 px-4 whitespace-nowrap">
-                        <span
-                          className={`px-2.5 py-1 text-[11px] font-bold rounded-full border whitespace-nowrap ${
-                            cr.status === 'Approved' || cr.status === 'Completed'
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : cr.status === 'Draft Submitted' || cr.status === 'Negotiating'
-                              ? 'bg-amber-50 text-amber-700 border-amber-200'
-                              : cr.status === 'Contact lần 1' || cr.status === 'Contact lần 2' || cr.status === 'Contact lần 3'
-                              ? 'bg-blue-50 text-blue-700 border-blue-200'
-                              : 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
-                          }`}
-                        >
-                          {cr.status}
-                        </span>
+                        {(() => {
+                          const badgeClass = cr.status === 'Approved' || cr.status === 'Completed'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : cr.status === 'Draft Submitted' || cr.status === 'Negotiating'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : cr.status === 'Rejected'
+                            ? 'bg-red-50 text-red-700 border-red-200'
+                            : cr.status === 'Contact lần 1' || cr.status === 'Contact lần 2' || cr.status === 'Contact lần 3'
+                            ? 'bg-blue-50 text-blue-700 border-blue-200'
+                            : 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300';
+
+                          if (!onUpdateStatus) {
+                            return (
+                              <span className={`px-2.5 py-1 text-[11px] font-bold rounded-full border whitespace-nowrap ${badgeClass}`}>
+                                {cr.status}
+                              </span>
+                            );
+                          }
+
+                          return (
+                            <select
+                              value={cr.status}
+                              onClick={e => e.stopPropagation()}
+                              onChange={e => onUpdateStatus(cr.id, e.target.value as CreatorStatus)}
+                              className={`px-2.5 py-1 text-[11px] font-bold rounded-full border whitespace-nowrap cursor-pointer ${badgeClass}`}
+                            >
+                              {ALL_CREATOR_STATUSES.map(s => (
+                                <option key={s} value={s}>{s}</option>
+                              ))}
+                            </select>
+                          );
+                        })()}
                       </td>
 
                       {/* Actions */}
