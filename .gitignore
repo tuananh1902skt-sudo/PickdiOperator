@@ -14,3 +14,10 @@ import-backup.js
 migrate-to-new-supabase.js
 schema.sql
 supabase/.temp/
+
+# Dữ liệu client — không đẩy lên repo công khai
+creators-import-batch.json
+creators-import*.json
+
+# Apps Script cho Google Sheet — có repo private riêng
+apps-script/
