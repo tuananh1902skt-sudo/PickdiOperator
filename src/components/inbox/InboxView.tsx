@@ -24,7 +24,7 @@ interface InboxViewProps {
   conversations: Conversation[];
   workspaces: Workspace[];
   onSendReply: (convId: string, content: string, isAiGenerated?: boolean) => void;
-  onCheckInbox?: () => Promise<{ success: boolean; imported?: number; skipped?: number; message?: string }>;
+  onCheckInbox?: () => Promise<{ success: boolean; imported?: number; skipped?: number; archivedStale?: number; message?: string }>;
   onRefreshData?: () => void;
 }
 
@@ -99,7 +99,7 @@ export const InboxView: React.FC<InboxViewProps> = ({
     setCheckingInbox(true);
     setSyncStatusMsg(null);
     try {
-      let result: { success: boolean; imported?: number; skipped?: number; message?: string };
+      let result: { success: boolean; imported?: number; skipped?: number; archivedStale?: number; message?: string };
       if (onCheckInbox) {
         result = await onCheckInbox();
       } else {
@@ -110,7 +110,8 @@ export const InboxView: React.FC<InboxViewProps> = ({
       await fetchUnmatchedEmails();
 
       if (result && result.success) {
-        setSyncStatusMsg(`Đã đồng bộ: ${result.imported ?? 0} tin nhắn mới, ${result.skipped ?? 0} bỏ qua`);
+        const archivedSuffix = result.archivedStale ? `, ${result.archivedStale} creator im lặng quá lâu đã tự Archive` : '';
+        setSyncStatusMsg(`Đã đồng bộ: ${result.imported ?? 0} tin nhắn mới, ${result.skipped ?? 0} bỏ qua${archivedSuffix}`);
         if (onRefreshData) onRefreshData();
       } else {
         setSyncStatusMsg(`Lỗi đồng bộ: ${result?.message || 'Không thể kiểm tra inbox lúc này. Vui lòng thử lại.'}`);

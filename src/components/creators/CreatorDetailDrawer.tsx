@@ -374,6 +374,8 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                       ? 'bg-sky-50 dark:bg-sky-950/50 border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-300'
                       : creator.metricsSource === 'cruva'
                       ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300'
+                      : creator.metricsSource === 'tiktokOne'
+                      ? 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300'
                       : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
                   }`}
                 >
@@ -385,6 +387,8 @@ export const CreatorDetailDrawer: React.FC<CreatorDetailDrawerProps> = ({
                       ? 'TCM'
                       : creator.metricsSource === 'cruva'
                       ? 'Cruva'
+                      : creator.metricsSource === 'tiktokOne'
+                      ? 'TikTok One'
                       : 'Manual'}
                   </span>
                 </div>

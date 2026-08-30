@@ -36,6 +36,30 @@ function looksLikeRateNegotiation(text: string): boolean {
   return priceLike || negotiationKeyword;
 }
 
+// Creator đã gửi hết 3 lần contact mà vẫn im lặng — nếu còn kẹt ở 'Contact lần 3' quá
+// STALE_CONTACT_LAN3_DAYS ngày kể từ lần contact cuối (lastContactAt) thì coi như dead lead,
+// tự chuyển sang Archived. Chạy mỗi lần operator bấm "Check Inbox" thay vì cần cron riêng —
+// nếu creator rep trước ngưỡng này, status đã bị đẩy sang 'Negotiating' ở nhánh reply phía trên
+// nên sẽ không còn khớp điều kiện 'Contact lần 3' nữa.
+const STALE_CONTACT_LAN3_DAYS = 3;
+
+async function archiveStaleContactLan3Creators(): Promise<number> {
+  const creators = await getAllCreators();
+  const now = Date.now();
+  let archivedCount = 0;
+  for (const c of creators) {
+    if (c.status !== 'Contact lần 3' || c.doNotContact || !c.lastContactAt) continue;
+    const daysSince = Math.floor((now - new Date(c.lastContactAt).getTime()) / 86400000);
+    if (daysSince >= STALE_CONTACT_LAN3_DAYS) {
+      c.status = 'Archived';
+      c.updatedAt = new Date().toISOString();
+      await saveCreator(c);
+      archivedCount++;
+    }
+  }
+  return archivedCount;
+}
+
 export async function checkInboxForReplies(): Promise<CheckInboxResult> {
   const config = await getEmailConfig();
 
@@ -93,6 +117,7 @@ export async function checkInboxForReplies(): Promise<CheckInboxResult> {
         skipped: 0,
         skippedReasons,
         needsManualReview: 0,
+        archivedStale: 0,
       };
     }
 
@@ -103,6 +128,7 @@ export async function checkInboxForReplies(): Promise<CheckInboxResult> {
         skipped: 0,
         skippedReasons,
         needsManualReview: 0,
+        archivedStale: await archiveStaleContactLan3Creators(),
       };
     }
 
@@ -304,6 +330,7 @@ export async function checkInboxForReplies(): Promise<CheckInboxResult> {
       skipped,
       skippedReasons,
       needsManualReview,
+      archivedStale: await archiveStaleContactLan3Creators(),
     };
   } finally {
     if (lock) {

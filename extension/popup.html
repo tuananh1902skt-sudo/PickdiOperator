@@ -27,21 +27,23 @@
 
   <hr>
 
-  <label>🔍 Import creator từ TCM (Affiliate Center)</label>
+  <label>🔍 Danh sách creator từ TCM (Affiliate Center)</label>
   <p style="font-size:11px; color:#6b7280; margin:2px 0 8px 0; line-height:1.4;">
     Mở trang Find Creators trên affiliate-us.tiktok.com, tự cuộn/chuyển trang qua danh sách
-    creator bạn muốn (extension âm thầm bắt data khi bạn thao tác), rồi bấm nút bên dưới để
-    đẩy toàn bộ những gì đã bắt được lên Pickdi — đã tự kèm luôn PPS, GMV/units sold, Video &amp;
-    LIVE GPM cho MỌI creator trong danh sách, không cần mở từng trang chi tiết. Sample score,
-    Collaboration metrics và % demographics đầy đủ thì vẫn cần mở trang chi tiết từng creator
-    (mục bên dưới) vì TCM chỉ tính các số đó khi bạn thực sự mở trang.
+    creator bạn muốn (extension âm thầm bắt data khi bạn thao tác) — đã tự kèm luôn PPS,
+    GMV/units sold, Video &amp; LIVE GPM cho MỌI creator trong danh sách, không cần mở từng
+    trang chi tiết. Sample score, Collaboration metrics và % demographics đầy đủ thì vẫn cần mở
+    trang chi tiết từng creator (mục bên dưới) vì TCM chỉ tính các số đó khi bạn thực sự mở
+    trang. Nút "Đọc data đã bắt được" chỉ đếm/xem trước, KHÔNG đẩy gì lên Pickdi — dùng "Xuất
+    CSV" để lấy file, hoặc tick auto-detail bên dưới nếu muốn đẩy thẳng lên Pickdi.
   </p>
   <div class="row">
     <input type="number" id="followerMin" placeholder="Follower min">
     <input type="number" id="followerMax" placeholder="Follower max">
   </div>
   <input type="text" id="keyword" placeholder="Lọc theo handle/nickname/ngành hàng">
-  <button id="findCreatorsBtn">⬆️ Import creator đã bắt được</button>
+  <button id="findCreatorsBtn">🔍 Đọc data đã bắt được</button>
+  <button id="exportCsvBtn" class="secondary">⬇️ Xuất CSV danh sách đã bắt</button>
   <div id="findStatus"></div>
   <button id="stopListImportBtn" class="secondary" style="display:none;">⏹ Dừng</button>
 

@@ -149,6 +149,85 @@ function matchedKalodataHeaders(headers: string[]): Record<string, string> {
   return matched;
 }
 
+// Preset cột cố định cho file CSV export từ extension "TikTok One Scraper (CSV export build)"
+// (xem CSV_COLUMNS trong background.js của extension đó) — map cứng theo đúng tên cột extension
+// xuất ra, giống cách xử lý Kalodata ở trên. Extension export thêm "Collab Score" và "TikTok One
+// ID" nhưng Creator (src/types.ts) chưa có field tương ứng cho 2 cột đó — cố tình bỏ qua, không
+// thêm field mới vào schema chỉ vì 1 nguồn import.
+const TTO_HEADER_MAP: Record<string, string> = {
+  handle: 'handle',
+  'display name': 'displayName',
+  bio: 'bio',
+  email: 'email',
+  instagram: 'instagram',
+  followers: 'followers',
+  'avg views': 'avgViews',
+  'engagement rate %': 'engagementRate',
+  category: 'category',
+  'rate card $/100k': 'rateCard',
+  'top gender': 'topGender',
+  'top age range': 'topAgeGroup',
+  'top country': 'topCountry',
+  'avatar url': 'avatar'
+};
+
+const TTO_PREVIEW_FIELDS: { key: string; label: string }[] = [
+  { key: 'handle', label: 'Handle' },
+  { key: 'displayName', label: 'Tên hiển thị' },
+  { key: 'followers', label: 'Followers' },
+  { key: 'avgViews', label: 'Avg Views' },
+  { key: 'engagementRate', label: 'Engagement Rate' },
+  { key: 'category', label: 'Category' },
+  { key: 'topGender', label: 'Top Gender' },
+  { key: 'topCountry', label: 'Top Country' },
+  { key: 'email', label: 'Email' }
+];
+
+function matchedTtoHeaders(headers: string[]): Record<string, string> {
+  const matched: Record<string, string> = {};
+  for (const h of headers) {
+    const targetKey = TTO_HEADER_MAP[h.trim().toLowerCase()];
+    if (targetKey && !matched[targetKey]) matched[targetKey] = h;
+  }
+  return matched;
+}
+
+const TTO_NUMERIC_FIELDS = new Set(['followers', 'avgViews', 'engagementRate']);
+
+function buildTtoRowObject(headers: string[], row: any[]) {
+  const raw: Record<string, any> = {};
+  headers.forEach((h, idx) => {
+    const targetKey = TTO_HEADER_MAP[h.trim().toLowerCase()];
+    if (!targetKey) return;
+    const rawValue = row[idx];
+    if (rawValue === undefined || rawValue === null || rawValue === '') return;
+    raw[targetKey] = TTO_NUMERIC_FIELDS.has(targetKey) ? parseLooseNumber(rawValue) : String(rawValue).trim();
+  });
+
+  // Top Gender/Age/Country gộp thành CreatorDemographics lồng nhau (xem src/types.ts) — chỉ tạo
+  // object khi có ít nhất 1 trong 3, không bịa object rỗng.
+  const demographics =
+    raw.topGender || raw.topAgeGroup || raw.topCountry
+      ? { topGender: raw.topGender, topAgeGroup: raw.topAgeGroup, topCountry: raw.topCountry }
+      : undefined;
+
+  return {
+    handle: raw.handle,
+    displayName: raw.displayName,
+    bio: raw.bio,
+    email: raw.email,
+    instagram: raw.instagram,
+    followers: raw.followers,
+    avgViews: raw.avgViews,
+    engagementRate: raw.engagementRate,
+    category: raw.category,
+    rateCard: raw.rateCard,
+    avatar: raw.avatar,
+    demographics,
+    metricsSource: 'tiktokOne'
+  };
+}
+
 function buildKalodataRowObject(headers: string[], row: any[]) {
   const raw: Record<string, any> = {};
   headers.forEach((h, idx) => {
@@ -195,7 +274,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   // 'cruva' chưa có preset cột riêng (Cruva chưa xác nhận tên cột export chuẩn) — dùng chung UI
   // map cột tay như Generic CSV, chỉ khác nhãn metricsSource gắn vào khi import (xem handleFileImport).
-  const [importMode, setImportMode] = useState<'kalodata' | 'cruva' | 'generic'>('kalodata');
+  const [importMode, setImportMode] = useState<'kalodata' | 'tto' | 'cruva' | 'generic'>('kalodata');
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileHeaders, setFileHeaders] = useState<string[]>([]);
   const [fileRows, setFileRows] = useState<any[][]>([]);
@@ -269,10 +348,13 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
   };
 
   const kalodataFoundHeaders = matchedKalodataHeaders(fileHeaders);
+  const ttoFoundHeaders = matchedTtoHeaders(fileHeaders);
 
   const mappedFileItems = (
     importMode === 'kalodata'
       ? fileRows.map(row => buildKalodataRowObject(fileHeaders, row))
+      : importMode === 'tto'
+      ? fileRows.map(row => buildTtoRowObject(fileHeaders, row))
       : fileRows.map(row => {
           const obj: Record<string, any> = buildRowObject(fileHeaders, row, columnMap);
           if (importMode === 'cruva') obj.metricsSource = 'cruva';
@@ -296,7 +378,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
         body: JSON.stringify({
           workspaceId: activeWorkspaceId,
           source: `File Import${fileName ? ` (${fileName})` : ''}`,
-          metricsSource: importMode === 'kalodata' ? 'kalodata' : importMode === 'cruva' ? 'cruva' : undefined,
+          metricsSource: importMode === 'kalodata' ? 'kalodata' : importMode === 'tto' ? 'tiktokOne' : importMode === 'cruva' ? 'cruva' : undefined,
           creators: mappedFileItems
         })
       });
@@ -337,7 +419,7 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                 Import Creator (File CSV/Excel)
               </h3>
               <p className="text-xs text-slate-500">
-                Nhập creator hàng loạt từ file Kalodata/Cruva/CSV vào workspace {activeWorkspaceId}
+                Nhập creator hàng loạt từ file Kalodata/TikTok One/Cruva/CSV vào workspace {activeWorkspaceId}
               </p>
             </div>
           </div>
@@ -360,6 +442,17 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
               }`}
             >
               Kalodata
+            </button>
+            <button
+              type="button"
+              onClick={() => setImportMode('tto')}
+              className={`px-3.5 py-1.5 rounded-lg font-bold text-[11px] transition-colors ${
+                importMode === 'tto'
+                  ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+              }`}
+            >
+              TikTok One
             </button>
             <button
               type="button"
@@ -391,6 +484,8 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
               <span className="font-bold text-slate-900 dark:text-white text-xs">
                 {importMode === 'kalodata'
                   ? 'Import file export từ Kalodata'
+                  : importMode === 'tto'
+                  ? 'Import file CSV từ TikTok One Scraper'
                   : importMode === 'cruva'
                   ? 'Import file export từ Cruva'
                   : 'Import file CSV/Excel bất kỳ'}
@@ -404,6 +499,14 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                   Followers, Revenue($), Engagement Rate, Views, VideoNum, TikTokUrl). Kalodata không export
                   GPM/beauty ratio/demographics nên các field đó phải điền tay sau. Cột nào file không có sẽ
                   bị bỏ qua, không tự bịa số.
+                </>
+              ) : importMode === 'tto' ? (
+                <>
+                  Chọn file CSV export từ extension "TikTok One Scraper (CSV export build)" (nút Export
+                  CSV trong popup extension) — app tự nhận diện đúng cột extension đó xuất ra (Handle,
+                  Display Name, Bio, Email, Instagram, Followers, Avg Views, Engagement Rate %, Category,
+                  Rate Card, Top Gender/Age Range/Country, Avatar URL). Cột "Collab Score" và "TikTok One
+                  ID" trong file KHÔNG được nhập (CRM chưa có field tương ứng) — bị bỏ qua an toàn.
                 </>
               ) : importMode === 'cruva' ? (
                 <>
@@ -493,6 +596,77 @@ export const ImportWizardModal: React.FC<ImportWizardModalProps> = ({
                         {filePreviewRows.map((row, i) => (
                           <tr key={i} className="border-b border-slate-100 dark:border-slate-800/60">
                             {KALODATA_PREVIEW_FIELDS.filter(f => kalodataFoundHeaders[f.key]).map(f => (
+                              <td key={f.key} className="py-1 pr-3 text-slate-700 dark:text-slate-300">{String(row[f.key] ?? '')}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {fileSkippedCount > 0 && (
+                    <div className="text-[11px] text-slate-500">
+                      Sẽ bỏ qua {fileSkippedCount} dòng không đọc được handle.
+                    </div>
+                  )}
+                  <button
+                    onClick={handleFileImport}
+                    disabled={fileImporting || mappedFileItems.length === 0}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-xs flex items-center gap-1.5 text-xs disabled:opacity-50"
+                  >
+                    {fileImporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    {fileImporting ? 'Đang nhập...' : `Xác nhận nhập ${mappedFileItems.length} creator`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {fileHeaders.length > 0 && importMode === 'tto' && (
+            <>
+              {/* Detected columns (read-only, không cho map tay — cùng kiểu preset cố định như Kalodata) */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                <div className="font-bold text-slate-900 dark:text-white text-xs">Cột đã nhận diện trong file</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {TTO_PREVIEW_FIELDS.map(field => (
+                    <div key={field.key} className="flex items-center gap-2">
+                      <span className="w-32 shrink-0 text-[11px] font-medium text-slate-500">{field.label}</span>
+                      {ttoFoundHeaders[field.key] ? (
+                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-mono">
+                          {ttoFoundHeaders[field.key]}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-slate-400 italic">không có trong file</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {!ttoFoundHeaders.handle && (
+                  <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-[11px] text-amber-700 dark:text-amber-300">
+                    File này không có cột "Handle" — không thể nhận diện creator. Kiểm tra lại đúng file
+                    Export CSV từ extension TikTok One Scraper, hoặc dùng tab "Generic CSV" để tự map cột.
+                  </div>
+                )}
+              </div>
+
+              {/* Preview */}
+              {ttoFoundHeaders.handle && (
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                  <div className="font-bold text-slate-900 dark:text-white text-xs">
+                    Xem trước ({filePreviewRows.length}/{mappedFileItems.length} dòng hợp lệ hiển thị, tổng {fileRows.length} dòng trong file)
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[10.5px] border-collapse">
+                      <thead>
+                        <tr className="text-left text-slate-500">
+                          {TTO_PREVIEW_FIELDS.filter(f => ttoFoundHeaders[f.key]).map(f => (
+                            <th key={f.key} className="py-1 pr-3 font-semibold border-b border-slate-200 dark:border-slate-800">{f.label}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filePreviewRows.map((row, i) => (
+                          <tr key={i} className="border-b border-slate-100 dark:border-slate-800/60">
+                            {TTO_PREVIEW_FIELDS.filter(f => ttoFoundHeaders[f.key]).map(f => (
                               <td key={f.key} className="py-1 pr-3 text-slate-700 dark:text-slate-300">{String(row[f.key] ?? '')}</td>
                             ))}
                           </tr>

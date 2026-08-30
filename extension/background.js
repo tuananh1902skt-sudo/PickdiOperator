@@ -463,16 +463,11 @@ async function runListImportJob(message) {
       return;
     }
 
-    await setJob(jobType, { status: 'running', message: `🔄 Đang đẩy ${normalized.length}/${rawList.length} creator về webapp...` });
-    let data;
-    try {
-      data = await postBatchImport(message.webappUrl, 'Pickdi TCM Extension', 'tcm', normalized);
-    } catch (err) {
-      await setJob(jobType, { status: 'error', message: `❌ ${err.message}`, failedPayload: normalized });
-      return;
-    }
+    // Nút này KHÔNG còn tự đẩy lên webapp Pickdi nữa — chỉ đọc/đếm lại data đã bắt được để
+    // operator xem trước, dùng nút "⬇️ Xuất CSV" nếu cần lấy ra file, hoặc tick "tự mở tab ẩn
+    // lấy chi tiết" bên dưới nếu muốn đẩy thẳng creator (kèm chi tiết) lên Pickdi.
     if (await stopIfRequested(jobType)) return;
-    await setJob(jobType, { status: 'done', message: `✅ +${data.importedCount} creator mới (${data.updatedCount} cập nhật) / ${rawList.length} đã bắt được` });
+    await setJob(jobType, { status: 'done', message: `✅ Đã đọc được ${normalized.length}/${rawList.length} creator (chưa đẩy lên webapp — dùng nút Xuất CSV hoặc tick auto-detail nếu cần đẩy lên Pickdi).` });
 
     if (message.autoDetail) {
       let shopId = '', shopRegion = 'US';
@@ -641,6 +636,29 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     runListImportJob(message);
     sendResponse({ ok: true, started: true });
     return false; // job chạy nền độc lập, popup không cần đợi — poll GET_EXT_JOBS để xem tiến độ
+  }
+
+  // Đọc + normalize lại đúng data đã bắt được (giống RUN_LIST_IMPORT) nhưng KHÔNG đẩy lên webapp —
+  // trả thẳng mảng creator về popup để popup tự dựng CSV và tải xuống máy, dùng khi chỉ cần file
+  // Excel/CSV để làm việc offline chứ chưa cần import vào Pickdi.
+  if (message.type === 'RUN_LIST_EXPORT') {
+    (async () => {
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: message.tabId },
+          world: 'MAIN',
+          func: readTcmCapturedList,
+        });
+        const scraped = results && results[0] && results[0].result;
+        const rawList = (scraped && scraped.list) || [];
+        const matched = rawList.filter((flat) => matchesClientFilters(flat, message.filters || {}));
+        const normalized = matched.map(normalizeCreator).filter((c) => c.handle);
+        sendResponse({ ok: true, creators: normalized, totalCaptured: rawList.length });
+      } catch (err) {
+        sendResponse({ ok: false, error: String((err && err.message) || err) });
+      }
+    })();
+    return true; // async sendResponse
   }
 
   if (message.type === 'RUN_DETAIL_JOB') {

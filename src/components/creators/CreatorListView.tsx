@@ -20,7 +20,8 @@ import {
   X,
   AlertTriangle,
   Image as ImageIcon,
-  RefreshCw
+  RefreshCw,
+  ClipboardList
 } from 'lucide-react';
 import { Creator, Campaign, Workspace, CreatorCampaignAssignment, CreatorStatus } from '../../types';
 import { WorkspaceBanner } from '../layout/WorkspaceBanner';
@@ -36,6 +37,32 @@ import {
   stopSearchCidQueue,
   SearchCidQueueState
 } from '../../lib/tcmExtensionBridge';
+
+// Chuẩn hoá 1 dòng người dùng dán vào thành handle so khớp được: bỏ @, bỏ URL TikTok đầy đủ,
+// bỏ query string, hạ về chữ thường. Chấp nhận cả "@abc", "abc", "https://tiktok.com/@abc",
+// "tiktok.com/@abc/video/123" — vì danh sách dán từ Sheet/mail thường lẫn đủ 4 dạng này.
+function normalizeHandle(raw: string): string {
+  let s = raw.trim().toLowerCase();
+  if (!s) return '';
+  s = s.replace(/^https?:\/\//, '').replace(/^www\./, '');
+  if (s.startsWith('tiktok.com/')) s = s.slice('tiktok.com/'.length);
+  s = s.split(/[?#]/)[0];
+  s = s.replace(/^@/, '').split('/')[0];
+  return s.trim();
+}
+
+// Tách text dán vào thành danh sách handle duy nhất, giữ nguyên thứ tự người dùng dán.
+// Ngăn cách bằng xuống dòng, dấu phẩy, chấm phẩy hoặc tab — dán 1 cột từ Google Sheet ra
+// là xuống dòng, dán từ mail thì hay là dấu phẩy.
+function parseHandleList(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  text.split(/[\n,;\t]+/).forEach(part => {
+    const h = normalizeHandle(part);
+    if (h && !seen.has(h)) { seen.add(h); out.push(h); }
+  });
+  return out;
+}
 
 // Menu dùng chung cho cả header ("toàn bộ workspace") và bulk-action bar ("creator đã chọn") —
 // gộp 2 thao tác TCM (tìm cid theo handle / cào chi tiết) + cấu hình Extension ID vào 1 dropdown
@@ -256,6 +283,19 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   // (chỉ tới từ TCM scrape hoặc thêm tay) không có importedAt nên không xuất hiện trong danh sách
   // ngày — chọn "Chưa rõ ngày import" để xem riêng nhóm đó.
   const [selectedImportDate, setSelectedImportDate] = useState('ALL');
+
+  // Lọc theo danh sách handle dán vào — luồng chính của quy trình sheet-first: lọc/chốt danh
+  // sách ở Google Sheet, copy cột handle, dán vào đây để app chọn đúng nhóm đó rồi mở Bulk
+  // Outreach. Không có nó thì phải tự tick tay từng dòng qua nhiều trang, gần như chắc chắn sai.
+  const [handleFilter, setHandleFilter] = useState<{
+    set: Set<string>;
+    pasted: number;
+    matched: number;
+    missing: string[];
+    archived: number;
+  } | null>(null);
+  const [showHandlePaste, setShowHandlePaste] = useState(false);
+  const [handlePasteText, setHandlePasteText] = useState('');
 
   // Sort theo cột — bấm vào tiêu đề cột trong bảng (Creator, Category & Niche, Email,
   // Followers, Avg Views, ER %, Brands, Campaigns, Status) để sort tăng/giảm,
@@ -494,6 +534,43 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
 
   const sourceCreators = creators;
 
+  // Áp danh sách handle: lọc bảng về đúng nhóm đó VÀ tick sẵn toàn bộ, để bấm "Gửi Hàng Loạt"
+  // là xong. Tick sẵn ở đây an toàn vì effect dọn selection bên dưới so với `sortedCreators`
+  // (toàn bộ tập đã lọc, không phải trang đang xem) nên chọn xuyên trang không bị mất.
+  const applyHandleList = () => {
+    const handles = parseHandleList(handlePasteText);
+    if (handles.length === 0) return;
+    const byHandle = new Map<string, Creator>();
+    sourceCreators.forEach(c => {
+      const h = c.handle.trim().toLowerCase();
+      if (h && !byHandle.has(h)) byHandle.set(h, c);
+    });
+    const matched: Creator[] = [];
+    const missing: string[] = [];
+    handles.forEach(h => {
+      const c = byHandle.get(h);
+      if (c) matched.push(c); else missing.push(h);
+    });
+    // Archived bị ẩn khỏi bảng bởi rule ngay đầu filteredCreators — đếm riêng để banner nói
+    // thật, thay vì để operator thấy "khớp 42" mà bảng chỉ hiện 38 dòng.
+    const archived = matched.filter(c => c.status === 'Archived').length;
+    setHandleFilter({
+      set: new Set(matched.map(c => c.handle.trim().toLowerCase())),
+      pasted: handles.length,
+      matched: matched.length,
+      missing,
+      archived,
+    });
+    setSelectedIds(matched.filter(c => c.status !== 'Archived').map(c => c.id));
+    setShowHandlePaste(false);
+  };
+
+  const clearHandleList = () => {
+    setHandleFilter(null);
+    setHandlePasteText('');
+    setSelectedIds([]);
+  };
+
   // Danh sách category cho dropdown filter — lấy trực tiếp từ category thực tế của các creator
   // đang có (thay vì 3 giá trị hardcode cũ), để filter luôn khớp với data thật, kể cả khi
   // creator được import với category mới lạ (TCM/Kalodata trả về nhiều category hơn 3 giá trị cũ).
@@ -552,6 +629,10 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
       if (!matchQuery) return false;
     }
 
+    // Lọc theo danh sách dán vào — đặt trước các filter khác để "khớp N/M" trên banner luôn
+    // là con số của chính danh sách đó, không bị các bộ lọc đang bật làm sai lệch.
+    if (handleFilter && !handleFilter.set.has(c.handle.trim().toLowerCase())) return false;
+
     if (selectedStatus !== 'ALL' && c.status !== selectedStatus) return false;
     if (selectedCountry !== 'ALL' && c.country !== selectedCountry) return false;
     if (selectedCategory !== 'ALL' && c.category !== selectedCategory) return false;
@@ -596,6 +677,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   }), [
     sourceCreators,
     search,
+    handleFilter,
     selectedStatus,
     selectedCountry,
     selectedCategory,
@@ -681,6 +763,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
     setCurrentPage(1);
   }, [
     search,
+    handleFilter,
     selectedStatus,
     selectedCountry,
     selectedCategory,
@@ -1052,7 +1135,21 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
             )}
 
             <button
-              onClick={() => setShowAdvancedFilters(o => !o)}
+              onClick={() => { setShowHandlePaste(o => !o); setShowAdvancedFilters(false); }}
+              className={`p-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 shrink-0 transition-colors ${
+                handleFilter
+                  ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                  : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200'
+              }`}
+              title="Dán 1 cột handle từ Google Sheet — app lọc đúng nhóm đó và tick sẵn để gửi outreach"
+            >
+              <ClipboardList className="w-3.5 h-3.5" />
+              Dán danh sách handle
+              {handleFilter && ` (${handleFilter.matched})`}
+            </button>
+
+            <button
+              onClick={() => { setShowAdvancedFilters(o => !o); setShowHandlePaste(false); }}
               className={`p-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 shrink-0 transition-colors ${
                 advancedFilterCount > 0
                   ? 'border-indigo-300 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300'
@@ -1065,6 +1162,98 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Ô dán danh sách handle — cầu nối clipboard giữa Google Sheet và module outreach */}
+        {showHandlePaste && (
+          <div className="p-3 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 space-y-2 animate-in fade-in duration-150">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">
+                Dán cột handle từ Google Sheet
+              </span>
+              <button
+                onClick={() => setShowHandlePaste(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <textarea
+              value={handlePasteText}
+              onChange={e => setHandlePasteText(e.target.value)}
+              onKeyDown={e => {
+                // Ctrl/Cmd+Enter để áp luôn — Enter thường phải giữ nguyên vì đây là danh sách nhiều dòng
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); applyHandleList(); }
+              }}
+              rows={5}
+              spellCheck={false}
+              placeholder={'glowbymina\nskinwithtee\n@dermdiary\nhttps://www.tiktok.com/@joyeuxglow'}
+              className="w-full p-2.5 text-xs font-mono rounded-lg border border-emerald-200 dark:border-emerald-900 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 placeholder:text-slate-300 dark:placeholder:text-slate-600 resize-y"
+            />
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                Mỗi dòng một handle. Nhận cả <code className="font-mono">@abc</code> và link TikTok đầy đủ.
+                {parseHandleList(handlePasteText).length > 0 && (
+                  <span className="ml-1 font-semibold text-emerald-700 dark:text-emerald-400">
+                    Đọc được {parseHandleList(handlePasteText).length} handle.
+                  </span>
+                )}
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                {handlePasteText && (
+                  <button
+                    onClick={() => setHandlePasteText('')}
+                    className="px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800"
+                  >
+                    Xoá ô
+                  </button>
+                )}
+                <button
+                  onClick={applyHandleList}
+                  disabled={parseHandleList(handlePasteText).length === 0}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Lọc &amp; tick sẵn
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Banner kết quả — nói rõ khớp bao nhiêu, thiếu handle nào, để còn đi import bổ sung */}
+        {handleFilter && (
+          <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 flex items-start justify-between gap-3 text-xs animate-in fade-in duration-150">
+            <div className="text-emerald-900 dark:text-emerald-200 space-y-1 min-w-0">
+              <div className="font-semibold">
+                Đang lọc theo danh sách dán vào — khớp {handleFilter.matched}/{handleFilter.pasted} handle
+                {handleFilter.archived > 0 && (
+                  <span className="font-normal text-emerald-700 dark:text-emerald-400">
+                    {' '}· {handleFilter.archived} đang Archived nên không hiện trong bảng
+                  </span>
+                )}
+              </div>
+              {handleFilter.missing.length > 0 && (
+                <div className="text-rose-700 dark:text-rose-400 break-words">
+                  {handleFilter.missing.length} handle chưa có trong hệ thống:{' '}
+                  <span className="font-mono">{handleFilter.missing.slice(0, 8).join(', ')}</span>
+                  {handleFilter.missing.length > 8 && ` … +${handleFilter.missing.length - 8}`}
+                  <button
+                    onClick={() => navigator.clipboard.writeText(handleFilter.missing.join('\n'))}
+                    className="ml-2 underline underline-offset-2 hover:no-underline"
+                  >
+                    Copy để đi import
+                  </button>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={clearHandleList}
+              className="shrink-0 px-2.5 py-1 font-semibold rounded-lg border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-white dark:hover:bg-slate-800 flex items-center gap-1"
+            >
+              <X className="w-3.5 h-3.5" />
+              Bỏ lọc
+            </button>
+          </div>
+        )}
 
         {/* Advanced Filters — range theo chỉ số sourcing + trạng thái quét TCM */}
         {showAdvancedFilters && (

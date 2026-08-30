@@ -201,6 +201,71 @@ document.getElementById('findCreatorsBtn').addEventListener('click', async () =>
   }
 });
 
+// ================== XUẤT CSV DANH SÁCH ĐÃ BẮT (không đẩy lên webapp) ==================
+const CSV_COLUMNS = [
+  { header: 'Handle', get: (c) => c.handle || '' },
+  { header: 'Display Name', get: (c) => c.displayName || '' },
+  { header: 'Country', get: (c) => c.country || '' },
+  { header: 'Category', get: (c) => c.category || '' },
+  { header: 'Followers', get: (c) => c.followers != null ? String(c.followers) : '' },
+  { header: 'Avg Views', get: (c) => c.avgViews != null ? String(c.avgViews) : '' },
+  { header: 'Engagement Rate', get: (c) => c.engagementRate != null ? String(c.engagementRate) : '' },
+  { header: 'GMV 30d', get: (c) => c.gmv30d != null ? String(c.gmv30d) : '' },
+  { header: 'Units Sold', get: (c) => c.salesMetrics && c.salesMetrics.itemsSold != null ? String(c.salesMetrics.itemsSold) : '' },
+  { header: 'GPM', get: (c) => c.gpm != null ? String(c.gpm) : '' },
+  { header: 'PPS Score', get: (c) => c.pps && c.pps.score != null ? String(c.pps.score) : '' },
+  { header: 'TCM Creator ID', get: (c) => c.tcmCreatorOecuid || '' },
+];
+
+function csvEscapeCell(v) {
+  if (v.includes(',') || v.includes('"') || v.includes('\n')) {
+    return `"${v.replace(/"/g, '""')}"`;
+  }
+  return v;
+}
+
+function downloadCreatorsCsv(creators, filename) {
+  const header = CSV_COLUMNS.map((col) => col.header).join(',');
+  const rows = creators.map((c) => CSV_COLUMNS.map((col) => csvEscapeCell(col.get(c))).join(','));
+  const csv = [header, ...rows].join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('exportCsvBtn').addEventListener('click', async () => {
+  const findStatusDiv = document.getElementById('findStatus');
+  const filters = {
+    follower_min: Number(document.getElementById('followerMin').value) || undefined,
+    follower_max: Number(document.getElementById('followerMax').value) || undefined,
+    query_keyword: document.getElementById('keyword').value.trim() || undefined,
+  };
+  if (filters.follower_min && filters.follower_max && filters.follower_min > filters.follower_max) {
+    [filters.follower_min, filters.follower_max] = [filters.follower_max, filters.follower_min];
+  }
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  setStatusText(findStatusDiv, '⏳ Đang đọc data đã bắt được để xuất CSV...', 'orange');
+  const res = await chrome.runtime.sendMessage({ type: 'RUN_LIST_EXPORT', tabId: tab.id, filters }).catch((err) => ({ ok: false, error: String(err) }));
+  if (!res || !res.ok) {
+    setStatusText(findStatusDiv, `❌ ${(res && res.error) || 'Không đọc được data.'}`, 'red');
+    return;
+  }
+  if (res.creators.length === 0) {
+    setStatusText(findStatusDiv, `⚠️ Bắt được ${res.totalCaptured} creator nhưng không có creator nào khớp filter/có handle hợp lệ.`, 'red');
+    return;
+  }
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadCreatorsCsv(res.creators, `tcm-creators-${stamp}.csv`);
+  setStatusText(findStatusDiv, `✅ Đã tải CSV ${res.creators.length}/${res.totalCaptured} creator.`, 'green');
+});
+
 let autoDetailPollTimer = null;
 function startAutoDetailPolling() {
   if (autoDetailPollTimer) return;

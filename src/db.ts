@@ -1120,13 +1120,20 @@ export async function getCampaignById(id: string): Promise<Campaign | null> {
 
 export async function getAllOutreach(): Promise<OutreachEmail[]> {
   const db = getDb();
-  const { data, error } = await db
-    .from('outreach_emails')
-    .select('*')
-    .order('created_at_ts', { ascending: false })
-    .order('rowid', { ascending: false });
-  if (error) throw error;
-  return (data ?? []).map(rowToOutreach);
+  const PAGE_SIZE = 1000;
+  const rows: any[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await db
+      .from('outreach_emails')
+      .select('*')
+      .order('created_at_ts', { ascending: false })
+      .order('rowid', { ascending: false })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  return rows.map(rowToOutreach);
 }
 
 // Select trơn hơn cho bảng OutreachView (/api/outreach) — bỏ 'body' (nội dung HTML đầy đủ),

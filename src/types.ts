@@ -300,6 +300,7 @@ export interface CheckInboxResult {
     ambiguous_multi_match: number;
   };
   needsManualReview: number;
+  archivedStale: number;
 }
 
 export interface OutreachEmail {

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Copy, Download, Check, FileSpreadsheet } from 'lucide-react';
-import { Creator, Campaign, CreatorCampaignAssignment, OutreachEmail, PostedVideo } from '../../types';
+import { Creator, Campaign, CreatorCampaignAssignment, OutreachEmail, PostedVideo, Conversation } from '../../types';
 
 interface ExportViewProps {
   creators: Creator[];
@@ -8,6 +8,7 @@ interface ExportViewProps {
   assignments: CreatorCampaignAssignment[];
   outreachList: OutreachEmail[];
   postedVideos: PostedVideo[];
+  conversations: Conversation[];
 }
 
 function todayStr(): string {
@@ -62,8 +63,12 @@ function demographicStr(creator?: Creator): string {
 
 // GMV rút gọn dạng $53k/$1.2m/$3.4b cho dễ đọc trong cột "GMV/Video, Last 30d" — làm tròn
 // về số nguyên (không giữ số lẻ như $53.1k) theo đúng ví dụ file mẫu yêu cầu.
-function formatUsdShort(v: number | undefined | null): string {
+function formatUsdShort(v: number | undefined | null, plain = false): string {
   if (v === undefined || v === null || Number.isNaN(v)) return '';
+  // Số thuần (Đ9 trong PIPELINE_SHEET_SPEC.md): xuất "53000" thay vì "$53k". Dạng rút gọn
+  // đọc đẹp nhưng vào Sheet là CHUỖI — đó chính là lý do 1.305/1.593 ô GMV của file client
+  // hiện tại không tính được công thức nào.
+  if (plain) return String(Math.round(v));
   const sign = v < 0 ? '-' : '';
   const abs = Math.abs(v);
   let short: string;
@@ -114,6 +119,59 @@ function whyThisCreator(creator?: Creator): string {
   return conclusion ? `${facts.slice(0, 3).join(', ')} — ${conclusion}.` : `${facts.slice(0, 3).join(', ')}.`;
 }
 
+// ─── Bộ cột thứ hai: xuất sang tab MAIN của sheet vận hành ───────────────────────────────
+// Tên cột dưới đây khớp CHÍNH XÁC bảng nhận diện SYN trong apps-script (Import.gs) — dán
+// nguyên khối này vào tab _DÁN rồi bấm 📥 Nhập creator mới là script tự map đúng cột, không
+// phải kéo tay. Đổi tên cột ở đây thì phải đổi cả SYN bên kia.
+type MainColumn = { header: string; get: (c: Creator, plain: boolean) => string };
+
+const MAIN_COLUMNS: MainColumn[] = [
+  { header: 'handle', get: c => fmt(c.handle) },
+  { header: 'email', get: c => fmt(c.email) },
+  { header: 'name', get: c => fmt(c.displayName) },
+  { header: 'source', get: c => METRICS_SOURCE_LABEL[c.metricsSource || ''] || '' },
+  { header: 'follower', get: (c, p) => formatUsdShortNum(c.followers, p) },
+  { header: 'gmv 30d', get: (c, p) => formatUsdShort(c.gmv30d, p) },
+  { header: 'gmv/video', get: (c, p) => formatUsdShort(gmvPerVideo(c), p) },
+  { header: 'gpm', get: (c, p) => formatUsdShort(c.gpm, p) },
+  { header: 'avg views', get: (c, p) => formatUsdShortNum(c.avgViews, p) },
+  { header: 'beauty %', get: c => (beautyRatio(c) !== undefined ? roundPct(beautyRatio(c)!, 1) : '') },
+  { header: 'female %', get: c => (c.demographics?.genderFemale !== undefined ? roundPct(c.demographics.genderFemale, 1) : '') },
+  { header: 'age group', get: c => fmt(c.demographics?.topAgeGroup) },
+  { header: 'category', get: c => categoryTop2(c) },
+  { header: 'video link', get: c => fmt(c.recentVideos?.find(v => v.videoUrl)?.videoUrl) },
+  { header: 'persona', get: () => '' },
+  { header: 'why this creator', get: c => whyThisCreator(c) },
+];
+
+const METRICS_SOURCE_LABEL: Record<string, string> = {
+  tcm: 'TCM',
+  kalodata: 'Kalodata',
+  tiktokOne: 'TTO',
+  cruva: 'Cruva',
+  manual: 'Manual',
+};
+
+// Số lượng (follower, view) không phải tiền — dạng rút gọn dùng k/m nhưng KHÔNG có "$".
+function formatUsdShortNum(v: number | undefined | null, plain: boolean): string {
+  const s = formatUsdShort(v, plain);
+  return plain ? s : s.replace('$', '');
+}
+
+// GMV/video = gmv30d chia số video đã đăng trong 30 ngày (videoMetrics.videosCount, chỉ có
+// khi đã cào TCM). Thiếu videosCount thì để TRỐNG chứ không rơi về gmv30d — gmv30d là GMV của
+// cả kênh trong 30 ngày, đặt nguyên nó vào cột "GMV/video" là sai đơn vị.
+function gmvPerVideo(c: Creator): number | undefined {
+  const n = c.videoMetrics?.videosCount;
+  if (c.gmv30d === undefined || !n || n <= 0) return undefined;
+  return c.gmv30d / n;
+}
+
+function beautyRatio(c: Creator): number | undefined {
+  return c.beautyCategoryRatio
+    ?? c.salesMetrics?.categorySplit?.find(x => x.name.toLowerCase().includes('beauty'))?.value;
+}
+
 type ExportColumn = {
   section?: string; // nhãn nhóm cột (row 1 merge trong file gốc) — undefined = cột đứng riêng (vd "O/X & Reason")
   header: string;
@@ -125,6 +183,8 @@ interface RowContext {
   assignment: CreatorCampaignAssignment;
   emails: OutreachEmail[]; // outreach emails của đúng cặp creator x campaign này
   totalGmv?: number; // tổng doanh thu các video đã đăng của đúng cặp creator x campaign này
+  conversation?: Conversation; // để biết creator đang "Negotiating" — OutreachEmail.status không có giá trị này
+  plainNumbers: boolean; // xuất số thuần thay vì dạng rút gọn $53k (xem formatUsdShort)
 }
 
 // Cột đánh dấu [AUTO] trong file gốc là formula tính sẵn trên sheet (No., Quote per Video,
@@ -143,7 +203,7 @@ const COLUMNS: ExportColumn[] = [
   { section: '1. Sourcing', header: 'Email', get: ({ creator }) => fmt(creator?.email) },
   { section: '1. Sourcing', header: 'Main Category (top 2)', get: ({ creator }) => categoryTop2(creator) },
   { section: '1. Sourcing', header: 'Demographic', get: ({ creator }) => demographicStr(creator) },
-  { section: '1. Sourcing', header: 'GMV/Video, Last 30d ($)', get: ({ creator }) => formatUsdShort(creator?.gmv30d) },
+  { section: '1. Sourcing', header: 'GMV/Video, Last 30d ($)', get: ({ creator, plainNumbers }) => formatUsdShort(creator?.gmv30d, plainNumbers) },
   { section: '1. Sourcing', header: 'Why This Creator', get: ({ creator }) => whyThisCreator(creator) },
   { header: 'O/X & Reason', get: () => '' },
   { section: '2. Outreach', header: '1st Email Sent', get: ({ emails }) => {
@@ -151,7 +211,10 @@ const COLUMNS: ExportColumn[] = [
     return toLocalDateStr(first?.sentAt);
   } },
   { section: '2. Outreach', header: 'Offer', get: () => '' },
-  { section: '2. Outreach', header: 'Reply Status', get: ({ emails }) => {
+  { section: '2. Outreach', header: 'Reply Status', get: ({ emails, conversation }) => {
+    // Conversation.status ưu tiên hơn vì nó có 'Negotiating' (imapSync tự set khi phát hiện
+    // reply mang tính đàm phán giá/rate card) — OutreachEmail.status tối đa chỉ lên tới 'Replied'.
+    if (conversation?.status === 'Negotiating') return 'Negotiating';
     const latest = [...emails].sort((a, b) => new Date(a.sentAt || 0).getTime() - new Date(b.sentAt || 0).getTime()).pop();
     return fmt(latest?.status);
   } },
@@ -248,7 +311,7 @@ function downloadCsv(filename: string, headerLines: string[][], rows: string[][]
   URL.revokeObjectURL(url);
 }
 
-export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, assignments, outreachList, postedVideos }) => {
+export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, assignments, outreachList, postedVideos, conversations }) => {
   const activeCampaigns = useMemo(() => campaigns.filter(c => c.status !== 'Archived'), [campaigns]);
   const [selectedCampaignId, setSelectedCampaignId] = useState(() => activeCampaigns[0]?.id || campaigns[0]?.id || '');
   const campaignId = selectedCampaignId || activeCampaigns[0]?.id || campaigns[0]?.id || '';
@@ -257,7 +320,37 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
   // trình duyệt, và thực tế thao tác nộp file cũng diễn ra theo ngày chứ không phải 1 lần duy nhất.
   const [selectedDate, setSelectedDate] = useState(todayStr());
 
+  // Hai bộ cột cho hai đích khác nhau:
+  //   'client' — 49 cột đúng format 04_Grinding Cream, dán vào file chung của team
+  //   'main'   — 16 cột tên khớp bảng nhận diện của apps-script, dán vào tab _DÁN của sheet
+  //              riêng rồi bấm 📥 Nhập creator mới
+  const [mode, setMode] = useState<'client' | 'main'>('client');
+  // Đ9: số vào Sheet phải là số thuần. Mặc định bật cho cả hai bộ cột.
+  const [plainNumbers, setPlainNumbers] = useState(true);
+
   const creatorById = useMemo(() => new Map(creators.map(c => [c.id, c])), [creators]);
+
+  // Bộ cột MAIN chạy trên creator VỪA IMPORT, không phải creator đã assign vào campaign —
+  // ImportWizardModal không gán campaign, nên nếu lấy theo assignment thì creator mới cào
+  // xong sẽ không bao giờ xuất được. Đây đúng là thứ tự thật của quy trình: cào → import →
+  // xuất sang sheet → lọc tay trên sheet → mới tick chọn để outreach.
+  const mainCreators = useMemo(() => {
+    if (mode !== 'main') return [];
+    return creators
+      .filter(c => toLocalDateStr(c.importedAt) === selectedDate)
+      .sort((a, b) => a.handle.localeCompare(b.handle));
+  }, [mode, creators, selectedDate]);
+
+  // Các ngày import đang có — để operator biết chọn ngày nào thay vì mò từng ngày một.
+  const availableImportDates = useMemo(() => {
+    const m = new Map<string, number>();
+    creators.forEach(c => {
+      const d = toLocalDateStr(c.importedAt);
+      if (d) m.set(d, (m.get(d) || 0) + 1);
+    });
+    return Array.from(m.entries()).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 30);
+  }, [creators]);
+  const conversationByCreatorId = useMemo(() => new Map(conversations.map(c => [c.creatorId, c])), [conversations]);
 
   const filteredAssignments = useMemo(() => {
     return assignments
@@ -278,7 +371,10 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
   // nếu có cờ cancelled thì cleanup của lần 2 sẽ huỷ luôn kết quả của lần fetch DUY NHẤT (lần 1),
   // khiến dữ liệu tải về không bao giờ được áp dụng vào state.
   const attemptedIdsRef = useRef<Set<string>>(new Set());
-  const creatorIdsKey = useMemo(() => filteredAssignments.map(a => a.creatorId).join(','), [filteredAssignments]);
+  const creatorIdsKey = useMemo(
+    () => (mode === 'main' ? mainCreators.map(c => c.id) : filteredAssignments.map(a => a.creatorId)).join(','),
+    [mode, mainCreators, filteredAssignments]
+  );
   useEffect(() => {
     const ids = creatorIdsKey ? creatorIdsKey.split(',').filter(Boolean) : [];
     const idsToFetch = ids.filter(id => !attemptedIdsRef.current.has(id));
@@ -296,7 +392,18 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
       });
   }, [creatorIdsKey]);
 
-  const rows = useMemo(() => {
+  const mainRows = useMemo(() => {
+    if (mode !== 'main') return [];
+    return mainCreators.map(summary => {
+      const detail = detailById.get(summary.id);
+      const creator = detail
+        ? { ...summary, demographics: detail.demographics, salesMetrics: detail.salesMetrics, videoMetrics: detail.videoMetrics, recentVideos: detail.recentVideos }
+        : summary;
+      return MAIN_COLUMNS.map(col => col.get(creator, plainNumbers));
+    });
+  }, [mode, mainCreators, detailById, plainNumbers]);
+
+  const clientRows = useMemo(() => {
     return filteredAssignments.map(assignment => {
       const summary = creatorById.get(assignment.creatorId);
       const detail = detailById.get(assignment.creatorId);
@@ -306,13 +413,23 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
       const totalGmv = posted.length > 0
         ? posted.reduce((sum, v) => sum + (v.totalRevenue || 0), 0)
         : undefined;
-      const ctx: RowContext = { creator, assignment, emails, totalGmv };
+      const conversation = conversationByCreatorId.get(assignment.creatorId);
+      const ctx: RowContext = { creator, assignment, emails, totalGmv, conversation, plainNumbers };
       return COLUMNS.map(col => col.get(ctx));
     });
-  }, [filteredAssignments, outreachList, postedVideos, creatorById, detailById, campaignId]);
+  }, [filteredAssignments, outreachList, postedVideos, creatorById, detailById, campaignId, conversationByCreatorId, plainNumbers]);
 
-  const headers = useMemo(() => COLUMNS.map(c => c.header), []);
-  const headerLines = useMemo(() => [groupHeaderLine(), headers], [headers]);
+  const rows = mode === 'main' ? mainRows : clientRows;
+  const headers = useMemo(
+    () => (mode === 'main' ? MAIN_COLUMNS.map(c => c.header) : COLUMNS.map(c => c.header)),
+    [mode]
+  );
+  // Bộ cột MAIN chỉ có MỘT dòng tiêu đề — tab _DÁN của apps-script đọc tên cột ở dòng 2, và
+  // dòng 1 bên đó là dải hướng dẫn cố định, nên không được xuất thêm dòng nhóm như bộ client.
+  const headerLines = useMemo(
+    () => (mode === 'main' ? [headers] : [groupHeaderLine(), headers]),
+    [mode, headers]
+  );
   const selectedCampaignName = campaigns.find(c => c.id === campaignId)?.name || '';
   const [copied, setCopied] = useState(false);
 
@@ -330,32 +447,95 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
           <FileSpreadsheet className="w-5 h-5 text-indigo-600" />
           <h2 className="text-lg font-bold text-slate-900 dark:text-white">Xuất dữ liệu cho Google Sheet d'Alba</h2>
         </div>
-        <div className="flex items-center gap-2">
-          <label htmlFor="export-campaign" className="text-sm text-slate-500 dark:text-slate-400">Sản phẩm / Campaign</label>
-          <select
-            id="export-campaign"
-            value={campaignId}
-            onChange={e => setSelectedCampaignId(e.target.value)}
-            className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
-          >
-            {campaigns.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-          <label htmlFor="export-date" className="text-sm text-slate-500 dark:text-slate-400">Ngày</label>
+        <div className="flex items-center gap-2 flex-wrap">
+          {mode === 'client' && (
+            <>
+              <label htmlFor="export-campaign" className="text-sm text-slate-500 dark:text-slate-400">Sản phẩm / Campaign</label>
+              <select
+                id="export-campaign"
+                value={campaignId}
+                onChange={e => setSelectedCampaignId(e.target.value)}
+                className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+              >
+                {campaigns.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </>
+          )}
+          <label htmlFor="export-date" className="text-sm text-slate-500 dark:text-slate-400">
+            {mode === 'main' ? 'Ngày import' : 'Ngày assign'}
+          </label>
           <input
             id="export-date"
             type="date"
+            list={mode === 'main' ? 'export-import-dates' : undefined}
             value={selectedDate}
             onChange={e => setSelectedDate(e.target.value)}
             className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
           />
+          <datalist id="export-import-dates">
+            {availableImportDates.map(([d, n]) => <option key={d} value={d} label={`${n} creator`} />)}
+          </datalist>
         </div>
+      </div>
+
+      {/* Chọn bộ cột — hai đích khác nhau, đừng dán nhầm chỗ */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+          <button
+            onClick={() => setMode('client')}
+            className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+              mode === 'client'
+                ? 'bg-indigo-600 text-white'
+                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+            }`}
+          >
+            Format client · 04_Grinding Cream
+          </button>
+          <button
+            onClick={() => setMode('main')}
+            className={`px-3 py-1.5 text-xs font-semibold border-l border-slate-200 dark:border-slate-700 transition-colors ${
+              mode === 'main'
+                ? 'bg-emerald-600 text-white'
+                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+            }`}
+          >
+            Tab MAIN · sheet vận hành
+          </button>
+        </div>
+
+        <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={plainNumbers}
+            onChange={e => setPlainNumbers(e.target.checked)}
+            className="rounded border-slate-300 dark:border-slate-600"
+          />
+          <span>
+            Số thuần
+            <span className="text-slate-400 dark:text-slate-500"> — xuất <code className="font-mono">53000</code> thay vì <code className="font-mono">$53k</code></span>
+          </span>
+        </label>
+      </div>
+
+      <div className={`px-3 py-2 rounded-lg text-xs border ${
+        mode === 'main'
+          ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-900 dark:text-emerald-200'
+          : 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-900 text-indigo-900 dark:text-indigo-200'
+      }`}>
+        {mode === 'main' ? (
+          <>16 cột, tên khớp bảng nhận diện của Apps Script. Copy → dán vào tab <b>_DÁN</b> của sheet riêng (từ dòng 3, dòng 2 là tên cột) → bấm <b>📥 Nhập creator mới</b>. Nguồn dòng là creator <b>import trong ngày đã chọn</b>, không phải creator đã gán campaign.</>
+        ) : (
+          <>49 cột đúng format client. Copy → sang file chung của team dán bằng <b>Ctrl+Shift+V</b> (chỉ giá trị). Nguồn dòng là creator <b>được gán vào campaign</b> trong ngày đã chọn.</>
+        )}
       </div>
 
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
-          <h3 className="font-semibold text-slate-900 dark:text-white text-sm">{selectedCampaignName || 'Chọn campaign'}</h3>
+          <h3 className="font-semibold text-slate-900 dark:text-white text-sm">
+            {mode === 'main' ? `Import ngày ${selectedDate}` : (selectedCampaignName || 'Chọn campaign')}
+          </h3>
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-400">{rows.length} creator</span>
             <button
@@ -366,7 +546,11 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
               {copied ? 'Đã copy' : 'Copy'}
             </button>
             <button
-              onClick={() => downloadCsv(`${selectedCampaignName || 'export'}-${selectedDate}.csv`, headerLines, rows)}
+              onClick={() => downloadCsv(
+                mode === 'main' ? `MAIN-${selectedDate}.csv` : `${selectedCampaignName || 'export'}-${selectedDate}.csv`,
+                headerLines,
+                rows
+              )}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
             >
               <Download className="w-3.5 h-3.5" />
@@ -377,11 +561,13 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-400 dark:text-slate-500">
-                {groupHeaderLine().map((g, i) => (
-                  <th key={i} className="px-3 py-1 text-left font-medium whitespace-nowrap border-b border-slate-100 dark:border-slate-800">{g}</th>
-                ))}
-              </tr>
+              {mode === 'client' && (
+                <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-400 dark:text-slate-500">
+                  {groupHeaderLine().map((g, i) => (
+                    <th key={i} className="px-3 py-1 text-left font-medium whitespace-nowrap border-b border-slate-100 dark:border-slate-800">{g}</th>
+                  ))}
+                </tr>
+              )}
               <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400">
                 {headers.map((h, i) => (
                   <th key={i} className="px-3 py-2 text-left font-medium whitespace-nowrap">{h}</th>
@@ -392,7 +578,9 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
               {rows.length === 0 ? (
                 <tr>
                   <td colSpan={headers.length || 1} className="px-3 py-6 text-center text-slate-400">
-                    Chưa có creator nào cho campaign này
+                    {mode === 'main'
+                      ? `Không có creator nào import ngày ${selectedDate}`
+                      : 'Chưa có creator nào cho campaign này'}
                   </td>
                 </tr>
               ) : (
