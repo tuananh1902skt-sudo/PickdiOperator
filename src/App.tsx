@@ -1,14 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Sidebar, ActiveTab } from './components/layout/Sidebar';
 import { Navbar } from './components/layout/Navbar';
-import { AiDrawer } from './components/layout/AiDrawer';
 import { NotificationDrawer } from './components/layout/NotificationDrawer';
-import { CommandPalette } from './components/layout/CommandPalette';
 
 import { CreatorListView } from './components/creators/CreatorListView';
-import { CreatorDetailDrawer } from './components/creators/CreatorDetailDrawer';
 import { QuickAddCreatorModal } from './components/creators/QuickAddCreatorModal';
-import { ImportWizardModal } from './components/creators/ImportWizardModal';
 
 import { OutreachView } from './components/outreach/OutreachView';
 import { EmailComposerModal } from './components/outreach/EmailComposerModal';
@@ -16,8 +12,6 @@ import { BulkOutreachModal } from './components/outreach/BulkOutreachModal';
 
 import { CampaignsView } from './components/campaigns/CampaignsView';
 import { CreateCampaignModal } from './components/campaigns/CreateCampaignModal';
-
-import { PostedVideoModal, PostedVideoFormData } from './components/reviews/PostedVideoModal';
 
 import { ExportView } from './components/export/ExportView';
 import { SettingsView } from './components/settings/SettingsView';
@@ -28,11 +22,9 @@ import {
   Campaign,
   OutreachEmail,
   Conversation,
-  DraftReview,
   NotificationItem,
   Workspace,
-  CreatorCampaignAssignment,
-  PostedVideo
+  CreatorCampaignAssignment
 } from './types';
 
 import {
@@ -41,7 +33,6 @@ import {
   INITIAL_CAMPAIGNS,
   INITIAL_OUTREACH,
   INITIAL_CONVERSATIONS,
-  INITIAL_REVIEWS,
   INITIAL_NOTIFICATIONS
 } from './data/initialData';
 
@@ -53,7 +44,6 @@ const TAB_PATHS: Record<ActiveTab, string> = {
   outreach: '/outreach',
   campaigns: '/campaigns',
   export: '/export',
-  notifications: '/notifications',
   settings: '/settings'
 };
 const PATH_TO_TAB: Record<string, ActiveTab> = Object.fromEntries(
@@ -62,12 +52,11 @@ const PATH_TO_TAB: Record<string, ActiveTab> = Object.fromEntries(
 
 // 1 lớp sâu hơn cho 2 chi tiết hay mở nhất — /creators/:id, /campaigns/:id/edit — parse trực
 // tiếp từ pathname thay vì tra bảng cố định như trên.
-type RouteParams = { creatorId?: string; campaignEditId?: string };
+type RouteParams = { campaignEditId?: string };
 type ParsedRoute = { tab: ActiveTab } & RouteParams;
 
 const parseRoute = (pathname: string): ParsedRoute => {
   const parts = pathname.split('/').filter(Boolean);
-  if (parts[0] === 'creators' && parts[1]) return { tab: 'creators', creatorId: parts[1] };
   if (parts[0] === 'campaigns' && parts[1] && parts[2] === 'edit') return { tab: 'campaigns', campaignEditId: parts[1] };
   return { tab: PATH_TO_TAB['/' + (parts[0] || 'creators')] || 'creators' };
 };
@@ -75,10 +64,6 @@ const parseRoute = (pathname: string): ParsedRoute => {
 export function App() {
   const initialRoute = parseRoute(window.location.pathname);
   const [activeTab, setActiveTabState] = useState<ActiveTab>(initialRoute.tab);
-  // Id lấy từ URL lúc mount/back-forward nhưng CHƯA chắc đã có sẵn trong data (creators/
-  // reviews/campaigns fetch bất đồng bộ) — giữ tạm ở đây, effect riêng theo từng data
-  // collection sẽ resolve thành object thật + tự dọn khi data đã load xong.
-  const [pendingCreatorId, setPendingCreatorId] = useState<string | null>(initialRoute.creatorId || null);
   const [pendingCampaignEditId, setPendingCampaignEditId] = useState<string | null>(initialRoute.campaignEditId || null);
 
   const navigateTo = (path: string) => {
@@ -104,8 +89,6 @@ export function App() {
     const handlePopState = () => {
       const route = parseRoute(window.location.pathname);
       setActiveTabState(route.tab);
-      setSelectedCreatorDetail(null);
-      setPendingCreatorId(route.creatorId || null);
       setEditingCampaign(null);
       setPendingCampaignEditId(route.campaignEditId || null);
     };
@@ -132,8 +115,6 @@ export function App() {
   // Reports, xem effect theo dõi activeTab bên dưới) thay vì tải toàn bộ nội dung email của
   // MỌI conversation ngay lúc app mount.
   const [conversations, setConversations] = useState<Conversation[]>(INITIAL_CONVERSATIONS);
-  const [reviews, setReviews] = useState<DraftReview[]>(INITIAL_REVIEWS);
-  const [postedVideos, setPostedVideos] = useState<PostedVideo[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
   // Quan hệ nhiều-nhiều Creator ↔ Campaign — nguồn sự thật cho việc creator nào đang chạy
   // campaign nào ở brand nào (xem CreatorCampaignAssignment ở types.ts).
@@ -181,25 +162,15 @@ export function App() {
   const workspaceCreators = creators
     .filter(c => creatorBelongsToActiveWorkspace(c.id))
     .map(resolveWorkspaceStatus);
-  // CommandPalette/AiDrawer chỉ cần chọn 1 creator từ danh sách (id/handle/displayName/
-  // avatar/status/category) chứ không hiển thị bảng CRM đầy đủ — trước đây fetch riêng
-  // /api/creators/lite (full-table lần 2, chỉ khác cột), giờ suy thẳng từ workspaceCreators
-  // (đã có sẵn) để tránh nhân đôi số dòng kéo về mỗi lần load/refresh.
-  const workspaceCreatorsLite = workspaceCreators;
   const workspaceCampaigns = campaigns.filter(cmp => inActiveWorkspace(cmp.workspaceId));
   const workspaceOutreach = outreachList.filter(o => inActiveWorkspace(o.workspaceId));
   const workspaceConversations = conversations.filter(c => inActiveWorkspace(c.workspaceId));
-  const workspaceReviews = reviews.filter(r => inActiveWorkspace(r.workspaceId));
-  const workspacePostedVideos = postedVideos.filter(v => inActiveWorkspace(v.workspaceId));
   const workspaceAssignments = assignments.filter(a => inActiveWorkspace(a.workspaceId));
   const workspaceNotifications = notifications.filter(n => inActiveWorkspace(n.workspaceId));
 
   // Modals & Drawers state
-  const [isAiDrawerOpen, setIsAiDrawerOpen] = useState(false);
   const [isNotificationDrawerOpen, setIsNotificationDrawerOpen] = useState(false);
-  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isQuickAddModalOpen, setIsQuickAddModalOpen] = useState(false);
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isCreateCampaignModalOpen, setIsCreateCampaignModalOpen] = useState(false);
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
 
@@ -211,39 +182,11 @@ export function App() {
     defaultCampaignId?: string;
     defaultSequenceStage?: 'first' | 'reminder_1' | 'reminder_2' | 'reminder_3';
   } | null>(null);
-  const [selectedCreatorDetail, setSelectedCreatorDetail] = useState<Creator | null>(null);
   const [preselectCampaignId, setPreselectCampaignId] = useState<string | null>(null);
-  const [reviewForPostedVideo, setReviewForPostedVideo] = useState<DraftReview | null>(null);
-
-  // /api/creators (state `creators`) chỉ trả cột nhẹ cho bảng danh sách — bio/recentVideos/
-  // demographics/salesMetrics/videoMetrics/liveMetrics/notes/tags CHỈ có khi fetch riêng
-  // /api/creators/:id (getCreatorById, full row).
-  // Gọi hàm này mỗi khi mở CreatorDetailDrawer để nạp đủ dữ liệu cho các field đó.
-  const fetchFullCreatorDetail = async (id: string) => {
-    try {
-      const res = await fetch(`/api/creators/${id}`);
-      const data = await res.json();
-      if (data.success && data.data) {
-        setSelectedCreatorDetail(prev => (prev?.id === id ? data.data : prev));
-      }
-    } catch (err) {
-      console.error('Failed to fetch full creator detail:', err);
-    }
-  };
 
   // Resolve id lấy từ URL (mount hoặc back/forward) thành object thật ngay khi data
   // collection tương ứng có sẵn — chạy lại mỗi khi creators/reviews/campaigns đổi vì lúc
   // mount data initial (mock) có thể chưa chứa id thật, phải chờ fetch xong mới tìm ra.
-  useEffect(() => {
-    if (!pendingCreatorId) return;
-    const found = creators.find(c => c.id === pendingCreatorId);
-    if (found) {
-      setSelectedCreatorDetail(found);
-      setPendingCreatorId(null);
-      fetchFullCreatorDetail(found.id);
-    }
-  }, [pendingCreatorId, creators]);
-
   useEffect(() => {
     if (!pendingCampaignEditId) return;
     const found = campaigns.find(c => c.id === pendingCampaignEditId);
@@ -256,19 +199,6 @@ export function App() {
   // Mở/đóng 3 drawer/modal chi tiết này luôn đi kèm đổi URL — đây là nơi duy nhất nên gọi
   // setSelectedCreatorDetail/setSelectedReviewDetail/setEditingCampaign để MỞ hay ĐÓNG;
   // các chỗ khác (đồng bộ data cho drawer đang mở) vẫn set thẳng state như cũ.
-  const openCreatorDetail = (cr: Creator) => {
-    setActiveTabState('creators');
-    setSelectedCreatorDetail(cr);
-    navigateTo(`/creators/${cr.id}`);
-    // cr thường tới từ list state đã trim cột nặng (xem fetchFullCreatorDetail) — nạp lại đầy
-    // đủ dữ liệu ngay khi mở, drawer hiện tạm với dữ liệu nhẹ trong lúc chờ.
-    fetchFullCreatorDetail(cr.id);
-  };
-  const closeCreatorDetail = () => {
-    setSelectedCreatorDetail(null);
-    navigateTo(TAB_PATHS.creators);
-  };
-
   const openCampaignEdit = (c: Campaign) => {
     setActiveTabState('campaigns');
     setEditingCampaign(c);
@@ -357,16 +287,6 @@ export function App() {
       .then(data => { if (data && Array.isArray(data.data)) setAssignments(data.data); })
       .catch(err => console.error(err));
 
-    fetch('/api/reviews')
-      .then(res => res.ok && res.headers.get('content-type')?.includes('application/json') ? res.json() : null)
-      .then(data => { if (data && Array.isArray(data.data)) setReviews(data.data); })
-      .catch(err => console.error(err));
-
-    fetch('/api/posted-videos')
-      .then(res => res.ok && res.headers.get('content-type')?.includes('application/json') ? res.json() : null)
-      .then(data => { if (data && Array.isArray(data.data)) setPostedVideos(data.data); })
-      .catch(err => console.error(err));
-
     fetch('/api/conversations')
       .then(res => res.ok && res.headers.get('content-type')?.includes('application/json') ? res.json() : null)
       .then(data => { if (data && Array.isArray(data.data)) setConversations(data.data); })
@@ -379,20 +299,6 @@ export function App() {
 
   }, []);
 
-  // Drawer chi tiết creator chỉ nhận `creator` như 1 snapshot lúc click — nếu để mở trong lúc
-  // extension đẩy data mới lên backend (vd nút "Auto quét + Lấy chi tiết" chạy trong tab TCM
-  // khác), poll 10s ở trên vẫn cập nhật `creators` nhưng KHÔNG tự thay object bên trong drawer
-  // đang mở, nên user thấy backend báo cập nhật thành công mà UI vẫn hiện data cũ/trống cho
-  // tới khi tự đóng-mở lại. Đồng bộ lại tham chiếu mỗi khi `creators` đổi để drawer luôn hiện
-  // đúng data mới nhất mà không cần thao tác gì thêm.
-  useEffect(() => {
-    setSelectedCreatorDetail(prev => {
-      if (!prev) return prev;
-      const fresh = creators.find(c => c.id === prev.id);
-      return fresh || prev;
-    });
-  }, [creators]);
-
   // Dark mode class toggle
   useEffect(() => {
     if (darkMode) {
@@ -401,18 +307,6 @@ export function App() {
       document.documentElement.classList.remove('dark');
     }
   }, [darkMode]);
-
-  // Keyboard shortcut for Cmd+K command palette
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setIsCommandPaletteOpen(prev => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
 
   // HANDLERS
   const WORKSPACE_COLOR_CYCLE: Workspace['color'][] = ['indigo', 'rose', 'emerald', 'amber'];
@@ -537,17 +431,6 @@ export function App() {
         ...prev
       ]);
       return false;
-    }
-  };
-
-  // ImportWizardModal already POSTs the parsed creators to /api/creators/batch-import
-  // itself before calling this — this only needs to pull the fresh server state in,
-  // not import a second time.
-  const handleBulkImportCreators = async (_imported: any[]) => {
-    try {
-      await refreshCreators();
-    } catch (err) {
-      console.error('Error refreshing creators after batch import:', err);
     }
   };
 
@@ -794,41 +677,6 @@ export function App() {
     }
   };
 
-  // Sửa các trường Sourcing List (giá/hợp đồng/hạng GMV...) của 1 assignment đã tồn tại —
-  // khác với handleAssignCampaignToCreator (tạo mới/đổi status), hàm này chỉ PATCH thông tin
-  // thương mại, không đụng tới status/campaign hiện tại.
-  const handleUpdateAssignment = async (assignmentId: string, updates: Partial<CreatorCampaignAssignment>) => {
-    const prevAssignments = assignments;
-    setAssignments(prev => prev.map(a => (a.id === assignmentId ? { ...a, ...updates } : a)));
-    try {
-      const res = await fetch(`/api/assignments/${assignmentId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.message || 'Không thể lưu thông tin Sourcing List.');
-      }
-      setAssignments(prev => prev.map(a => (a.id === data.data.id ? data.data : a)));
-    } catch (err) {
-      console.error('Error updating assignment:', err);
-      setAssignments(prevAssignments);
-      setNotifications(prev => [
-        {
-          id: `notif-${Date.now()}`,
-          title: 'Lưu Sourcing List thất bại',
-          description: 'Không thể lưu thông tin giá/hợp đồng. Vui lòng thử lại.',
-          priority: 'HIGH',
-          category: 'System',
-          isRead: false,
-          createdAt: new Date().toISOString()
-        },
-        ...prev
-      ]);
-    }
-  };
-
   const handleUnassignCreatorCampaign = async (assignmentId: string) => {
     const prevAssignments = assignments;
     setAssignments(prev => prev.filter(a => a.id !== assignmentId));
@@ -845,105 +693,6 @@ export function App() {
     }
   };
 
-  const handleSubmitPostedVideo = async (reviewId: string, form: PostedVideoFormData) => {
-    setReviewForPostedVideo(null);
-    const review = reviews.find(r => r.id === reviewId);
-    if (!review) return;
-
-    const existing = postedVideos.find(v => v.reviewId === reviewId);
-    try {
-      if (existing) {
-        const res = await fetch(`/api/posted-videos/${existing.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(form)
-        });
-        const data = await res.json();
-        if (data.success && data.data) {
-          setPostedVideos(prev => prev.map(v => (v.id === existing.id ? data.data : v)));
-        }
-      } else {
-        const res = await fetch('/api/posted-videos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            workspaceId: review.workspaceId,
-            reviewId: review.id,
-            creatorId: review.creatorId,
-            creatorName: review.creatorName,
-            creatorHandle: review.creatorHandle,
-            campaignId: review.campaignId,
-            campaignName: review.campaignName,
-            ...form
-          })
-        });
-        const data = await res.json();
-        if (data.success && data.data) {
-          setPostedVideos(prev => [data.data, ...prev]);
-        }
-      }
-    } catch (err) {
-      console.error('Error saving posted video:', err);
-    }
-  };
-
-  const handleAddCreatorNote = (creatorId: string, content: string) => {
-    const newNote = {
-      id: `n-${Date.now()}`,
-      author: 'Anh Tuan',
-      content,
-      createdAt: new Date().toISOString()
-    };
-
-    setCreators(prev =>
-      prev.map(c => (c.id === creatorId ? { ...c, notes: [newNote, ...(c.notes || [])] } : c))
-    );
-
-    if (selectedCreatorDetail?.id === creatorId) {
-      setSelectedCreatorDetail(prev =>
-        prev ? { ...prev, notes: [newNote, ...(prev.notes || [])] } : null
-      );
-    }
-  };
-
-  const handleUpdateCreatorEmail = async (creatorId: string, email: string) => {
-    const prevCreators = creators;
-    const prevSelected = selectedCreatorDetail;
-    setCreators(prev => prev.map(c => (c.id === creatorId ? { ...c, email } : c)));
-    if (selectedCreatorDetail?.id === creatorId) {
-      setSelectedCreatorDetail(prev => (prev ? { ...prev, email } : prev));
-    }
-    try {
-      const res = await fetch(`/api/creators/${creatorId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.message || 'Không thể lưu email.');
-      setCreators(prev => prev.map(c => (c.id === creatorId ? data.data : c)));
-      if (selectedCreatorDetail?.id === creatorId) {
-        setSelectedCreatorDetail(prev => (prev ? data.data : prev));
-      }
-    } catch (err) {
-      console.error('Error updating creator email:', err);
-      setCreators(prevCreators);
-      setSelectedCreatorDetail(prevSelected);
-      setNotifications(prev => [
-        {
-          id: `notif-${Date.now()}`,
-          title: 'Lưu email thất bại',
-          description: 'Không thể lưu email creator này. Vui lòng thử lại.',
-          priority: 'HIGH',
-          category: 'System',
-          isRead: false,
-          createdAt: new Date().toISOString()
-        },
-        ...prev
-      ]);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans flex antialiased">
       {/* Sidebar Navigation */}
@@ -952,16 +701,13 @@ export function App() {
         setActiveTab={setActiveTab}
         collapsed={collapsed}
         setCollapsed={setCollapsed}
-        unreadNotifsCount={workspaceNotifications.filter(n => !n.isRead).length}
         creatorsCount={workspaceCreators.length}
-        openNotifDrawer={() => setIsNotificationDrawerOpen(true)}
       />
 
       {/* Main App Canvas */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         {/* Top Navbar */}
         <Navbar
-          openCommandPalette={() => setIsCommandPaletteOpen(true)}
           openNotifDrawer={() => setIsNotificationDrawerOpen(true)}
           unreadNotifsCount={workspaceNotifications.filter(n => !n.isRead).length}
           darkMode={darkMode}
@@ -983,8 +729,6 @@ export function App() {
               activeWorkspace={activeWorkspace}
               onSelectWorkspace={id => setActiveWorkspaceId(id)}
               onOpenSettings={() => setActiveTab('settings')}
-              onSelectCreator={openCreatorDetail}
-              onOpenImport={() => setIsImportModalOpen(true)}
               onRefresh={refreshCreators}
               onOpenEmailComposer={cr => {
                 setSelectedCreatorForEmail(cr);
@@ -992,7 +736,6 @@ export function App() {
               }}
               onArchiveCreator={handleArchiveCreator}
               onDeleteCreatorPermanently={handleDeleteCreatorPermanently}
-              onRunAiScore={() => setIsAiDrawerOpen(true)}
               onAssignCampaign={handleAssignCampaignToCreator}
               onUnassignCampaign={handleUnassignCreatorCampaign}
               onOpenBulkOutreach={creatorIds => setBulkOutreachConfig({ creatorIds })}
@@ -1009,7 +752,6 @@ export function App() {
                 setIsEmailComposerOpen(true);
               }}
               onUpdateCreatorStatus={handleUpdateCreatorStatus}
-              onSelectCreator={openCreatorDetail}
               onOpenBulkOutreach={(creatorIds, defaultSequenceStage) =>
                 setBulkOutreachConfig({ creatorIds, defaultSequenceStage })
               }
@@ -1028,7 +770,6 @@ export function App() {
               onOpenCreateCampaign={() => setIsCreateCampaignModalOpen(true)}
               onEditCampaign={openCampaignEdit}
               onArchiveCampaign={handleArchiveCampaign}
-              onSelectCreator={openCreatorDetail}
               preselectCampaignId={preselectCampaignId}
               onOpenBulkOutreach={(creatorIds, campaignId) => setBulkOutreachConfig({ creatorIds, defaultCampaignId: campaignId })}
             />
@@ -1037,11 +778,6 @@ export function App() {
           {activeTab === 'export' && (
             <ExportView
               creators={workspaceCreators}
-              campaigns={workspaceCampaigns}
-              assignments={workspaceAssignments}
-              outreachList={workspaceOutreach}
-              postedVideos={workspacePostedVideos}
-              conversations={workspaceConversations}
             />
           )}
 
@@ -1058,16 +794,6 @@ export function App() {
       </div>
 
       {/* GLOBAL MODALS & DRAWERS */}
-      <AiDrawer
-        isOpen={isAiDrawerOpen}
-        onClose={() => setIsAiDrawerOpen(false)}
-        creators={workspaceCreatorsLite}
-        campaigns={workspaceCampaigns}
-        conversations={workspaceConversations}
-        reviews={workspaceReviews}
-        activeWorkspace={activeWorkspace}
-      />
-
       <NotificationDrawer
         isOpen={isNotificationDrawerOpen}
         onClose={() => setIsNotificationDrawerOpen(false)}
@@ -1079,31 +805,10 @@ export function App() {
         }}
       />
 
-      <CommandPalette
-        isOpen={isCommandPaletteOpen}
-        onClose={() => setIsCommandPaletteOpen(false)}
-        creators={workspaceCreatorsLite}
-        campaigns={workspaceCampaigns}
-        onSelectCreator={openCreatorDetail}
-        onSelectCampaign={cmp => {
-          setPreselectCampaignId(cmp.id);
-          setActiveTab('campaigns');
-        }}
-        onSelectTab={setActiveTab}
-        onOpenQuickAdd={() => setIsQuickAddModalOpen(true)}
-      />
-
       <QuickAddCreatorModal
         isOpen={isQuickAddModalOpen}
         onClose={() => setIsQuickAddModalOpen(false)}
         onSubmit={handleQuickAddCreator}
-      />
-
-      <ImportWizardModal
-        isOpen={isImportModalOpen}
-        onClose={() => setIsImportModalOpen(false)}
-        onConfirmImport={handleBulkImportCreators}
-        activeWorkspaceId={activeWorkspaceId}
       />
 
       <CreateCampaignModal
@@ -1142,31 +847,6 @@ export function App() {
         onCompleted={refreshAfterBulkOutreach}
       />
 
-      <CreatorDetailDrawer
-        creator={selectedCreatorDetail}
-        campaigns={campaigns}
-        workspaces={workspaces}
-        assignments={assignments}
-        scoringCriteria={activeWorkspace?.scoringCriteria}
-        onClose={closeCreatorDetail}
-        onOpenEmailComposer={cr => {
-          setSelectedCreatorForEmail(cr);
-          setIsEmailComposerOpen(true);
-        }}
-        onArchiveCreator={handleArchiveCreator}
-        onAddNote={handleAddCreatorNote}
-        onAssignCampaign={handleAssignCampaignToCreator}
-        onUnassignCampaign={handleUnassignCreatorCampaign}
-        onUpdateAssignment={handleUpdateAssignment}
-        onUpdateEmail={handleUpdateCreatorEmail}
-      />
-
-      <PostedVideoModal
-        review={reviewForPostedVideo}
-        existing={reviewForPostedVideo ? postedVideos.find(v => v.reviewId === reviewForPostedVideo.id) : null}
-        onClose={() => setReviewForPostedVideo(null)}
-        onSubmit={handleSubmitPostedVideo}
-      />
     </div>
   );
 }

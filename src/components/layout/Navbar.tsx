@@ -1,6 +1,5 @@
 import React, { useEffect, useRef } from 'react';
 import {
-  Search,
   Bell,
   Sun,
   Moon,
@@ -11,7 +10,6 @@ import {
 import { Workspace } from '../../types';
 
 interface NavbarProps {
-  openCommandPalette: () => void;
   openNotifDrawer: () => void;
   unreadNotifsCount: number;
   darkMode: boolean;
@@ -23,7 +21,6 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
-  openCommandPalette,
   openNotifDrawer,
   unreadNotifsCount,
   darkMode,
@@ -119,22 +116,8 @@ export const Navbar: React.FC<NavbarProps> = ({
         )}
       </div>
 
-      {/* Center Search Bar */}
-      <div className="flex-1 max-w-xl min-w-0 hidden sm:block">
-        <button
-          id="global-search-trigger"
-          onClick={openCommandPalette}
-          className="w-full flex items-center justify-between gap-2 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 border border-transparent hover:border-slate-300 dark:hover:border-slate-700 text-xs transition-all"
-        >
-          <div className="flex items-center gap-2 min-w-0">
-            <Search className="w-4 h-4 text-slate-400 shrink-0" />
-            <span className="truncate whitespace-nowrap">Search creators, campaigns, tasks, messages, notes...</span>
-          </div>
-          <kbd className="hidden sm:inline-flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-mono font-medium text-slate-500 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-md shadow-2xs shrink-0">
-            ⌘K
-          </kbd>
-        </button>
-      </div>
+      {/* Đẩy nhóm icon bên phải về đúng mép — chỗ này trước là ô search mở CommandPalette. */}
+      <div className="flex-1 min-w-0" />
 
       {/* Right Action Icons */}
       <div className="flex items-center gap-2 sm:gap-3">

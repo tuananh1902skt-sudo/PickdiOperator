@@ -23,7 +23,6 @@ interface CampaignsViewProps {
   onOpenCreateCampaign: () => void;
   onEditCampaign: (campaign: Campaign) => void;
   onArchiveCampaign: (campaignId: string) => void;
-  onSelectCreator: (cr: Creator) => void;
   preselectCampaignId?: string | null;
   onOpenBulkOutreach?: (creatorIds: string[], campaignId: string) => void;
 }
@@ -41,7 +40,6 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
   onOpenCreateCampaign,
   onEditCampaign,
   onArchiveCampaign,
-  onSelectCreator,
   preselectCampaignId,
   onOpenBulkOutreach
 }) => {
@@ -324,7 +322,6 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
                     <th className="p-3">Category</th>
                     <th className="p-3 text-right">Followers</th>
                     <th className="p-3">Status</th>
-                    <th className="p-3 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -359,14 +356,6 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${getCreatorStatusBadge(assignmentStatus)}`}>
                               {assignmentStatus}
                             </span>
-                          </td>
-                          <td className="p-3 text-right">
-                            <button
-                              onClick={() => onSelectCreator(cr)}
-                              className="p-1 text-slate-400 hover:text-indigo-600 rounded"
-                            >
-                              <ExternalLink className="w-4 h-4" />
-                            </button>
                           </td>
                         </tr>
                       );

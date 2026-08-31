@@ -227,13 +227,10 @@ interface CreatorListViewProps {
   workspaces?: Workspace[];
   onSelectWorkspace?: (id: string) => void;
   onOpenSettings?: () => void;
-  onSelectCreator: (cr: Creator) => void;
-  onOpenImport: () => void;
   onRefresh?: () => Promise<void> | void;
   onOpenEmailComposer: (cr: Creator) => void;
   onArchiveCreator: (id: string) => void;
   onDeleteCreatorPermanently?: (id: string) => void;
-  onRunAiScore: (cr: Creator) => void;
   onAssignCampaign: (crId: string, cmpId: string) => void;
   onUnassignCampaign?: (assignmentId: string) => void;
   onOpenBulkOutreach?: (creatorIds: string[]) => void;
@@ -248,13 +245,10 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
   workspaces = [],
   onSelectWorkspace,
   onOpenSettings,
-  onSelectCreator,
-  onOpenImport,
   onRefresh,
   onOpenEmailComposer,
   onArchiveCreator,
   onDeleteCreatorPermanently,
-  onRunAiScore,
   onAssignCampaign,
   onUnassignCampaign,
   onOpenBulkOutreach,
@@ -937,13 +931,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
               Refresh
             </button>
           )}
-          <button
-            onClick={onOpenImport}
-            className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
-          >
-            <UploadCloud className="w-4 h-4" />
-            Import Creator
-          </button>
         </div>
       </div>
 
@@ -1463,19 +1450,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                 </button>
               </div>
 
-              <button
-                onClick={() => {
-                  selectedIds.forEach(id => {
-                    const cr = sourceCreators.find(c => c.id === id);
-                    if (cr) onRunAiScore(cr);
-                  });
-                }}
-                className="px-2.5 py-1 bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 font-semibold rounded-lg flex items-center gap-1 hover:bg-indigo-100"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                Bulk AI Score
-              </button>
-
               {(() => {
                 const selectedCreators = selectedIds
                   .map(id => sourceCreators.find(c => c.id === id))
@@ -1582,10 +1556,7 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
 
                       {/* Profile Column */}
                       <td className="py-3.5 px-4">
-                        <div
-                          className="flex items-center gap-3 cursor-pointer group"
-                          onClick={() => onSelectCreator(cr)}
-                        >
+                        <div className="flex items-center gap-3">
                           <img
                             src={cr.avatar}
                             alt={cr.displayName}
@@ -1775,14 +1746,6 @@ export const CreatorListView: React.FC<CreatorListViewProps> = ({
                             title="Generate Outreach Email"
                           >
                             <Mail className="w-4 h-4" />
-                          </button>
-
-                          <button
-                            onClick={() => onSelectCreator(cr)}
-                            className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                            title="View Creator Detail"
-                          >
-                            <ExternalLink className="w-4 h-4" />
                           </button>
 
                           <button

@@ -6,7 +6,6 @@ import { ZipArchive } from 'archiver';
 import { getEmailConfig, saveEmailConfig, DEFAULT_SENDER_NAME } from './src/lib/emailConfig';
 import { sendEmail } from './src/lib/mailer';
 import { renderFirstContactEmailHtml } from './src/lib/emailTemplate';
-import { checkInboxForReplies } from './src/lib/imapSync';
 import { downloadAvatar } from './src/lib/avatars';
 import { Client as QStashClient, Receiver as QStashReceiver } from '@upstash/qstash';
 import { getAiConfig, saveAiConfig, defaultModelFor, AiProviderName } from './src/lib/aiConfig';
@@ -14,21 +13,9 @@ import { getOutreachTemplates, saveOutreachTemplates, fillOutreachTemplate, Sequ
 import { pickRandomFirstContactSubject, ensurePaidSubject } from './src/lib/outreachSubjects';
 import {
   runAgent,
-  runTextAgent,
   classifyAgentError,
   OUTREACH_SEQUENCE_AGENTS,
-  negotiationReplyAgent,
-  reviewComplianceChecklistAgent,
-  opsDailySummaryAgent,
-  opsPrioritySuggesterAgent,
-  copilotChatAgent,
-  AGENT_REGISTRY,
 } from './src/lib/agents';
-import {
-  getAgentPromptOverride,
-  saveAgentPromptOverride,
-  deleteAgentPromptOverride,
-} from './src/db';
 import {
   Workspace,
   Creator,
@@ -36,12 +23,9 @@ import {
   Campaign,
   OutreachEmail,
   Conversation,
-  NotificationItem,
-  ActivityItem,
   BulkOutreachJob,
   BulkOutreachItem,
   CreatorCampaignAssignment,
-  PostedVideo,
 } from './src/types';
 import {
   INITIAL_WORKSPACES,
@@ -64,8 +48,6 @@ import {
   getAllCreators,
   getCreatorsForList,
   getCreatorsForExport,
-  getCreatorsMini,
-  getAllCreatorHandles,
   getCreatorsCount,
   getFirstCreator,
   getCreatorById,
@@ -86,20 +68,12 @@ import {
   getLatestOutreachForItem,
   getAllConversations,
   getConversationsForList,
-  getConversationById,
   getConversationByCreatorId,
   saveConversation,
-  getAllReviews,
   getAllTasks,
-  getAllNotifications,
   saveNotification,
-  markAllNotificationsRead,
   addActivity,
   normalizeCreatorStoreInDb,
-  searchAll,
-  getUnresolvedUnmatchedInboundEmails,
-  getUnmatchedInboundEmailById,
-  saveUnmatchedInboundEmail,
   getAllAssignments,
   getAssignmentById,
   saveAssignment,
@@ -108,9 +82,6 @@ import {
   saveBulkOutreachJob,
   getBulkOutreachJobById,
   tryClaimBulkOutreachSendLock,
-  getAllPostedVideos,
-  getPostedVideoById,
-  savePostedVideo,
 } from './src/db';
 
 dotenv.config();
@@ -353,15 +324,6 @@ app.post('/api/creators/export', async (req, res) => {
     console.error('creators/export failed:', err);
     res.status(500).json({ success: false, error: String(err?.message || err) });
   }
-});
-
-// Danh sách siêu nhẹ (id/handle/displayName/avatar/status/category) cho các UI
-// chỉ cần chọn 1 creator (CommandPalette, AiDrawer) — không cần load ~40 cột CREATOR_LIST_COLUMNS
-// của /api/creators chỉ để hiển thị dropdown/typeahead. Đặt TRƯỚC /api/creators/:id vì Express
-// khớp route theo thứ tự khai báo, để lại sau thì "/api/creators/lite" sẽ bị :id nuốt mất.
-app.get('/api/creators/lite', async (req, res) => {
-  const list = await getCreatorsMini();
-  res.json({ success: true, data: list });
 });
 
 app.get('/api/creators/:id', async (req, res) => {
@@ -1134,81 +1096,6 @@ app.put('/api/settings/email', async (req, res) => {
   });
 });
 
-// Inbox Check API
-app.post('/api/inbox/check', async (req, res) => {
-  try {
-    const result = await checkInboxForReplies();
-    res.json({ success: true, ...result });
-  } catch (err: any) {
-    console.error('Inbox check error:', err);
-    res.status(500).json({ success: false, message: 'Không thể đồng bộ hộp thư lúc này. Vui lòng kiểm tra cấu hình Email trong Cài đặt hoặc thử lại sau.' });
-  }
-});
-
-// Unmatched Inbound Emails API
-app.get('/api/inbox/unmatched', async (req, res) => {
-  const unresolved = await getUnresolvedUnmatchedInboundEmails();
-  res.json({ success: true, data: unresolved });
-});
-
-app.post('/api/inbox/unmatched/:id/assign', async (req, res) => {
-  const { creatorId } = req.body;
-  if (!creatorId) {
-    return res.status(400).json({ success: false, message: 'Thiếu creatorId' });
-  }
-
-  const record = await getUnmatchedInboundEmailById(req.params.id);
-  if (!record || record.resolved) {
-    return res.status(404).json({ success: false, message: 'Email chưa xác định không tồn tại hoặc đã được xử lý' });
-  }
-
-  if (!record.candidateCreatorIds.includes(creatorId)) {
-    return res.status(400).json({ success: false, message: 'creatorId không nằm trong danh sách creator ứng viên (candidateCreatorIds)' });
-  }
-
-  const creator = await getCreatorById(creatorId);
-  if (!creator) {
-    return res.status(404).json({ success: false, message: 'Creator không tồn tại' });
-  }
-
-  let conv = await getConversationByCreatorId(creator.id);
-  if (!conv) {
-    conv = {
-      id: `conv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      creatorId: creator.id,
-      creatorName: creator.displayName,
-      creatorHandle: creator.handle,
-      creatorAvatar: creator.avatar || '',
-      status: 'Need Reply',
-      lastMessageAt: new Date().toISOString(),
-      messages: [],
-      unread: true,
-    };
-  }
-
-  const newMessage = {
-    id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-    senderType: 'CREATOR' as const,
-    senderName: record.senderName || record.senderEmail || creator.displayName,
-    content: record.content || '(No text content)',
-    createdAt: record.receivedAt || new Date().toISOString(),
-    subject: record.subject,
-    messageId: record.messageId,
-  };
-
-  conv.messages.push(newMessage);
-  conv.unread = true;
-  conv.status = 'Need Reply';
-  conv.lastMessageAt = newMessage.createdAt;
-  await saveConversation(conv);
-
-  record.resolved = true;
-  await saveUnmatchedInboundEmail(record);
-
-  await addActivity('Anh Tuan', 'manually assigned email to creator', `@${creator.handle}`, 'outreach', conv.id);
-  res.json({ success: true, data: conv, message: 'Đã gán email cho creator thành công' });
-});
-
 // Outreach & Email API
 app.get('/api/outreach', async (req, res) => {
   res.json({ success: true, data: await getOutreachForList() });
@@ -1955,186 +1842,9 @@ app.get('/api/conversations', async (req, res) => {
   res.json({ success: true, data: await getConversationsForList() });
 });
 
-// Full list kèm `messages` — chỉ gọi khi operator thực sự mở Inbox tab hoặc Reports tab (2 nơi
-// duy nhất cần đọc nội dung message), xem fetchFullConversations() ở App.tsx.
-app.get('/api/conversations/full', async (req, res) => {
-  res.json({ success: true, data: await getAllConversations() });
-});
-
-app.get('/api/conversations/:id', async (req, res) => {
-  const conv = await getConversationById(req.params.id);
-  if (!conv) {
-    return res.status(404).json({ success: false, message: 'Conversation not found' });
-  }
-  res.json({ success: true, data: conv });
-});
-
-app.post('/api/conversations/:id/reply', async (req, res) => {
-  const conv = await getConversationById(req.params.id);
-  if (!conv) {
-    return res.status(404).json({ success: false, message: 'Conversation not found' });
-  }
-
-  const cr = await getCreatorById(conv.creatorId);
-  if (!cr || !cr.email || !cr.email.trim()) {
-    return res.status(400).json({ success: false, message: 'Creator này chưa có email' });
-  }
-
-  const content = req.body.content;
-  if (!content || !content.trim()) {
-    return res.status(400).json({ success: false, message: 'Nội dung tin nhắn không được rỗng' });
-  }
-
-  let replySubject = 'Re: Collaborate with Pickdi';
-  const lastMsgWithSubject = [...conv.messages].reverse().find(m => m.subject);
-  if (lastMsgWithSubject && lastMsgWithSubject.subject) {
-    replySubject = lastMsgWithSubject.subject.startsWith('Re:') ? lastMsgWithSubject.subject : `Re: ${lastMsgWithSubject.subject}`;
-  } else {
-    const outreachList = (await getAllOutreach()).filter(o => o.creatorId === conv.creatorId);
-    if (outreachList.length > 0 && outreachList[0].subject) {
-      replySubject = outreachList[0].subject.startsWith('Re:') ? outreachList[0].subject : `Re: ${outreachList[0].subject}`;
-    }
-  }
-
-  const messageIdChain = conv.messages.map(m => m.messageId).filter((id): id is string => !!id);
-  const inReplyTo = messageIdChain[messageIdChain.length - 1];
-  const references = messageIdChain.length ? messageIdChain : undefined;
-
-  try {
-    const { messageId } = await sendEmail({
-      to: cr.email,
-      subject: replySubject,
-      text: content,
-      inReplyTo,
-      references
-    });
-
-    const newMessage = {
-      id: `msg-${Date.now()}`,
-      senderType: req.body.senderType || 'USER',
-      senderName: req.body.senderName || 'Anh Tuan',
-      content,
-      isAiGenerated: req.body.isAiGenerated || false,
-      createdAt: new Date().toISOString(),
-      messageId,
-      inReplyTo,
-      subject: replySubject
-    };
-
-    conv.messages.push(newMessage as any);
-    conv.lastMessageAt = new Date().toISOString();
-    conv.status = 'Waiting Reply';
-    conv.unread = false;
-
-    await saveConversation(conv);
-    await addActivity('Anh Tuan', 'sent reply message', `To ${conv.creatorName}`, 'outreach', conv.id);
-    res.json({ success: true, data: conv });
-  } catch (err: any) {
-    console.error('Send reply error:', err);
-    res.status(500).json({ success: false, message: 'Gửi phản hồi thất bại. Vui lòng kiểm tra cấu hình email và thử lại.' });
-  }
-});
-
-// Content Reviews API — list route stays: Dashboard's pendingReviewsCount KPI + the AI
-// Copilot drawer (AiDrawer) still read from it even though the dedicated Review detail/
-// approval UI was removed.
-app.get('/api/reviews', async (req, res) => {
-  res.json({ success: true, data: await getAllReviews() });
-});
-
-// Posted Videos API — bảng "Uploaded" trong file d'Alba, video đã đăng chính thức + ROI.
-app.get('/api/posted-videos', async (req, res) => {
-  res.json({ success: true, data: await getAllPostedVideos() });
-});
-
-app.post('/api/posted-videos', async (req, res) => {
-  const { creatorId, creatorName, creatorHandle, campaignId, campaignName, videoUrl } = req.body;
-  if (!creatorId || !campaignId || !videoUrl) {
-    return res.status(400).json({ success: false, message: 'creatorId, campaignId và videoUrl là bắt buộc' });
-  }
-
-  const newVideo: PostedVideo = {
-    id: `pv-${Date.now()}`,
-    workspaceId: req.body.workspaceId,
-    reviewId: req.body.reviewId,
-    creatorId,
-    creatorName,
-    creatorHandle,
-    campaignId,
-    campaignName,
-    round: req.body.round,
-    pricePerVideo: toFiniteNumber(req.body.pricePerVideo),
-    paid: req.body.paid,
-    postedAt: req.body.postedAt || new Date().toISOString(),
-    videoUrl,
-    videoId: req.body.videoId,
-    adCode: req.body.adCode,
-    roi: toFiniteNumber(req.body.roi),
-    totalRevenue: toFiniteNumber(req.body.totalRevenue),
-    totalOrders: toFiniteNumber(req.body.totalOrders),
-    totalAdSpend: toFiniteNumber(req.body.totalAdSpend),
-  };
-
-  await savePostedVideo(newVideo);
-  await addActivity('Anh Tuan', 'marked video as posted', `${newVideo.creatorName} - ${newVideo.campaignName}`, 'campaign', newVideo.id);
-  res.status(201).json({ success: true, data: newVideo });
-});
-
-app.patch('/api/posted-videos/:id', async (req, res) => {
-  const video = await getPostedVideoById(req.params.id);
-  if (!video) {
-    return res.status(404).json({ success: false, message: 'Posted video not found' });
-  }
-
-  const updated: PostedVideo = {
-    ...video,
-    ...stripImmutableFields(req.body, ['creatorId', 'campaignId', 'workspaceId', 'reviewId']),
-  };
-  await savePostedVideo(updated);
-  res.json({ success: true, data: updated });
-});
-
 // Note: the dedicated Tasks CRUD API (GET/POST/PATCH /api/tasks) was removed along with the
 // Tasks feature UI. getAllTasks() (src/db.ts) is still used below by the AI daily-summary and
 // priority-suggestion endpoints, which treat tasks as a general workload signal.
-
-// Notifications API
-app.get('/api/notifications', async (req, res) => {
-  res.json({ success: true, data: await getAllNotifications() });
-});
-
-app.patch('/api/notifications/read-all', async (req, res) => {
-  await markAllNotificationsRead();
-  res.json({ success: true, message: 'All notifications marked as read' });
-});
-
-// Search API
-app.get('/api/search', async (req, res) => {
-  const q = (req.query.q || '').toString();
-  const data = await searchAll(q);
-  res.json({ success: true, data });
-});
-
-app.post('/api/ai/chat', async (req, res) => {
-  try {
-    const { prompt, messages, creatorId, campaignId } = req.body;
-    const creator = creatorId ? await getCreatorById(creatorId) : null;
-    const campaign = campaignId ? await getCampaignById(campaignId) : null;
-
-    const text = await runTextAgent(copilotChatAgent, {
-      prompt,
-      messages,
-      creator,
-      campaign,
-      totalCreators: await getCreatorsCount(),
-      totalCampaigns: (await getAllCampaigns()).length,
-    });
-
-    res.json({ success: true, text: text || 'Không có phản hồi từ Gemini.' });
-  } catch (error: any) {
-    await handleAiRouteError(error, res);
-  }
-});
 
 // Generates the FIRST-CONTACT outreach email. Reminder emails (2nd/3rd follow-up) are
 // handled by /api/ai/outreach-agent, which picks the right agent by sequence stage.
@@ -2155,167 +1865,15 @@ app.post('/api/ai/email', async (req, res) => {
   }
 });
 
-// Picks the right outreach agent (first contact / reminder 1 / 2 / 3) for an existing
-// OutreachEmail record based on its sequenceStage.
-app.post('/api/ai/outreach-agent', async (req, res) => {
-  try {
-    const { outreachId, creator: creatorInput, campaign, tone } = req.body;
-    // Cùng lý do refetch như /api/ai/email — creatorInput có thể là bản list đã trim cột.
-    const creator = creatorInput?.id ? ((await getCreatorById(creatorInput.id)) || creatorInput) : creatorInput;
-    const outreach = outreachId ? (await getAllOutreach()).find(o => o.id === outreachId) : undefined;
-    const stage = outreach?.sequenceStage || 'first';
-    const agent = OUTREACH_SEQUENCE_AGENTS[stage] || OUTREACH_SEQUENCE_AGENTS.first;
-
-    const daysSinceLastContact = outreach?.sentAt
-      ? Math.floor((Date.now() - new Date(outreach.sentAt).getTime()) / 86400000)
-      : undefined;
-
-    const { data, cached } = await runAgent(agent, {
-      creator,
-      campaign,
-      tone,
-      originalOutreach: outreach,
-      daysSinceLastContact,
-    });
-    res.json({ success: true, data: { ...data, cached, agentUsed: agent.id } });
-  } catch (error: any) {
-    await handleAiRouteError(error, res);
-  }
-});
-
-app.post('/api/ai/reply', async (req, res) => {
-  try {
-    const { conversation, creator, campaign } = req.body;
-    const { data, cached } = await runAgent(negotiationReplyAgent, { conversation, creator, campaign });
-    res.json({ success: true, data: { ...data, cached } });
-  } catch (error: any) {
-    await handleAiRouteError(error, res);
-  }
-});
-
-app.post('/api/ai/review', async (req, res) => {
-  try {
-    const { videoTitle, campaignName, draftUrl } = req.body;
-    const { data } = await runAgent(reviewComplianceChecklistAgent, { videoTitle, campaignName, draftUrl });
-    data.analysisScope = 'metadata-only';
-    res.json({ success: true, data });
-  } catch (error: any) {
-    await handleAiRouteError(error, res);
-  }
-});
-
 // workspaceId có thể rỗng (workspace Agency, xem toàn bộ) — nếu có, chỉ giữ lại các bản ghi
 // thuộc đúng workspace đó, cùng logic với `inActiveWorkspace` ở App.tsx phía client, để banner
 // AI trên Dashboard không gợi ý dựa trên dữ liệu của workspace khác.
 const scopedToWorkspace = <T extends { workspaceId?: string }>(items: T[], workspaceId?: string): T[] =>
   workspaceId ? items.filter(item => !item.workspaceId || item.workspaceId === workspaceId) : items;
 
-app.post('/api/ai/daily-summary', async (req, res) => {
-  const { workspaceId } = req.body || {};
-  const kpis = await getKpis(INITIAL_KPIS);
-  const reviews = scopedToWorkspace(await getAllReviews(), workspaceId);
-  const tasks = scopedToWorkspace(await getAllTasks(), workspaceId);
-
-  try {
-    const { data } = await runAgent(opsDailySummaryAgent, {
-      todayEmailsSent: kpis.todayEmailsSent,
-      todayRepliesReceived: kpis.todayRepliesReceived,
-      pendingReviewsCount: reviews.filter(r => r.status === 'Pending Review').length,
-      pendingTasksCount: tasks.filter(t => t.status !== 'Completed').length,
-    });
-    res.json({ success: true, data: { ...data, source: 'ai' } });
-  } catch (error: any) {
-    console.warn('AI Daily Summary call failed or missing API key, using deterministic fallback:', error?.message);
-    const fallbackData = buildDeterministicDailySummary(kpis, reviews, tasks);
-    res.json({ success: true, data: fallbackData });
-  }
-});
-
-// Replaces the previously-hardcoded dashboard "AI Recommendation" banner (which just
-// printed a canned string around recentReplies[0]) with a real judgment call over
-// everything currently open — campaigns, stale conversations, pending reviews, tasks.
-app.post('/api/ai/priority-suggestion', async (req, res) => {
-  const { workspaceId } = req.body || {};
-  const campaigns = scopedToWorkspace(await getAllCampaigns(), workspaceId).filter(c => c.status !== 'Completed' && c.status !== 'Archived');
-  const conversations = scopedToWorkspace(await getConversationsForList(), workspaceId).filter(c => c.status !== 'Completed');
-  const reviews = scopedToWorkspace(await getAllReviews(), workspaceId).filter(r => r.status === 'Pending Review');
-  const tasks = scopedToWorkspace(await getAllTasks(), workspaceId).filter(t => t.status !== 'Completed');
-
-  const openCampaigns = campaigns.map(c => ({ name: c.name, status: c.status, creatorCount: c.creatorIds?.length || 0 }));
-  const staleConversations = conversations.map(c => ({
-    creatorName: c.creatorName,
-    status: c.status,
-    daysSinceLastMessage: Math.floor((Date.now() - new Date(c.lastMessageAt).getTime()) / 86400000),
-  }));
-  const pendingReviews = reviews.map(r => ({ creatorName: r.creatorName, videoTitle: r.videoTitle, dueAt: r.dueAt }));
-  const overdueTasks = tasks.map(t => ({ title: t.title, priority: t.priority, dueDate: t.dueDate }));
-
-  try {
-    const { data } = await runAgent(opsPrioritySuggesterAgent, { openCampaigns, staleConversations, pendingReviews, overdueTasks });
-    res.json({ success: true, data: { ...data, source: 'ai' } });
-  } catch (error: any) {
-    console.warn('ops.priority_suggester agent failed, using deterministic fallback:', error?.message);
-    const noOpenItems = openCampaigns.length === 0 && staleConversations.length === 0 && pendingReviews.length === 0 && overdueTasks.length === 0;
-    res.json({
-      success: true,
-      data: {
-        priorityAction: noOpenItems
-          ? 'Không có việc gì khẩn cấp — tiếp tục tìm kiếm và liên hệ thêm creator mới.'
-          : pendingReviews.length > 0
-            ? `Ưu tiên duyệt ${pendingReviews.length} draft video đang chờ.`
-            : overdueTasks.length > 0
-              ? `Ưu tiên xử lý ${overdueTasks.length} công việc tồn đọng.`
-              : `Theo dõi ${staleConversations.length} cuộc trò chuyện đang chờ phản hồi.`,
-        reasoning: 'Đề xuất theo số lượng việc tồn đọng (fallback không dùng AI).',
-        secondaryActions: [],
-        source: 'deterministic',
-      },
-    });
-  }
-});
-
 // ==========================================
 // AGENT PROMPT STUDIO — operator-editable "how to behave" instructions per agent
 // ==========================================
-
-// List every trained agent + whether it currently has a custom (operator-saved) prompt.
-app.get('/api/agent-prompts', async (req, res) => {
-  const data = await Promise.all(Object.values(AGENT_REGISTRY).map(async (agent) => {
-    const override = await getAgentPromptOverride(agent.id);
-    return {
-      id: agent.id,
-      label: agent.label,
-      defaultInstructions: agent.defaultInstructions,
-      customInstructions: override ?? null,
-      isCustom: override !== undefined,
-    };
-  }));
-  res.json({ success: true, data });
-});
-
-app.put('/api/agent-prompts/:agentId', async (req, res) => {
-  const agent = AGENT_REGISTRY[req.params.agentId];
-  if (!agent) {
-    return res.status(404).json({ success: false, message: 'Agent not found' });
-  }
-  const { customInstructions } = req.body;
-  if (typeof customInstructions !== 'string' || !customInstructions.trim()) {
-    return res.status(400).json({ success: false, message: 'customInstructions không được để trống' });
-  }
-  await saveAgentPromptOverride(agent.id, customInstructions);
-  await addActivity('Anh Tuan', 'customized agent prompt', agent.label, 'agent-prompt', agent.id);
-  res.json({ success: true, data: { id: agent.id, customInstructions, isCustom: true } });
-});
-
-app.delete('/api/agent-prompts/:agentId', async (req, res) => {
-  const agent = AGENT_REGISTRY[req.params.agentId];
-  if (!agent) {
-    return res.status(404).json({ success: false, message: 'Agent not found' });
-  }
-  await deleteAgentPromptOverride(agent.id);
-  await addActivity('Anh Tuan', 'reset agent prompt to default', agent.label, 'agent-prompt', agent.id);
-  res.json({ success: true, data: { id: agent.id, defaultInstructions: agent.defaultInstructions, isCustom: false } });
-});
 
 // Builds reasonable sample data (from whatever is actually in the CRM) so the Test button
 // works with zero setup — the operator can still pass their own `context` in the body.
@@ -2373,32 +1931,6 @@ async function buildSampleAgentContext(agentId: string) {
       return {};
   }
 }
-
-// Runs an agent with a DRAFT instructions string (not yet saved) so the operator can preview
-// output before committing an edit in the Agent Prompt Studio UI.
-app.post('/api/agent-prompts/:agentId/test', async (req, res) => {
-  const agent = AGENT_REGISTRY[req.params.agentId];
-  if (!agent) {
-    return res.status(404).json({ success: false, message: 'Agent not found' });
-  }
-  const { customInstructions, context } = req.body;
-  if (typeof customInstructions !== 'string' || !customInstructions.trim()) {
-    return res.status(400).json({ success: false, message: 'customInstructions không được để trống' });
-  }
-
-  const ctx = context && typeof context === 'object' ? context : await buildSampleAgentContext(agent.id);
-
-  try {
-    if (agent.id === copilotChatAgent.id) {
-      const text = await runTextAgent(copilotChatAgent, ctx, customInstructions);
-      return res.json({ success: true, data: { text } });
-    }
-    const { data } = await runAgent(agent, ctx, customInstructions);
-    res.json({ success: true, data });
-  } catch (error: any) {
-    await handleAiRouteError(error, res);
-  }
-});
 
 // Last middleware in the chain — catches anything forwarded via next(err), including the
 // async rejections the wrapper above now routes here, so a failure returns a JSON 500

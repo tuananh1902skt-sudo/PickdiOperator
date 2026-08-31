@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Settings, User, Sparkles, Building2, Plus, Check, Mail, Save, KeyRound, Target } from 'lucide-react';
 import { Workspace, WorkspaceScoringCriteria, CreatorGmvTier } from '../../types';
 import { WorkspaceBanner } from '../layout/WorkspaceBanner';
-import { AgentPromptStudio } from './AgentPromptStudio';
 import { AiProviderSettings } from './AiProviderSettings';
 import { OutreachTemplateSettings } from './OutreachTemplateSettings';
 
@@ -11,7 +10,6 @@ const SECTIONS = [
   { id: 'scoring-criteria', label: 'Sourcing Scoring Criteria', icon: Target },
   { id: 'ai-copilot', label: 'AI Copilot', icon: Sparkles },
   { id: 'ai-providers', label: 'AI Providers', icon: Sparkles },
-  { id: 'agent-studio', label: 'Agent Prompt Studio', icon: Sparkles },
   { id: 'profile', label: 'Operator Profile', icon: User },
   { id: 'email', label: 'Email Outreach Sync', icon: Mail },
   { id: 'outreach-templates', label: 'Outreach Templates', icon: Mail },
@@ -712,14 +710,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         className="scroll-mt-6"
       >
         <AiProviderSettings />
-      </div>
-
-      <div
-        id="agent-studio"
-        ref={el => { sectionRefs.current['agent-studio'] = el; }}
-        className="scroll-mt-6"
-      >
-        <AgentPromptStudio />
       </div>
 
       {/* Settings Section 2: Operator Profile */}

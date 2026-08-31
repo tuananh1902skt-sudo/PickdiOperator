@@ -3,7 +3,6 @@ import {
   Users,
   Send,
   Target,
-  Bell,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -17,7 +16,6 @@ export type ActiveTab =
   | 'outreach'
   | 'campaigns'
   | 'export'
-  | 'notifications'
   | 'settings';
 
 interface SidebarProps {
@@ -25,9 +23,7 @@ interface SidebarProps {
   setActiveTab: (tab: ActiveTab) => void;
   collapsed: boolean;
   setCollapsed: (collapsed: boolean) => void;
-  unreadNotifsCount: number;
   creatorsCount?: number;
-  openNotifDrawer?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -35,16 +31,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab,
   collapsed,
   setCollapsed,
-  unreadNotifsCount,
-  creatorsCount = 0,
-  openNotifDrawer
+  creatorsCount = 0
 }) => {
   const navItems = [
     { id: 'creators' as ActiveTab, label: 'Creators CRM', icon: Users, countText: creatorsCount > 0 ? `${creatorsCount}` : undefined },
     { id: 'outreach' as ActiveTab, label: 'Outreach & Pipeline', icon: Send },
     { id: 'campaigns' as ActiveTab, label: 'Campaigns', icon: Target },
     { id: 'export' as ActiveTab, label: 'Xuất Google Sheet', icon: FileSpreadsheet },
-    { id: 'notifications' as ActiveTab, label: 'Notifications', icon: Bell, count: unreadNotifsCount },
     { id: 'settings' as ActiveTab, label: 'Settings', icon: Settings },
   ];
 
@@ -92,14 +85,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               key={item.id}
               id={`nav-item-${item.id}`}
-              onClick={() => {
-                if (item.id === 'notifications') {
-                  if (openNotifDrawer) openNotifDrawer();
-                  else setActiveTab(item.id);
-                } else {
-                  setActiveTab(item.id);
-                }
-              }}
+              onClick={() => setActiveTab(item.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
                 isActive
                   ? 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 font-semibold'
@@ -115,12 +101,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {!collapsed && item.countText ? (
                 <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-indigo-600 text-white shadow-xs">
                   {item.countText}
-                </span>
-              ) : null}
-
-              {!collapsed && item.count ? (
-                <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-rose-500 text-white">
-                  {item.count}
                 </span>
               ) : null}
             </button>

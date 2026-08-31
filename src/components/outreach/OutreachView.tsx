@@ -16,7 +16,6 @@ interface OutreachViewProps {
   outreachList: OutreachEmail[];
   onOpenEmailComposer: (cr: Creator) => void;
   onUpdateCreatorStatus: (creatorId: string, status: CreatorStatus) => void;
-  onSelectCreator: (cr: Creator) => void;
   onOpenBulkOutreach?: (creatorIds: string[], defaultSequenceStage: 'first' | 'reminder_1' | 'reminder_2' | 'reminder_3') => void;
 }
 
@@ -61,7 +60,6 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
   outreachList,
   onOpenEmailComposer,
   onUpdateCreatorStatus,
-  onSelectCreator,
   onOpenBulkOutreach
 }) => {
   const [activeTab, setActiveTab] = useState<'kanban' | 'history'>('kanban');
@@ -251,7 +249,6 @@ export const OutreachView: React.FC<OutreachViewProps> = ({
                       <div
                         key={cr.id}
                         draggable
-                        onClick={() => onSelectCreator(cr)}
                         onDragStart={e => {
                           e.dataTransfer.setData('text/plain', cr.id);
                           e.dataTransfer.effectAllowed = 'move';
