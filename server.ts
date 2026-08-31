@@ -63,6 +63,7 @@ import {
   setKpis,
   getAllCreators,
   getCreatorsForList,
+  getCreatorsForExport,
   getCreatorsMini,
   getAllCreatorHandles,
   getCreatorsCount,
@@ -339,6 +340,19 @@ app.get('/api/creators', async (req, res) => {
     category: category ? String(category) : undefined,
   });
   res.json({ success: true, data: filtered, meta: { total: filtered.length } });
+});
+
+// Tab Xuất file cần 6 cột (gpm + 5 JSONB) mà /api/creators cố tình không trả về cho nhẹ.
+// Một request cho cả lô thay cho vòng lặp /api/creators/:id từng dòng mà ExportView dùng trước đây.
+app.post('/api/creators/export', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const rows = await getCreatorsForExport(ids);
+    res.json({ success: true, data: rows, meta: { total: rows.length } });
+  } catch (err: any) {
+    console.error('creators/export failed:', err);
+    res.status(500).json({ success: false, error: String(err?.message || err) });
+  }
 });
 
 // Danh sách siêu nhẹ (id/handle/displayName/avatar/status/category) cho các UI
@@ -676,6 +690,9 @@ app.post('/api/creators/batch-import', async (req, res) => {
         engagementRate: toFiniteNumber(scrapedEngagement) ?? existing.engagementRate,
         gmv30d: toFiniteNumber(scrapedGmv) ?? existing.gmv30d,
         email: item.email || item.contact_email || existing.email,
+        // Nút "Lấy engagement (tiktok.com)" đã gửi kèm instagram (dò trong bio TikTok) từ lâu
+        // nhưng route này map từng field một và bỏ sót nó, nên cột instagram rỗng 0/1363.
+        instagram: item.instagram || existing.instagram,
         bio: item.bio || existing.bio,
         category: (typeof item.category === 'string' && item.category) ? item.category : existing.category,
         niche: (item.niche && (Array.isArray(item.niche) ? item.niche.length : String(item.niche).length))
@@ -736,6 +753,7 @@ app.post('/api/creators/batch-import', async (req, res) => {
         status: 'New Lead',
         owner: 'Anh Tuan (Scraper Bot)',
         email: item.email || item.contact_email || undefined,
+        instagram: item.instagram || undefined,
         phone: item.phone || undefined,
         createdAt: new Date().toISOString(),
         tags: ['TikTok Scraped', source || 'Auto Extension', ...(countryName ? [countryName] : [])],

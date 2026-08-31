@@ -991,6 +991,37 @@ export async function getCreatorsForList(filters?: CreatorListFilters): Promise<
   return filterCreatorsByNicheSearch(rows.map(rowToCreator), q);
 }
 
+// Bộ cột cho tab Xuất file. Bằng CREATOR_LIST_COLUMNS cộng đúng 6 field mà hai bộ cột export
+// cần nhưng bảng danh sách CRM không đọc tới. Trước đây ExportView phải gọi /api/creators/:id
+// cho TỪNG dòng đang hiển thị (N+1 request mỗi lần đổi ngày), và `gpm` thì không có đường nào
+// tới được ExportView cả — nên cột GPM trong bộ 16 cột MAIN luôn xuất ra rỗng dù DB có 975
+// creator mang giá trị đó. KHÔNG gộp mấy cột này vào CREATOR_LIST_COLUMNS: recentVideos/
+// demographics là JSONB, kéo chúng cho cả roster sẽ làm nặng mọi màn hình khác.
+const CREATOR_EXPORT_COLUMNS = [
+  CREATOR_LIST_COLUMNS,
+  'gpm', 'demographics', '"salesMetrics"', '"videoMetrics"', '"recentVideos"', 'instagram',
+].join(', ');
+
+export async function getCreatorsForExport(ids: string[]): Promise<Creator[]> {
+  const clean = Array.from(new Set(ids.filter(Boolean).map(String)));
+  if (clean.length === 0) return [];
+  const db = getDb();
+  // Cắt khúc để danh sách id không làm URL của PostgREST dài quá giới hạn; các khúc chạy song
+  // song vì mỗi round-trip tới Supabase tốn ~1s bất kể query nặng nhẹ (xem queryAllCreatorRows).
+  const CHUNK = 200;
+  const chunks: string[][] = [];
+  for (let i = 0; i < clean.length; i += CHUNK) chunks.push(clean.slice(i, i + CHUNK));
+  const results = await Promise.all(
+    chunks.map(part => db.from('creators').select(CREATOR_EXPORT_COLUMNS).in('id', part))
+  );
+  const out: Creator[] = [];
+  for (const { data, error } of results) {
+    if (error) throw error;
+    (data ?? []).forEach((row: any) => out.push(rowToCreator(row)));
+  }
+  return out;
+}
+
 // Select tối thiểu cho các UI chỉ cần "chọn 1 creator từ danh sách" chứ không hiển thị bảng CRM
 // đầy đủ — CommandPalette (⌘K search), AiDrawer (dropdown "Target Creator"). Trước đây các UI
 // này dùng chung state `creators` đã load CREATOR_LIST_COLUMNS (~40 cột) cho toàn bộ bảng, dù

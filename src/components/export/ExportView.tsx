@@ -140,9 +140,19 @@ const MAIN_COLUMNS: MainColumn[] = [
   { header: 'age group', get: c => fmt(c.demographics?.topAgeGroup) },
   { header: 'category', get: c => categoryTop2(c) },
   { header: 'video link', get: c => fmt(c.recentVideos?.find(v => v.videoUrl)?.videoUrl) },
-  { header: 'persona', get: () => '' },
+  { header: 'persona', get: c => personaStr(c) },
   { header: 'why this creator', get: c => whyThisCreator(c) },
 ];
+
+// Persona ghép từ demographics thật, theo đúng lối viết của cột Persona trong file client
+// ("Hispanic / Female / 20s–30s"). Chỉ ghép cái gì có thật: TCM không trả sắc tộc nên không
+// đoán vế đó, và topCountry của TCM thực chất là BANG Mỹ đông follower nhất, không phải quốc
+// gia (xem follower_state_location). Trước đây cột này xuất ra rỗng cho mọi creator.
+function personaStr(creator?: Creator): string {
+  const demo = creator?.demographics;
+  if (!demo) return '';
+  return [demo.topGender, demo.topAgeGroup, demo.topCountry].filter(Boolean).join(' / ');
+}
 
 const METRICS_SOURCE_LABEL: Record<string, string> = {
   tcm: 'TCM',
@@ -358,10 +368,11 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
       .sort((a, b) => new Date(a.assignedAt).getTime() - new Date(b.assignedAt).getTime());
   }, [assignments, campaignId, selectedDate]);
 
-  // `creators` (App.tsx global list state) cố tình bỏ demographics/salesMetrics để nhẹ khi load
-  // cả 3900+ creator (xem comment CREATOR_LIST_COLUMNS trong db.ts) — Main Category (top 2) và
-  // Demographic cần 2 field JSONB đó nên phải fetch riêng qua getCreatorById cho từng creator
-  // ĐANG hiển thị (số dòng đã nhỏ vì lọc theo ngày ở trên rồi, không phải fetch cả roster).
+  // `creators` (App.tsx global list state) cố tình bỏ demographics/salesMetrics/gpm để nhẹ khi
+  // load cả roster (xem comment CREATOR_LIST_COLUMNS trong db.ts) — nên các dòng ĐANG hiển thị
+  // phải lấy bổ sung qua /api/creators/export, một request cho cả lô. Trước đây chỗ này gọi
+  // /api/creators/:id cho từng dòng: N+1 request, và vẫn không lấy `gpm` nên cột GPM của bộ 16
+  // cột MAIN xuất ra rỗng dù DB có dữ liệu.
   const [detailById, setDetailById] = useState<Map<string, Creator>>(new Map());
   // Khoá effect theo chuỗi id (primitive) thay vì theo reference của `filteredAssignments` —
   // App.tsx tạo mảng assignments/creators MỚI mỗi lần re-render (không useMemo ở đó) nên reference
@@ -380,13 +391,19 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
     const idsToFetch = ids.filter(id => !attemptedIdsRef.current.has(id));
     if (idsToFetch.length === 0) return;
     idsToFetch.forEach(id => attemptedIdsRef.current.add(id));
-    Promise.all(idsToFetch.map(id => fetch(`/api/creators/${id}`).then(r => r.ok ? r.json() : null).catch(() => null)))
-      .then(results => {
+    fetch('/api/creators/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: idsToFetch }),
+    })
+      .then(r => (r.ok ? r.json() : null))
+      .catch(() => null)
+      .then(res => {
+        const rows: Creator[] = res?.data ?? [];
+        if (rows.length === 0) return;
         setDetailById(prev => {
           const next = new Map(prev);
-          results.forEach((res, i) => {
-            if (res?.data) next.set(idsToFetch[i], res.data as Creator);
-          });
+          rows.forEach(c => next.set(c.id, c));
           return next;
         });
       });
@@ -395,10 +412,9 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
   const mainRows = useMemo(() => {
     if (mode !== 'main') return [];
     return mainCreators.map(summary => {
-      const detail = detailById.get(summary.id);
-      const creator = detail
-        ? { ...summary, demographics: detail.demographics, salesMetrics: detail.salesMetrics, videoMetrics: detail.videoMetrics, recentVideos: detail.recentVideos }
-        : summary;
+      // /api/creators/export trả đúng bộ cột của danh sách CỘNG thêm 6 cột, nên bản chi tiết
+      // là superset — dùng thẳng, không cần ghép từng field (cách ghép cũ bỏ sót `gpm`).
+      const creator = detailById.get(summary.id) ?? summary;
       return MAIN_COLUMNS.map(col => col.get(creator, plainNumbers));
     });
   }, [mode, mainCreators, detailById, plainNumbers]);
@@ -406,8 +422,7 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
   const clientRows = useMemo(() => {
     return filteredAssignments.map(assignment => {
       const summary = creatorById.get(assignment.creatorId);
-      const detail = detailById.get(assignment.creatorId);
-      const creator = summary && detail ? { ...summary, demographics: detail.demographics, salesMetrics: detail.salesMetrics } : summary;
+      const creator = detailById.get(assignment.creatorId) ?? summary;
       const emails = outreachList.filter(o => o.creatorId === assignment.creatorId && o.campaignId === campaignId);
       const posted = postedVideos.filter(v => v.creatorId === assignment.creatorId && v.campaignId === campaignId);
       const totalGmv = posted.length > 0
