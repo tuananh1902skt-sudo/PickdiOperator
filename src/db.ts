@@ -820,12 +820,42 @@ export async function saveUnmatchedInboundEmail(u: UnmatchedInboundEmail): Promi
 
 // Key-Value / Settings / KPIs
 
+// "Hôm nay" của các bộ đếm theo ngày tính theo giờ VN chứ không phải UTC: operator gửi mail
+// trong giờ hành chính VN, mà mốc sang ngày của UTC rơi đúng 7h sáng VN — reset ngay giữa
+// buổi làm sẽ cho gửi gấp đôi hạn mức trong cùng một ngày làm việc.
+const KPI_TIME_ZONE = 'Asia/Ho_Chi_Minh';
+
+// en-CA để ra đúng dạng YYYY-MM-DD (so sánh chuỗi được, không cần parse lại).
+export function kpiDayKey(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: KPI_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}
+
+// Các bộ đếm tên "today..." trước đây chỉ tăng, không có chỗ nào đưa về 0 — nên một khi tổng
+// số mail đã gửi từ trước tới giờ vượt dailyCap thì MỌI job outreach sau đó đều dừng ngay từ
+// item đầu tiên. Đây là chỗ DUY NHẤT quyết định "đã sang ngày mới": mọi đường đọc KPI đều đi
+// qua getKpis nên không thể quên reset ở một nhánh nào đó.
+//
+// Chỉ reset trên đường ĐỌC, không tự ghi xuống DB — getKpis được gọi ở cả những chỗ chỉ xem
+// (dashboard, kiểm tra cap) và không nên biến chúng thành lệnh ghi. Giá trị đã reset kèm
+// countDate mới sẽ được ghi xuống ở lần setKpis kế tiếp, tức lần gửi mail đầu tiên trong ngày.
+function rollDailyCounters(kpis: DashboardKPIs): DashboardKPIs {
+  const today = kpiDayKey();
+  if (kpis.countDate === today) return kpis;
+  // Bản ghi cũ chưa có countDate rơi vào đây: coi như của ngày khác, reset — đúng ý đồ.
+  return { ...kpis, todayEmailsSent: 0, todayRepliesReceived: 0, countDate: today };
+}
+
 export async function getKpis(defaultKpis: DashboardKPIs): Promise<DashboardKPIs> {
   const db = getDb();
   const { data, error } = await db.from('settings').select('value').eq('key', 'kpis').maybeSingle();
   if (error) throw error;
-  if (!data || !data.value) return defaultKpis;
-  return parseJson(data.value, defaultKpis);
+  if (!data || !data.value) return rollDailyCounters(defaultKpis);
+  return rollDailyCounters(parseJson(data.value, defaultKpis));
 }
 
 export async function setKpis(kpis: DashboardKPIs): Promise<void> {

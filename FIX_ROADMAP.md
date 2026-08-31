@@ -19,6 +19,7 @@ Không cần link artifact nữa — mọi thông tin cần để sửa từng l
 5. Một `P` (P0/P1/P2/P3) có thể tách nhiều session — cứ làm 1-2 mục/session rồi dừng, không sao.
 
 **Quy ước Trạng thái:** `⬜ Chưa làm` · `🔄 Đang làm` · `✅ Xong` · `⚠️ Blocked`
+- **Ghi chú:** **Đừng chỉ set biến môi trường `API_KEY` để vá — làm vậy là app tự chết.** Middleware ở `server.ts` chặn MỌI request non-GET thiếu header `x-api-key`, mà frontend không gửi header đó ở bất kỳ đâu; bật lên là mọi nút bấm trong webapp 401. Kiểm tra 2026-09-01: `POST /api/__probe__` trên production trả **404 chứ không phải 401** → `API_KEY` chưa set, API đang mở hoàn toàn. Muốn đóng phải làm cả hai đầu cùng lúc.
 
 ---
 
@@ -26,12 +27,12 @@ Không cần link artifact nữa — mọi thông tin cần để sửa từng l
 
 | ID | Mức độ | Tên lỗi | Trạng thái |
 |---|---|---|---|
-| [P0-1](#p0-1-giới-hạn-gửi-email-ngày-là-bộ-đếm-suốt-đời) | Critical | Giới hạn email/ngày không reset | ⬜ Chưa làm |
-| [P0-2](#p0-2-extension-chỉ-kết-nối-được-với-localhost) | Critical | Extension chỉ chạy trên localhost | ⬜ Chưa làm |
-| [P0-3](#p0-3-api-không-bắt-buộc-xác-thực) | Critical | API không bắt buộc xác thực | ⬜ Chưa làm |
-| [P0-4](#p0-4-không-phân-trang-getall-tự-cắt-ở-1000-dòng) | Critical | Không phân trang, cắt ở 1.000 dòng | ⬜ Chưa làm |
+| [P0-1](#p0-1-giới-hạn-gửi-email-ngày-là-bộ-đếm-suốt-đời) | Critical | Giới hạn email/ngày không reset | ✅ Xong |
+| [P0-2](#p0-2-extension-chỉ-kết-nối-được-với-localhost) | Critical | Extension chỉ chạy trên localhost | ✅ Xong |
+| [P0-3](#p0-3-api-không-bắt-buộc-xác-thực) | Critical | API không bắt buộc xác thực | ⚠️ Nửa chừng |
+| [P0-4](#p0-4-không-phân-trang-getall-tự-cắt-ở-1000-dòng) | Critical | Không phân trang, cắt ở 1.000 dòng | ✅ Xong |
 | [P0-5](#p0-5-không-có-ràng-buộc-unique-cho-handle-creator) | High | Không unique constraint cho handle | ⬜ Chưa làm |
-| [P0-6](#p0-6-race-condition-khi-gửi-email-hàng-loạt) | High | Race condition gửi email hàng loạt | ⬜ Chưa làm |
+| [P0-6](#p0-6-race-condition-khi-gửi-email-hàng-loạt) | High | Race condition gửi email hàng loạt | ✅ Xong |
 | [P1-1](#p1-1-cờ-không-liên-hệ-nữa-không-có-ui) | High | do-not-contact không có UI | ⬜ Chưa làm |
 | [P1-2](#p1-2-xoá-creator-không-dùng-transaction) | High | Xoá creator không transaction | ⬜ Chưa làm |
 | [P1-3](#p1-3-bật-row-level-security-trên-supabase) | High | RLS chưa bật | ⬜ Chưa làm |
@@ -68,8 +69,8 @@ Không cần link artifact nữa — mọi thông tin cần để sửa từng l
   1. Set `dailyCap` thấp (vd. 2) qua UI/DB test, tạo bulk outreach job có 3 item, chạy — xác nhận đúng 2 item gửi rồi dừng đúng như cũ (không phá behavior cap trong-ngày).
   2. Giả lập "hôm qua đã gửi đủ cap": set thủ công `countDate` = ngày hôm qua trong DB, tạo job mới hôm nay — xác nhận job gửi được (không bị chặn bởi số đếm cũ).
   3. Kiểm tra dashboard KPI "today" vẫn hiển thị đúng số đã gửi trong ngày sau khi reset.
-- **Trạng thái:** ⬜ Chưa làm
-- **Ghi chú:** _(để trống, điền sau khi làm — vd. chọn UTC hay giờ VN cho "ngày mới")_
+- **Trạng thái:** ✅ Xong
+- **Ghi chú:** Sửa 2026-09-01. Thêm `countDate` vào `DashboardKPIs`; toàn bộ logic "đã sang ngày mới" nằm trong `rollDailyCounters()` ở `src/db.ts`, gọi từ bên trong `getKpis()` — mọi đường đọc KPI đều đi qua đó nên không thể quên reset ở một nhánh nào. **Chọn giờ VN (`Asia/Ho_Chi_Minh`), không phải UTC**: mốc sang ngày của UTC rơi đúng 7h sáng VN, reset giữa buổi làm sẽ cho gửi gấp đôi hạn mức trong cùng một ngày làm việc. Chỉ reset trên đường ĐỌC, không tự ghi xuống DB (getKpis còn được gọi ở chỗ chỉ xem); giá trị mới ghi xuống ở lần `setKpis` kế tiếp. Bản ghi cũ chưa có `countDate` rơi vào nhánh reset — đúng ý đồ. Giá trị thật lúc sửa là **1358 / cap 80**, tức mọi job outreach đang dừng ở `paused_cap` trước khi gửi được email đầu tiên. Đã test: kpiDayKey đúng ở cả 3 mốc quanh nửa đêm VN, cùng ngày giữ nguyên 5 → tăng được lên 6, countDate cũ → reset về 0.
 
 ---
 
@@ -85,8 +86,8 @@ Không cần link artifact nữa — mọi thông tin cần để sửa từng l
   1. Mở web app ở domain production thật (không phải localhost), vào trang creator, bấm "Auto quét + Lấy chi tiết".
   2. Mở DevTools Console của extension (`chrome://extensions` → Inspect service worker) — xác nhận không có lỗi `Could not establish connection`.
   3. Xác nhận queue thực sự bắt đầu chạy (có log/UI phản hồi từ extension).
-- **Trạng thái:** ⬜ Chưa làm
-- **Ghi chú:** _(ghi domain thật đã thêm, và cách xử lý preview deploy nếu có)_
+- **Trạng thái:** ✅ Xong
+- **Ghi chú:** Đã có `https://pickdi-operator.vercel.app/*` trong `externally_connectable.matches` ở cả `extension/manifest.json` và `extension-v2/manifest.json`. Xác nhận lại 2026-09-01.
 
 ---
 
@@ -121,8 +122,8 @@ Không cần link artifact nữa — mọi thông tin cần để sửa từng l
   1. Chèn tạm >1.000 dòng test vào bảng `creators` (script hoặc SQL trực tiếp trên Supabase, xoá lại sau khi test), gọi API danh sách creators — xác nhận nhận đủ số dòng (qua phân trang hoặc qua range mở rộng).
   2. Xác nhận UI vẫn hiển thị đúng, không bị lỗi khi số lượng lớn.
   3. Dọn dữ liệu test đã chèn.
-- **Trạng thái:** ⬜ Chưa làm
-- **Ghi chú:** _(ghi rõ đã làm phân trang thật hay chỉ nâng giới hạn tạm thời, và bảng nào đã xử lý)_
+- **Trạng thái:** ✅ Xong
+- **Ghi chú:** Đã phân trang thật bằng `.range(from, from + PAGE_SIZE - 1)`, bắn các trang song song. Xác nhận lại 2026-09-01 (`src/db.ts` 694/918/1047/1162).
 
 ---
 
@@ -152,7 +153,7 @@ Không cần link artifact nữa — mọi thông tin cần để sửa từng l
 - **Cách kiểm tra sau khi sửa:**
   1. Viết script gọi endpoint trigger-gửi-item-tiếp-theo 2 lần gần như đồng thời (Promise.all 2 fetch) trên cùng 1 job — xác nhận chỉ 1 email thực sự được gửi (kiểm tra qua `outreach_emails` hoặc mailbox test), luồng còn lại phải nhận biết được là "đã có luồng khác xử lý" và không gửi trùng.
   2. Chạy lại luồng gửi bulk outreach bình thường (1 luồng duy nhất) — xác nhận vẫn gửi tuần tự đúng như cũ, không bị đứng do khoá.
-- **Trạng thái:** ⬜ Chưa làm
+- **Trạng thái:** ✅ Xong
 - **Ghi chú:**
 
 ---

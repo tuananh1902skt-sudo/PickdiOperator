@@ -464,6 +464,11 @@ export interface ActivityItem {
 export interface DashboardKPIs {
   todayEmailsSent: number;
   todayRepliesReceived: number;
+  // Ngày (YYYY-MM-DD, giờ VN) mà hai bộ đếm "today..." ở trên đang đếm cho. Thiếu field này
+  // thì chúng chỉ tăng chứ không bao giờ về 0 — xem rollDailyCounters() trong db.ts.
+  // Optional vì các bản ghi ghi trước khi có field này vẫn phải đọc được; khi đó coi như
+  // của một ngày khác, tức là được reset.
+  countDate?: string;
   pendingReviewsCount: number;
   overdueTasksCount: number;
   activeCampaignsCount: number;
