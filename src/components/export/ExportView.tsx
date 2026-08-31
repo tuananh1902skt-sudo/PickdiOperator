@@ -329,6 +329,11 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
   // mới thêm trong ngày đó — render cả nghìn dòng 1 lúc (toàn bộ roster của campaign) làm treo
   // trình duyệt, và thực tế thao tác nộp file cũng diễn ra theo ngày chứ không phải 1 lần duy nhất.
   const [selectedDate, setSelectedDate] = useState(todayStr());
+  // Lấp dữ liệu cho creator đã có là việc một lần, không diễn ra theo ngày: roster nằm rải trên
+  // hàng chục ngày import, và những dòng import từ trước khi cột importedAt tồn tại thì KHÔNG
+  // ngày nào chọn ra được. Bật cờ này để bỏ lọc ngày. Mặc định tắt, nên việc thường ngày
+  // (cào hôm nay → xuất hôm nay → dán) không đổi gì.
+  const [allDates, setAllDates] = useState(false);
 
   // Hai bộ cột cho hai đích khác nhau:
   //   'client' — 49 cột đúng format 04_Grinding Cream, dán vào file chung của team
@@ -347,9 +352,9 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
   const mainCreators = useMemo(() => {
     if (mode !== 'main') return [];
     return creators
-      .filter(c => toLocalDateStr(c.importedAt) === selectedDate)
+      .filter(c => allDates || toLocalDateStr(c.importedAt) === selectedDate)
       .sort((a, b) => a.handle.localeCompare(b.handle));
-  }, [mode, creators, selectedDate]);
+  }, [mode, creators, selectedDate, allDates]);
 
   // Các ngày import đang có — để operator biết chọn ngày nào thay vì mò từng ngày một.
   const availableImportDates = useMemo(() => {
@@ -435,6 +440,11 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
   }, [filteredAssignments, outreachList, postedVideos, creatorById, detailById, campaignId, conversationByCreatorId, plainNumbers]);
 
   const rows = mode === 'main' ? mainRows : clientRows;
+  // Bảng bên dưới CHỈ là bản xem trước. Copy và Tải CSV vẫn lấy đủ `rows` — cắt ở đây thôi vì
+  // render vài nghìn dòng × 16 cột làm treo trình duyệt, mà thao tác thật là copy cả cục chứ
+  // không phải ngồi đọc từng dòng.
+  const PREVIEW_MAX = 200;
+  const previewRows = rows.length > PREVIEW_MAX ? rows.slice(0, PREVIEW_MAX) : rows;
   const headers = useMemo(
     () => (mode === 'main' ? MAIN_COLUMNS.map(c => c.header) : COLUMNS.map(c => c.header)),
     [mode]
@@ -486,12 +496,24 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
             type="date"
             list={mode === 'main' ? 'export-import-dates' : undefined}
             value={selectedDate}
+            disabled={mode === 'main' && allDates}
             onChange={e => setSelectedDate(e.target.value)}
-            className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+            className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 disabled:opacity-40"
           />
           <datalist id="export-import-dates">
             {availableImportDates.map(([d, n]) => <option key={d} value={d} label={`${n} creator`} />)}
           </datalist>
+          {mode === 'main' && (
+            <label className="flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allDates}
+                onChange={e => setAllDates(e.target.checked)}
+                className="rounded border-slate-300 dark:border-slate-600"
+              />
+              Tất cả các ngày
+            </label>
+          )}
         </div>
       </div>
 
@@ -540,7 +562,7 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
           : 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-900 text-indigo-900 dark:text-indigo-200'
       }`}>
         {mode === 'main' ? (
-          <>16 cột, tên khớp bảng nhận diện của Apps Script. Copy → dán vào tab <b>_DÁN</b> của sheet riêng (từ dòng 3, dòng 2 là tên cột) → bấm <b>📥 Nhập creator mới</b>. Nguồn dòng là creator <b>import trong ngày đã chọn</b>, không phải creator đã gán campaign.</>
+          <>16 cột, tên khớp bảng nhận diện của Apps Script. Copy → dán vào tab <b>_DÁN</b> của sheet riêng (từ dòng 3, dòng 2 là tên cột) → bấm <b>📥 Nhập creator mới</b>. Nguồn dòng là creator <b>{allDates ? 'đã import, không lọc ngày' : 'import trong ngày đã chọn'}</b>, không phải creator đã gán campaign.{allDates && <> Dùng cho lần lấp dữ liệu creator cũ; xong rồi nên bỏ tick lại.</>}</>
         ) : (
           <>49 cột đúng format client. Copy → sang file chung của team dán bằng <b>Ctrl+Shift+V</b> (chỉ giá trị). Nguồn dòng là creator <b>được gán vào campaign</b> trong ngày đã chọn.</>
         )}
@@ -549,7 +571,9 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
           <h3 className="font-semibold text-slate-900 dark:text-white text-sm">
-            {mode === 'main' ? `Import ngày ${selectedDate}` : (selectedCampaignName || 'Chọn campaign')}
+            {mode === 'main'
+              ? (allDates ? 'Tất cả creator đã import' : `Import ngày ${selectedDate}`)
+              : (selectedCampaignName || 'Chọn campaign')}
           </h3>
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-400">{rows.length} creator</span>
@@ -562,7 +586,9 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
             </button>
             <button
               onClick={() => downloadCsv(
-                mode === 'main' ? `MAIN-${selectedDate}.csv` : `${selectedCampaignName || 'export'}-${selectedDate}.csv`,
+                mode === 'main'
+                  ? (allDates ? 'MAIN-tat-ca.csv' : `MAIN-${selectedDate}.csv`)
+                  : `${selectedCampaignName || 'export'}-${selectedDate}.csv`,
                 headerLines,
                 rows
               )}
@@ -594,12 +620,12 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
                 <tr>
                   <td colSpan={headers.length || 1} className="px-3 py-6 text-center text-slate-400">
                     {mode === 'main'
-                      ? `Không có creator nào import ngày ${selectedDate}`
+                      ? (allDates ? 'Chưa có creator nào' : `Không có creator nào import ngày ${selectedDate}`)
                       : 'Chưa có creator nào cho campaign này'}
                   </td>
                 </tr>
               ) : (
-                rows.map((row, i) => (
+                previewRows.map((row, i) => (
                   <tr key={i} className="border-t border-slate-100 dark:border-slate-800">
                     {row.map((cell, j) => (
                       <td key={j} className="px-3 py-2 whitespace-nowrap text-slate-700 dark:text-slate-300">
@@ -608,6 +634,13 @@ export const ExportView: React.FC<ExportViewProps> = ({ creators, campaigns, ass
                     ))}
                   </tr>
                 ))
+              )}
+              {rows.length > previewRows.length && (
+                <tr>
+                  <td colSpan={headers.length || 1} className="px-3 py-3 text-center text-slate-400 border-t border-slate-100 dark:border-slate-800">
+                    Xem trước {previewRows.length} dòng đầu — Copy và Tải CSV vẫn lấy đủ {rows.length} dòng.
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
