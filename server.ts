@@ -1279,6 +1279,134 @@ app.post('/api/outreach/send', async (req, res) => {
   }
 });
 
+// --- Ad-hoc Outreach API ---
+// Gửi thẳng từ danh sách dán vào (Handle/Email/Tên...) copy từ tab ➜ GỬI OUTREACH của Sheet —
+// KHÔNG cần creator đã tồn tại trong DB của app. Không tra cứu, không dedupe, không do-not-
+// contact, không ghi lịch sử/KPI/conversation. Google Sheet là bộ não duy nhất theo dõi đã
+// gửi hay chưa (script Pipeline tự ghi NHẬT KÝ khi bấm "Đã gửi outreach") — app ở đây chỉ là
+// máy soạn + gửi mail một lần rồi thôi, đúng hướng thu hẹp dần vai trò quản lý creator của app.
+interface AdhocOutreachRow {
+  handle: string;
+  email: string;
+  displayName?: string;
+  category?: string;
+}
+
+app.post('/api/outreach/adhoc/generate', async (req, res) => {
+  try {
+    const {
+      rows,
+      sequenceStage = 'first',
+      tone,
+      contentSource = 'ai',
+      campaignId,
+    }: {
+      rows: AdhocOutreachRow[];
+      sequenceStage: SequenceStage;
+      tone?: string;
+      contentSource?: 'ai' | 'template';
+      campaignId?: string;
+    } = req.body;
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ success: false, message: 'Chưa dán danh sách nào' });
+    }
+
+    const campaign = campaignId ? await getCampaignById(campaignId) : undefined;
+    const agent = OUTREACH_SEQUENCE_AGENTS[sequenceStage] || OUTREACH_SEQUENCE_AGENTS.first;
+    const avoidPhrasings: string[] = [];
+    const items: Array<{
+      handle: string; email: string; displayName: string;
+      subject: string; body: string; source: string; status: string; skipReason?: string;
+    }> = [];
+
+    for (const row of rows) {
+      const cr: Partial<Creator> = { displayName: row.displayName, handle: row.handle, email: row.email, category: row.category };
+      const base = { handle: row.handle, email: row.email, displayName: row.displayName || row.handle };
+
+      if (!row.email || !row.email.trim()) {
+        items.push({ ...base, subject: '', body: '', source: 'ai', status: 'skipped_no_email', skipReason: 'Thiếu email' });
+        continue;
+      }
+
+      if (contentSource === 'template') {
+        // body không được để rỗng ở stage "first" dù renderFirstContactEmailHtml (áp lúc
+        // gửi) đã có sẵn 1 câu pitch cố định trong hero — filled.body vẫn cần cho phần
+        // plain-text fallback của email (client không hiển thị HTML).
+        const filled = await fillOutreachTemplate(sequenceStage, cr, campaign);
+        const subject = sequenceStage === 'first' ? pickRandomFirstContactSubject() : ensurePaidSubject(filled.subject);
+        items.push({ ...base, subject, body: filled.body, source: 'template', status: 'draft' });
+        continue;
+      }
+
+      try {
+        const { data } = await runAgent(agent, { creator: cr, campaign, tone, avoidPhrasings: [...avoidPhrasings] });
+        const draftSubject = data.subject || 'Collaboration Offer';
+        const subject = sequenceStage === 'first' ? pickRandomFirstContactSubject() : ensurePaidSubject(draftSubject);
+        const body = data.body || '';
+        items.push({ ...base, subject, body, source: 'ai', status: 'draft' });
+        avoidPhrasings.push(extractOpeningPhrasing(body));
+      } catch (err: any) {
+        console.warn(`Ad-hoc outreach: AI generation failed for ${row.handle}, using template fallback:`, err?.message);
+        const filled = await fillOutreachTemplate(sequenceStage, cr, campaign);
+        const subject = sequenceStage === 'first' ? pickRandomFirstContactSubject() : ensurePaidSubject(filled.subject);
+        items.push({ ...base, subject, body: filled.body, source: 'template_fallback', status: 'draft' });
+      }
+    }
+
+    res.json({ success: true, data: items });
+  } catch (error: any) {
+    await handleAiRouteError(error, res);
+  }
+});
+
+app.post('/api/outreach/adhoc/send', async (req, res) => {
+  try {
+    const {
+      email, subject, body, cc, creatorName, sequenceStage, campaignId,
+    }: {
+      email: string; subject: string; body: string; cc?: string;
+      creatorName?: string; sequenceStage?: SequenceStage; campaignId?: string;
+    } = req.body;
+    if (!email || !email.trim()) return res.status(400).json({ success: false, message: 'Thiếu email' });
+    if (!subject || !body) return res.status(400).json({ success: false, message: 'Thiếu subject/body' });
+
+    const sendSubject = ensurePaidSubject(subject);
+
+    // Render đúng khung HTML "Piedmont" (logo/ảnh sản phẩm/offer card) giống hệt Bulk
+    // Outreach — chỉ khác là không có campaign/product thì card sản phẩm tự ẩn, không lỗi.
+    const emailConfig = await getEmailConfig();
+    const campaign = campaignId ? await getCampaignById(campaignId) : undefined;
+    const product = campaign?.products?.[0];
+    const isFirstContact = !sequenceStage || sequenceStage === 'first';
+    const ctaHref = emailConfig.email ? `mailto:${emailConfig.email}?subject=${encodeURIComponent(sendSubject)}` : undefined;
+    const html = renderFirstContactEmailHtml({
+      creatorName,
+      senderName: emailConfig.senderName || DEFAULT_SENDER_NAME,
+      brandName: campaign?.name || emailConfig.brand,
+      logoUrl: emailConfig.logoUrl,
+      primaryColor: emailConfig.primaryColor,
+      productName: product?.name,
+      productImageUrl: product?.imageUrl,
+      productUrl: product?.productUrl,
+      productRating: product?.rating,
+      productReviewCount: product?.reviewCount,
+      productSoldCount: product?.soldCount,
+      productHighlights: product?.highlights,
+      compensationOffer: product?.compensationOffer,
+      bodyText: isFirstContact ? body : undefined,
+      introText: isFirstContact ? undefined : body,
+      ctaHref,
+    });
+
+    const { messageId } = await sendEmail({ to: email, cc, subject: sendSubject, text: body, html });
+    res.json({ success: true, data: { messageId } });
+  } catch (err: any) {
+    console.error('Ad-hoc outreach send error:', err);
+    res.status(500).json({ success: false, message: err?.message || 'Gửi email thất bại. Vui lòng kiểm tra cấu hình Email trong Cài đặt và thử lại.' });
+  }
+});
+
 // --- Bulk Outreach API ---
 const DEFAULT_PACING_MIN_SECONDS = 45;
 const DEFAULT_PACING_MAX_SECONDS = 120;

@@ -9,6 +9,7 @@ import { QuickAddCreatorModal } from './components/creators/QuickAddCreatorModal
 import { OutreachView } from './components/outreach/OutreachView';
 import { EmailComposerModal } from './components/outreach/EmailComposerModal';
 import { BulkOutreachModal } from './components/outreach/BulkOutreachModal';
+import { AdhocOutreachView } from './components/outreach/AdhocOutreachView';
 
 import { CampaignsView } from './components/campaigns/CampaignsView';
 import { CreateCampaignModal } from './components/campaigns/CreateCampaignModal';
@@ -42,6 +43,7 @@ import {
 const TAB_PATHS: Record<ActiveTab, string> = {
   creators: '/creators',
   outreach: '/outreach',
+  'adhoc-outreach': '/outreach-nhanh',
   campaigns: '/campaigns',
   export: '/export',
   settings: '/settings'
@@ -756,6 +758,10 @@ export function App() {
                 setBulkOutreachConfig({ creatorIds, defaultSequenceStage })
               }
             />
+          )}
+
+          {activeTab === 'adhoc-outreach' && (
+            <AdhocOutreachView campaigns={isAgencyWorkspace ? campaigns : workspaceCampaigns} />
           )}
 
           {activeTab === 'campaigns' && (

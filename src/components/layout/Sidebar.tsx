@@ -8,12 +8,14 @@ import {
   ChevronRight,
   ShieldCheck,
   Bot,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ClipboardList
 } from 'lucide-react';
 
 export type ActiveTab =
   | 'creators'
   | 'outreach'
+  | 'adhoc-outreach'
   | 'campaigns'
   | 'export'
   | 'settings';
@@ -36,6 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems = [
     { id: 'creators' as ActiveTab, label: 'Creators CRM', icon: Users, countText: creatorsCount > 0 ? `${creatorsCount}` : undefined },
     { id: 'outreach' as ActiveTab, label: 'Outreach & Pipeline', icon: Send },
+    { id: 'adhoc-outreach' as ActiveTab, label: 'Dán & Gửi Outreach', icon: ClipboardList },
     { id: 'campaigns' as ActiveTab, label: 'Campaigns', icon: Target },
     { id: 'export' as ActiveTab, label: 'Xuất Google Sheet', icon: FileSpreadsheet },
     { id: 'settings' as ActiveTab, label: 'Settings', icon: Settings },
