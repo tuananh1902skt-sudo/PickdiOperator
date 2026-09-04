@@ -6,7 +6,7 @@
     body { width: 280px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 14px; margin: 0; background: #f9fafb; }
     h3 { margin: 0 0 10px 0; font-size: 14px; color: #111827; }
     label { font-size: 11px; color: #4b5563; font-weight: bold; }
-    input { width: 100%; padding: 6px; margin: 4px 0 10px 0; border: 1px solid #d1d5db; border-radius: 4px; box-sizing: border-box; font-size: 11px; }
+    input, textarea { width: 100%; padding: 6px; margin: 4px 0 10px 0; border: 1px solid #d1d5db; border-radius: 4px; box-sizing: border-box; font-size: 11px; font-family: inherit; resize: vertical; }
     .row { display: flex; gap: 6px; }
     .row input { flex: 1; }
     button { width: 100%; padding: 10px; background: #4f46e5; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 12px; }
@@ -67,6 +67,22 @@
   <button id="continueAutoDetailBtn" class="accent" style="display:none;">▶️ Lấy tiếp</button>
   <button id="stopAutoDetailBtn" class="secondary" style="display:none;">⏹ Dừng hàng đợi</button>
 
+  <p style="font-size:11px; color:#6b7280; margin:10px 0 8px 0; line-height:1.4;">
+    🤖 Bản KHÔNG đẩy webapp của mục trên — tự mở lần lượt từng trang chi tiết cho danh sách đã
+    bắt (list bên trên), gộp thẳng vào CSV buffer (mục 📦 cuối popup) thay vì đẩy lên Pickdi.
+    Cùng nhịp độ 4-8s/creator, mỗi đợt
+    <input type="number" id="csvAutoDetailMax" placeholder="không giới hạn" min="1" style="width:70px; display:inline; padding:2px 4px; margin:0 2px;"> creator.
+  </p>
+  <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin:0 0 8px 0; cursor:pointer; font-size:11px; color:#4b5563;">
+    <input type="checkbox" id="csvAutoDetailContinueCheckbox" style="width:auto; margin:0;">
+    Tự lấy tiếp đợt kế sau khi nghỉ
+    <input type="number" id="csvAutoDetailCooldownMin" value="1" min="0.5" max="30" step="0.5" style="width:44px; display:inline; padding:2px 4px; margin:0 2px;"> phút
+  </label>
+  <button id="startCsvAutoDetailBtn" class="secondary">🤖 Bắt đầu lấy chi tiết CSV cho danh sách</button>
+  <div id="csvAutoDetailQueueStatus" style="font-size:11px; color:#374151; word-break:break-word; margin:6px 0;"></div>
+  <button id="continueCsvAutoDetailBtn" class="accent" style="display:none;">▶️ Lấy tiếp</button>
+  <button id="stopCsvAutoDetailBtn" class="secondary" style="display:none;">⏹ Dừng hàng đợi</button>
+
   <hr>
 
   <label>📋 Lấy chi tiết creator (khuyên dùng)</label>
@@ -77,6 +93,7 @@
     nút này.
   </p>
   <button id="pushDetailBtn" class="accent">📋 Lấy chi tiết trang này</button>
+  <button id="detailExportBtn" class="secondary">💾 Lưu vào CSV buffer (không đẩy webapp)</button>
   <div id="detailStatus"></div>
   <button id="stopDetailSingleBtn" class="secondary" style="display:none;">⏹ Dừng</button>
 
@@ -85,14 +102,61 @@
     được, thử nút dưới (tự cuộn/bấm qua các tab để kích hoạt) trước khi bấm lại nút trên.
   </p>
   <button id="autoScanBtn" class="secondary">🚀 Auto quét qua các tab (dự phòng)</button>
+  <button id="autoScanExportBtn" class="secondary">💾 Lưu vào CSV buffer (không đẩy webapp)</button>
   <div id="autoScanStatus"></div>
   <button id="stopAutoScanBtn" class="secondary" style="display:none;">⏹ Dừng</button>
 
   <button id="pushEngagementBtn" class="secondary">📊 Lấy engagement (tiktok.com)</button>
+  <button id="engagementExportBtn" class="secondary">💾 Lưu vào CSV buffer (không đẩy webapp)</button>
   <div id="engagementStatus"></div>
   <button id="stopEngagementBtn" class="secondary" style="display:none;">⏹ Dừng</button>
 
+  <hr>
+
+  <label>📦 CSV buffer (chi tiết/engagement đã lưu tạm, không ở webapp)</label>
+  <p style="font-size:11px; color:#6b7280; margin:2px 0 8px 0; line-height:1.4;">
+    Mỗi lần bấm "Lưu vào CSV buffer" ở trên, creator được gộp vào đây theo handle (chạy cả
+    detail lẫn engagement cho cùng 1 creator sẽ gộp chung 1 dòng). Buffer nằm trên máy, không
+    đụng tới webapp — xuất CSV khi xong, xoá buffer để bắt đầu đợt mới.
+  </p>
+  <div id="csvBufferStatus" style="font-size:11px; color:#374151; margin-bottom:8px;">Buffer trống.</div>
+  <button id="exportBufferCsvBtn">⬇️ Xuất CSV buffer</button>
+  <button id="clearBufferCsvBtn" class="secondary">🗑 Xoá buffer</button>
+
+  <hr>
+
+  <label>🔍 Cào chi tiết CSV cho creator chỉ có handle (Kalodata/import)</label>
+  <p style="font-size:11px; color:#6b7280; margin:2px 0 8px 0; line-height:1.4;">
+    Dành cho creator chưa từng xuất hiện trong list TCM đã bắt (Kalodata/nhập tay/file import) —
+    chỉ có handle, chưa có cid. Mỗi handle: tự gõ vào ô search thật của TCM để tìm cid, rồi tự mở
+    trang chi tiết của đúng cid đó — cùng kỹ thuật/nhịp độ 4-8s/creator như các mục trên, gộp
+    thẳng vào CSV buffer (không đẩy webapp). Cần đã từng bấm "Đọc data đã bắt được" ít nhất 1 lần
+    từ tab TCM thật trước đó (extension tự nhớ Shop ID từ đó).
+  </p>
+  <label style="font-weight:normal; font-size:11px;">🔑 Shop ID (tự nhớ từ tab TCM, hoặc gõ tay nếu chưa có)</label>
+  <div style="display:flex; gap:6px; align-items:center;">
+    <input type="text" id="manualShopId" placeholder="vd: 7495834271626855854" style="flex:1;">
+    <input type="text" id="manualShopRegion" placeholder="US" style="width:60px;">
+  </div>
+  <p style="font-size:10px; color:#9ca3af; margin:4px 0 8px 0; line-height:1.4;">
+    Lấy Shop ID bằng cách mở 1 tab affiliate-us.tiktok.com/connection/creator..., copy đúng đoạn
+    số sau <code>shop_id=</code> trên thanh địa chỉ. Gõ vào đây rồi bấm 💾 Lưu — không cần mở tab
+    TCM thật hay bấm "Đọc data đã bắt được" nữa.
+  </p>
+  <button id="saveManualShopIdBtn" class="secondary">💾 Lưu Shop ID</button>
+  <div id="manualShopIdStatus" style="font-size:11px; color:#374151; margin:4px 0 8px 0;"></div>
+
+  <label style="font-weight:normal; font-size:11px;">📂 Đọc cột "Handle" thẳng từ file Kalodata (.xlsx)</label>
+  <input type="file" id="kalodataXlsxFile" accept=".xlsx">
+  <textarea id="kalodataHandles" rows="4" placeholder="Mỗi dòng 1 handle, hoặc cách nhau bằng dấu phẩy/space — hoặc chọn file .xlsx ở trên để tự điền"></textarea>
+  <input type="number" id="kalodataMax" placeholder="không giới hạn" min="1">
+  <button id="startKalodataCsvBtn">🔍 Tìm & lấy chi tiết CSV</button>
+  <div id="kalodataQueueStatus" style="font-size:11px; color:#374151; word-break:break-word; margin:6px 0;"></div>
+  <button id="continueKalodataCsvBtn" class="accent" style="display:none;">▶️ Lấy tiếp</button>
+  <button id="stopKalodataCsvBtn" class="secondary" style="display:none;">⏹ Dừng</button>
+
   <script src="shared.js"></script>
+  <script src="xlsxLite.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
