@@ -21,3 +21,9 @@ creators-import*.json
 
 # Apps Script cho Google Sheet — có repo private riêng
 apps-script/
+
+# Danh sách handle / dump đối chiếu Sheet vs DB — cùng loại dữ liệu client như trên,
+# sinh ra một lần rồi bỏ, không phải nguồn dữ liệu để đẩy lên repo
+goc-only-*.txt
+goc-only-*.tsv
+scripts/*_handles.txt

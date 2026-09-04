@@ -1,7 +1,18 @@
-import React, { useMemo, useState } from 'react';
-import { ClipboardList, Send, X, Loader2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ClipboardList, Send, X, Loader2, CheckCircle2, XCircle, AlertTriangle, Eye, Pencil } from 'lucide-react';
 import type { SequenceStage } from '../../lib/outreachTemplates';
 import type { Campaign } from '../../types';
+import { renderFirstContactEmailHtml } from '../../lib/emailTemplate';
+
+// Chỉ những field branding mà khung mail Piedmont cần để dựng preview giống hệt mail thật
+// (/api/settings/email trả về nhiều hơn thế — phần còn lại là cấu hình SMTP/IMAP).
+interface EmailBranding {
+  brand?: string;
+  logoUrl?: string;
+  primaryColor?: string;
+  email?: string;
+  senderName?: string;
+}
 
 // Mirrors normalizeHandle() in CreatorListView.tsx — kept as a local copy on purpose: this
 // page has zero dependency on the Creator CRM module by design (no shared state, no shared
@@ -78,11 +89,46 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
   const [campaignId, setCampaignId] = useState('');
   const [cc, setCc] = useState('');
   const [items, setItems] = useState<DraftItem[] | null>(null);
+  const [branding, setBranding] = useState<EmailBranding>({});
+  const [previewHandle, setPreviewHandle] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
 
+  // Preview dựng ở client phải khớp đúng những gì /api/outreach/adhoc/send dựng ở server:
+  // cùng renderFirstContactEmailHtml, cùng nguồn branding (Settings > Email) và cùng product
+  // đầu tiên của campaign đang chọn — nên phải kéo branding về đây thay vì đoán.
+  useEffect(() => {
+    fetch('/api/settings/email')
+      .then(res => res.json())
+      .then(json => { if (json?.success) setBranding(json.data); })
+      .catch(err => console.error('Failed to load email branding:', err));
+  }, []);
+
   const rows = useMemo(() => parseRows(pasteText), [pasteText]);
+  const currentCampaign = campaigns.find(c => c.id === campaignId);
+  const product = currentCampaign?.products?.[0];
+
+  // Giữ nguyên thứ tự ưu tiên của server (campaign.name trước, rồi brand trong Settings) —
+  // lệch chỗ này là preview hiển thị một tên thương hiệu, mail gửi đi lại ra tên khác.
+  const renderPreview = (item: DraftItem) => renderFirstContactEmailHtml({
+    creatorName: item.displayName || item.handle,
+    senderName: branding.senderName,
+    brandName: currentCampaign?.name || branding.brand,
+    logoUrl: branding.logoUrl,
+    primaryColor: branding.primaryColor,
+    productName: product?.name,
+    productImageUrl: product?.imageUrl,
+    productUrl: product?.productUrl,
+    productRating: product?.rating,
+    productReviewCount: product?.reviewCount,
+    productSoldCount: product?.soldCount,
+    productHighlights: product?.highlights,
+    compensationOffer: product?.compensationOffer,
+    bodyText: stage === 'first' ? item.body : undefined,
+    introText: stage === 'first' ? undefined : item.body,
+    ctaHref: branding.email ? `mailto:${branding.email}?subject=${encodeURIComponent(item.subject)}` : undefined,
+  });
   const missingEmailCount = rows.filter(r => !r.email).length;
 
   const handleGenerate = async () => {
@@ -150,6 +196,7 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
     setItems(null);
     setPasteText('');
     setError('');
+    setPreviewHandle(null);
   };
 
   const sentCount = items?.filter(it => it.sendStatus === 'sent').length || 0;
@@ -272,6 +319,12 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
             </div>
           </div>
 
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Phần soạn ở đây chỉ là chữ. Khi gửi, mail được bọc vào đúng khung HTML (logo, ảnh sản
+            phẩm, offer, CTA) như Bulk Outreach — bấm <span className="font-semibold">Xem trước</span> để
+            thấy mail thật. Chọn campaign ở bước dán nếu muốn có card sản phẩm.
+          </p>
+
           <div className="space-y-3">
             {items.map(item => (
               <div
@@ -291,6 +344,14 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
                     {item.sendStatus === 'sent' && <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Đã gửi</span>}
                     {item.sendStatus === 'sending' && <span className="text-indigo-600 dark:text-indigo-400 flex items-center gap-1"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Đang gửi</span>}
                     {item.sendStatus === 'failed' && <span className="text-rose-600 dark:text-rose-400 flex items-center gap-1" title={item.sendError}><XCircle className="w-3.5 h-3.5" /> Lỗi</span>}
+                    {item.status === 'draft' && (
+                      <button
+                        onClick={() => setPreviewHandle(prev => (prev === item.handle ? null : item.handle))}
+                        className="px-2 py-1 text-[10px] font-bold text-indigo-600 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/40 flex items-center gap-1"
+                      >
+                        {previewHandle === item.handle ? <><Pencil className="w-3 h-3" /> Sửa</> : <><Eye className="w-3 h-3" /> Xem trước</>}
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -304,13 +365,29 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
                       disabled={item.sendStatus === 'sent' || item.sendStatus === 'sending'}
                       className="w-full px-2.5 py-1.5 text-sm font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 disabled:opacity-60"
                     />
-                    <textarea
-                      value={item.body}
-                      onChange={e => updateItem(item.handle, { body: e.target.value })}
-                      disabled={item.sendStatus === 'sent' || item.sendStatus === 'sending'}
-                      rows={4}
-                      className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 resize-y disabled:opacity-60"
-                    />
+                    {previewHandle === item.handle ? (
+                      <iframe
+                        title={`Xem trước - ${item.handle}`}
+                        sandbox=""
+                        srcDoc={renderPreview(item)}
+                        className="w-full h-96 rounded-lg border border-slate-200 dark:border-slate-700 bg-white"
+                      />
+                    ) : (
+                      <>
+                        {stage !== 'first' && (
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                            Đây chỉ là câu mở đầu (thay câu pitch mặc định) — phần sản phẩm, offer và CTA bên dưới vẫn giữ nguyên như mẫu.
+                          </p>
+                        )}
+                        <textarea
+                          value={item.body}
+                          onChange={e => updateItem(item.handle, { body: e.target.value })}
+                          disabled={item.sendStatus === 'sent' || item.sendStatus === 'sending'}
+                          rows={4}
+                          className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 resize-y disabled:opacity-60"
+                        />
+                      </>
+                    )}
                     {item.sendStatus === 'failed' && (
                       <div className="flex items-center justify-between">
                         <p className="text-xs text-rose-600 dark:text-rose-400">{item.sendError}</p>
