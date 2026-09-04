@@ -30,11 +30,21 @@ const STORAGE_KEY = 'autoDetailState';
 const AUTO_CONTINUE_ALARM = 'autoDetailContinue';
 const TAB_LOAD_TIMEOUT_MS = 20000;
 // Trần tối đa chờ profile xuất hiện SAU khi tab báo 'complete' — không phải khoảng đợi cố định
-// nữa (xem readProfileByCidInPageWithWait): trả về ngay khi có data, chỉ chờ tới hết mức này nếu
-// tab bị Chrome throttle mạnh (background tab). 1.8s cũ quá ngắn khi chạy hàng đợi nhiều tab liên
-// tiếp — nâng lên 8s để chịu được throttling thật, vẫn đủ nhanh cho ca bình thường vì poll xong
-// là trả ngay, không đợi hết 8s.
-const POST_LOAD_BUFFER_MS = 8000;
+// nữa (xem readProfileByCidInPageWithWait): trả về ngay khi settle xong, chỉ chờ tới hết mức này
+// nếu tab bị Chrome throttle mạnh (background tab) hoặc data không bao giờ về. Nâng lên 14s (từ
+// 8s) để có chỗ cho khoảng "settle" bên dưới cộng thêm throttling thật.
+const POST_LOAD_BUFFER_MS = 14000;
+// TCM gọi marketplace/profile NHIỀU LẦN song song cho cùng 1 creator (interceptor.js deep-merge
+// từng response một vào window.__pickdi_tcm_profiles) — bản cũ đóng tab NGAY khi thấy bản ghi đầu
+// tiên xuất hiện, trước khi các response chậm hơn (demographics/collab/sales...) kịp merge vào,
+// nên nhiều trường hay bị rỗng dù coi như "đã cào được". Giờ sau khi thấy bản ghi đầu tiên, đợi
+// thêm một khoảng "settle" ngẫu nhiên nữa rồi mới đọc lần cuối và đóng tab. Ngẫu nhiên hoá cả
+// settle lẫn khoảng nghỉ giữa 2 handle (ITEM_DELAY_*) để nhịp độ mở/đóng tab không đều tăm tắp —
+// đều đặn quá dễ bị hệ thống chống bot của TCM nhận diện hơn là chỉ riêng tốc độ nhanh/chậm.
+const PROFILE_SETTLE_MIN_MS = 1800;
+const PROFILE_SETTLE_MAX_MS = 3500;
+const ITEM_DELAY_MIN_MS = 6000;
+const ITEM_DELAY_MAX_MS = 13000;
 
 let isProcessing = false;
 
@@ -65,19 +75,28 @@ function readProfileByCidInPage(cid) {
 }
 
 // Bản có chờ, thay cho readProfileByCidInPage + sleep(POST_LOAD_BUFFER_MS) cố định bên ngoài.
-// Root cause thật của tỷ lệ lỗi cao khi chạy hàng đợi (nhiều tab ẩn liên tiếp): Chrome giảm ưu
-// tiên CPU/network cho tab KHÔNG active (background tab throttling) — request marketplace/profile
-// vẫn tự bắn khi trang mount như bình thường, nhưng có thể về CHẬM HƠN rõ rệt so với lúc user tự
-// mở tay 1 tab active — nên buffer cố định 1.8s nhiều lúc đọc trước khi interceptor.js kịp merge
-// response vào window.__pickdi_tcm_profiles. Hàm này chạy NGAY TRONG page (world MAIN), tự poll
-// mỗi 300ms tới khi có data hoặc hết maxWaitMs, trả về ngay khi có thay vì luôn đợi hết buffer.
-function readProfileByCidInPageWithWait(cid, maxWaitMs) {
+// Root cause thật của tỷ lệ lỗi cao khi chạy hàng đợi (nhiều tab liên tiếp): Chrome giảm ưu tiên
+// CPU/network cho tab KHÔNG active (background tab throttling) — request marketplace/profile vẫn
+// tự bắn khi trang mount như bình thường, nhưng có thể về CHẬM HƠN rõ rệt so với lúc user tự mở
+// tay 1 tab active. Hàm này chạy NGAY TRONG page (world MAIN), tự poll mỗi 300ms.
+//
+// Quan trọng: TCM gọi marketplace/profile NHIỀU LẦN song song cho cùng creator, nên "có data" ở
+// lần poll đầu tiên không có nghĩa ĐỦ data — các response chậm hơn (demographics/collab/sales)
+// còn đang trên đường về. Poll tiếp thêm `settleMs` SAU LẦN THẤY ĐẦU TIÊN (không reset lại từ
+// đầu) rồi mới đọc bản ghi mới nhất và trả về, để các response song song còn lại kịp deep-merge
+// vào window.__pickdi_tcm_profiles trước khi tab bị đóng. Vẫn tôn trọng trần maxWaitMs tổng thể
+// để không treo vô hạn nếu creator không còn khả dụng.
+function readProfileByCidInPageWithWait(cid, maxWaitMs, settleMs) {
   return new Promise((resolve) => {
     const start = Date.now();
+    let firstSeenAt = null;
     const check = () => {
       const store = window.__pickdi_tcm_profiles || {};
-      if (store[cid]) return resolve(store[cid]);
-      if (Date.now() - start >= maxWaitMs) return resolve(null);
+      const data = store[cid] || null;
+      if (data && firstSeenAt === null) firstSeenAt = Date.now();
+      const timedOut = Date.now() - start >= maxWaitMs;
+      const settled = firstSeenAt !== null && Date.now() - firstSeenAt >= settleMs;
+      if (timedOut || settled) return resolve(data);
       setTimeout(check, 300);
     };
     check();
@@ -137,7 +156,7 @@ async function processOneItem(state) {
       target: { tabId: tab.id },
       world: 'MAIN',
       func: readProfileByCidInPageWithWait,
-      args: [String(item.cid), POST_LOAD_BUFFER_MS],
+      args: [String(item.cid), POST_LOAD_BUFFER_MS, randomDelay(PROFILE_SETTLE_MIN_MS, PROFILE_SETTLE_MAX_MS)],
     });
     const profile = results && results[0] && results[0].result;
     if (!profile) {
@@ -215,7 +234,7 @@ async function runLoop() {
       if (!after || after.status !== 'running') break;
       if (after.index >= after.queue.length) continue; // quay lại đầu vòng lặp để check auto-continue/pending
 
-      await sleep(randomDelay(state.delayMinMs || 4000, state.delayMaxMs || 8000));
+      await sleep(randomDelay(state.delayMinMs || ITEM_DELAY_MIN_MS, state.delayMaxMs || ITEM_DELAY_MAX_MS));
     }
   } finally {
     isProcessing = false;
@@ -236,8 +255,8 @@ async function startAutoDetailQueueInternal(items, webappUrl, shopId, shopRegion
     webappUrl,
     shopId,
     shopRegion: shopRegion || 'US',
-    delayMinMs: 4000,
-    delayMaxMs: 8000,
+    delayMinMs: ITEM_DELAY_MIN_MS,
+    delayMaxMs: ITEM_DELAY_MAX_MS,
     autoContinue: !!autoContinue,
     cooldownMs: cooldownMs || 45000,
     processedCount: 0,
@@ -275,7 +294,11 @@ async function continueAutoDetailQueueInternal() {
 // đúng handle để lấy cid + category/niche/GMV, rồi POST thẳng batch-import. Cùng nhịp độ thận
 // trọng (tuần tự + delay ngẫu nhiên) như hàng đợi auto-detail ở trên.
 const SEARCH_CID_STORAGE_KEY = 'searchCidState';
-const SEARCH_TAB_POST_LOAD_BUFFER_MS = 1200;
+// Trước là khoảng nghỉ cố định 1.2s trước khi gõ vào ô search — quá đều đặn và hơi ngắn cho
+// component client-render nặng của Find Creators. Ngẫu nhiên hoá + nới rộng ra cùng lý do với
+// PROFILE_SETTLE_* ở trên.
+const SEARCH_TAB_POST_LOAD_BUFFER_MIN_MS = 1800;
+const SEARCH_TAB_POST_LOAD_BUFFER_MAX_MS = 3200;
 
 let isSearchCidProcessing = false;
 
@@ -307,7 +330,7 @@ async function processOneSearchCidItem(state) {
     // ẩn rồi bật sau — tránh khoảng hở khiến tab vẫn coi như ẩn với mắt người dùng.
     ({ tab, previousActiveTabId, previousWindowId } = await createForegroundTab(url));
     await waitForTabComplete(tab.id);
-    await sleep(SEARCH_TAB_POST_LOAD_BUFFER_MS);
+    await sleep(randomDelay(SEARCH_TAB_POST_LOAD_BUFFER_MIN_MS, SEARCH_TAB_POST_LOAD_BUFFER_MAX_MS));
 
     const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -397,7 +420,7 @@ async function runSearchCidLoop() {
       if (!after || after.status !== 'running') break;
       if (after.index >= after.queue.length) continue;
 
-      await sleep(randomDelay(4000, 8000));
+      await sleep(randomDelay(ITEM_DELAY_MIN_MS, ITEM_DELAY_MAX_MS));
     }
   } finally {
     isSearchCidProcessing = false;
@@ -541,7 +564,7 @@ async function processOneCsvQueueItem(state) {
       target: { tabId: tab.id },
       world: 'MAIN',
       func: readProfileByCidInPageWithWait,
-      args: [String(item.cid), POST_LOAD_BUFFER_MS],
+      args: [String(item.cid), POST_LOAD_BUFFER_MS, randomDelay(PROFILE_SETTLE_MIN_MS, PROFILE_SETTLE_MAX_MS)],
     });
     const profile = results && results[0] && results[0].result;
     if (!profile) {
@@ -604,7 +627,7 @@ async function runCsvQueueLoop() {
       if (!after || after.status !== 'running') break;
       if (after.index >= after.queue.length) continue;
 
-      await sleep(randomDelay(state.delayMinMs || 4000, state.delayMaxMs || 8000));
+      await sleep(randomDelay(state.delayMinMs || ITEM_DELAY_MIN_MS, state.delayMaxMs || ITEM_DELAY_MAX_MS));
     }
   } finally {
     isCsvQueueProcessing = false;
@@ -624,8 +647,8 @@ async function startCsvDetailQueueInternal(items, shopId, shopRegion, maxCount, 
     index: 0,
     shopId,
     shopRegion: shopRegion || 'US',
-    delayMinMs: 4000,
-    delayMaxMs: 8000,
+    delayMinMs: ITEM_DELAY_MIN_MS,
+    delayMaxMs: ITEM_DELAY_MAX_MS,
     autoContinue: !!autoContinue,
     cooldownMs: cooldownMs || 45000,
     processedCount: 0,
@@ -692,7 +715,7 @@ async function processOneCsvSearchQueueItem(state) {
     // ẩn rồi bật active sau — không còn khoảng hở nào khiến tab bị coi là "ẩn" trên màn hình.
     ({ tab, previousActiveTabId, previousWindowId } = await createForegroundTab(url));
     await waitForTabComplete(tab.id);
-    await sleep(SEARCH_TAB_POST_LOAD_BUFFER_MS);
+    await sleep(randomDelay(SEARCH_TAB_POST_LOAD_BUFFER_MIN_MS, SEARCH_TAB_POST_LOAD_BUFFER_MAX_MS));
 
     const searchResults = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -730,7 +753,7 @@ async function processOneCsvSearchQueueItem(state) {
       target: { tabId: tab.id },
       world: 'MAIN',
       func: readProfileByCidInPageWithWait,
-      args: [String(cid), POST_LOAD_BUFFER_MS],
+      args: [String(cid), POST_LOAD_BUFFER_MS, randomDelay(PROFILE_SETTLE_MIN_MS, PROFILE_SETTLE_MAX_MS)],
     });
     const profile = detailResults && detailResults[0] && detailResults[0].result;
     const detail = profile ? normalizeTcmProfileDetail(profile) : null;
@@ -751,6 +774,20 @@ async function processOneCsvSearchQueueItem(state) {
     await restoreForegroundTab(previousActiveTabId, previousWindowId);
   }
 }
+
+// Dừng và giữ nguyên phần chưa xử lý (từ state.index trở đi) vào `pending`, để nút "Lấy tiếp"
+// chạy lại đúng từ chỗ dừng thay vì phải dán lại danh sách và cào từ đầu. Dùng chung cho cả
+// bấm Dừng tay lẫn tự dừng vì lỗi liên tiếp bên dưới.
+async function stopCsvSearchQueuePreservingPending(extraPatch) {
+  const state = await getCsvSearchQueueState();
+  if (!state) return;
+  const remaining = (state.queue || []).slice(state.index || 0);
+  const pending = [...remaining, ...(state.pending || [])];
+  const queue = (state.queue || []).slice(0, state.index || 0);
+  await patchCsvSearchQueueState({ status: 'stopped', queue, pending, currentHandle: null, ...extraPatch });
+}
+
+const CONSECUTIVE_FAILURE_LIMIT = 5;
 
 async function runCsvSearchQueueLoop() {
   if (isCsvSearchQueueProcessing) return;
@@ -773,19 +810,28 @@ async function runCsvSearchQueueLoop() {
       if (fresh.status !== 'running') break;
 
       const results = [...(fresh.results || []), result];
+      const consecutiveFailures = result.ok ? 0 : (fresh.consecutiveFailures || 0) + 1;
       await patchCsvSearchQueueState({
         index: fresh.index + 1,
         results,
         processedCount: (fresh.processedCount || 0) + 1,
         failedCount: (fresh.failedCount || 0) + (result.ok ? 0 : 1),
+        consecutiveFailures,
         currentHandle: null,
       });
+
+      if (consecutiveFailures >= CONSECUTIVE_FAILURE_LIMIT) {
+        await stopCsvSearchQueuePreservingPending({
+          autoStopReason: `${CONSECUTIVE_FAILURE_LIMIT} handle liên tiếp lỗi — tự dừng để tránh cào rác (có thể do giao diện TCM đổi hoặc mất đăng nhập). Kiểm tra rồi bấm "Lấy tiếp".`,
+        });
+        break;
+      }
 
       const after = await getCsvSearchQueueState();
       if (!after || after.status !== 'running') break;
       if (after.index >= after.queue.length) continue;
 
-      await sleep(randomDelay(4000, 8000));
+      await sleep(randomDelay(ITEM_DELAY_MIN_MS, ITEM_DELAY_MAX_MS));
     }
   } finally {
     isCsvSearchQueueProcessing = false;
@@ -809,6 +855,8 @@ async function startCsvSearchCidQueueInternal(items, shopId, shopRegion, maxCoun
     failedCount: 0,
     results: [],
     currentHandle: null,
+    consecutiveFailures: 0,
+    autoStopReason: null,
     startedAt: Date.now(),
     updatedAt: Date.now(),
   });
@@ -823,7 +871,15 @@ async function continueCsvSearchCidQueueInternal() {
   const chunkSize = state.chunkSize || state.pending.length;
   const nextQueue = state.pending.slice(0, chunkSize);
   const nextPending = state.pending.slice(chunkSize);
-  await patchCsvSearchQueueState({ status: 'running', queue: nextQueue, pending: nextPending, index: 0, currentHandle: null });
+  await patchCsvSearchQueueState({
+    status: 'running',
+    queue: nextQueue,
+    pending: nextPending,
+    index: 0,
+    currentHandle: null,
+    consecutiveFailures: 0,
+    autoStopReason: null,
+  });
   runCsvSearchQueueLoop();
   return { continued: true, queued: nextQueue.length, pending: nextPending.length };
 }
@@ -1235,7 +1291,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === 'STOP_CSV_SEARCH_CID_QUEUE') {
     (async () => {
-      await patchCsvSearchQueueState({ status: 'stopped' });
+      await stopCsvSearchQueuePreservingPending({ autoStopReason: null });
       sendResponse({ ok: true });
     })();
     return true;

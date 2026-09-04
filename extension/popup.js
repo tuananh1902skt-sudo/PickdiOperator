@@ -38,15 +38,16 @@ function setStatusText(el, text, color) {
   el.style.color = color || '';
 }
 
-// AGENTS.md network/CORS-fallback rule: khi POST sync tới CRM lỗi, data KHÔNG được mất — giờ
-// job chạy trong background.js (không có clipboard/DOM) nên lưu payload lỗi vào chrome.storage
-// (job.failedPayload) rồi copy vào clipboard ngay khi popup mở lại và render thấy job đó lỗi
-// (xem renderJob) thay vì copy thẳng lúc lỗi xảy ra như bản cũ.
+// AGENTS.md network/CORS-fallback rule: khi POST sync tới CRM lỗi, data KHÔNG được mất — job
+// chạy trong background.js (không có clipboard/DOM) nên lưu payload lỗi vào chrome.storage
+// (job.failedPayload). Copy vào clipboard CHỈ khi user chủ động bấm dòng trạng thái (xem
+// renderJob) — trước đây tự copy ngầm mỗi lần popup mở/render thấy job lỗi, ghi đè bất ngờ bất
+// cứ thứ gì user vừa copy (vd danh sách handle định dán vào ô Kalodata) mà không báo trước.
 async function copyToClipboardFallback(payload, statusEl) {
   try {
     await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
     const prevColor = statusEl.style.color;
-    const prevText = statusEl.textContent;
+    const prevText = statusEl.dataset.baseMessage || statusEl.textContent;
     setStatusText(statusEl, `${prevText} — 📋 Đã copy data vào clipboard, dán thủ công vào CRM Import.`, prevColor);
   } catch (err) {
     console.error('Clipboard fallback failed:', err);
@@ -90,17 +91,22 @@ for (const [jobType, btnId] of Object.entries(JOB_STOP_BUTTONS)) {
   });
 }
 
-const copiedFailedPayloadAt = {};
 function renderJob(jobType, job) {
   const divId = JOB_STATUS_DIVS[jobType];
   if (!divId || !job) return;
   const div = document.getElementById(divId);
   if (!div) return;
   const color = job.status === 'error' ? 'red' : job.status === 'running' ? 'orange' : 'green';
-  setStatusText(div, job.message || '', color);
-  if (job.status === 'error' && job.failedPayload && copiedFailedPayloadAt[jobType] !== job.updatedAt) {
-    copiedFailedPayloadAt[jobType] = job.updatedAt;
-    copyToClipboardFallback(job.failedPayload, div);
+  if (job.status === 'error' && job.failedPayload) {
+    div.dataset.baseMessage = job.message || '';
+    setStatusText(div, `${job.message || ''} — 📋 Bấm vào đây để copy data lỗi vào clipboard.`, color);
+    div.style.cursor = 'pointer';
+    div.onclick = () => copyToClipboardFallback(job.failedPayload, div);
+  } else {
+    delete div.dataset.baseMessage;
+    setStatusText(div, job.message || '', color);
+    div.style.cursor = '';
+    div.onclick = null;
   }
   const stopBtn = document.getElementById(JOB_STOP_BUTTONS[jobType]);
   if (stopBtn) stopBtn.style.display = job.status === 'running' ? 'block' : 'none';
@@ -767,14 +773,15 @@ function renderKalodataCsvStatus(state) {
     setStatusText(div, `🔍 Đang tìm/lấy chi tiết: ${done}/${total} xong (${failed} lỗi)${state.currentHandle ? ` — đang tìm @${state.currentHandle}` : ''}...`, 'orange');
   } else {
     stopBtn.style.display = 'none';
-    const color = failed > 0 ? 'orange' : 'green';
+    const color = state.autoStopReason ? 'red' : failed > 0 ? 'orange' : 'green';
     const label = state.status === 'stopped' ? 'Đã dừng' : 'Hoàn tất';
+    const autoStopPrefix = state.autoStopReason ? `⚠️ ${state.autoStopReason} ` : '';
     if (pending > 0) {
       continueBtn.style.display = 'block';
-      setStatusText(div, `${label} đợt này: ${done}/${total} xong (${failed} lỗi). Còn ${pending} handle chưa xử lý — bấm "Lấy tiếp" khi sẵn sàng.`, color);
+      setStatusText(div, `${autoStopPrefix}${label} đợt này: ${done}/${total} xong (${failed} lỗi). Còn ${pending} handle chưa xử lý — bấm "Lấy tiếp" khi sẵn sàng.`, color);
     } else {
       continueBtn.style.display = 'none';
-      setStatusText(div, `${state.status === 'stopped' ? '⏹' : '✅'} ${label}: ${done}/${total} xong (${failed} lỗi). Xem mục 📦 CSV buffer bên trên để xuất file.`, color);
+      setStatusText(div, `${autoStopPrefix}${state.status === 'stopped' ? '⏹' : '✅'} ${label}: ${done}/${total} xong (${failed} lỗi). Xem mục 📦 CSV buffer bên trên để xuất file.`, color);
     }
   }
 }
