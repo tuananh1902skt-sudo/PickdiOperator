@@ -2,7 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ClipboardList, Send, X, Loader2, CheckCircle2, XCircle, AlertTriangle, Eye, Pencil } from 'lucide-react';
 import type { SequenceStage } from '../../lib/outreachTemplates';
 import type { Campaign } from '../../types';
-import { renderFirstContactEmailHtml } from '../../lib/emailTemplate';
+import {
+  renderFirstContactEmailHtml,
+  renderChallengeInviteEmailHtml,
+  CHALLENGE_INVITE_DEFAULT_INTRO,
+} from '../../lib/emailTemplate';
+import { pickRandomChallengeSubject } from '../../lib/outreachSubjects';
 
 // Chỉ những field branding mà khung mail Piedmont cần để dựng preview giống hệt mail thật
 // (/api/settings/email trả về nhiều hơn thế — phần còn lại là cấu hình SMTP/IMAP).
@@ -65,11 +70,16 @@ interface DraftItem extends ParsedRow {
   sendError?: string;
 }
 
-const STAGE_OPTIONS: { value: SequenceStage; label: string }[] = [
+// 'challenge' không thuộc chuỗi outreach paid-collab (first → reminder) mà là mail mời tham gia
+// contest + đăng video — soạn hoàn toàn ở client từ mẫu cố định (không gọi AI), khung HTML riêng.
+type AdhocStage = SequenceStage | 'challenge';
+
+const STAGE_OPTIONS: { value: AdhocStage; label: string }[] = [
   { value: 'first', label: 'Email đầu tiên (First Contact)' },
   { value: 'reminder_1', label: 'Nhắc lần 1' },
   { value: 'reminder_2', label: 'Nhắc lần 2' },
   { value: 'reminder_3', label: 'Nhắc lần 3 (Close-out)' },
+  { value: 'challenge', label: 'Mời tham gia Challenge (đăng video, không paid)' },
 ];
 
 function randomDelayMs() {
@@ -84,7 +94,7 @@ interface AdhocOutreachViewProps {
 
 export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns }) => {
   const [pasteText, setPasteText] = useState('');
-  const [stage, setStage] = useState<SequenceStage>('first');
+  const [stage, setStage] = useState<AdhocStage>('first');
   const [contentSource, setContentSource] = useState<'ai' | 'template'>('ai');
   const [campaignId, setCampaignId] = useState('');
   const [cc, setCc] = useState('');
@@ -111,7 +121,14 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
 
   // Giữ nguyên thứ tự ưu tiên của server (campaign.name trước, rồi brand trong Settings) —
   // lệch chỗ này là preview hiển thị một tên thương hiệu, mail gửi đi lại ra tên khác.
-  const renderPreview = (item: DraftItem) => renderFirstContactEmailHtml({
+  const renderPreview = (item: DraftItem) => stage === 'challenge' ? renderChallengeInviteEmailHtml({
+    creatorName: item.displayName || item.handle,
+    senderName: branding.senderName,
+    brandName: currentCampaign?.name || branding.brand,
+    logoUrl: branding.logoUrl,
+    primaryColor: branding.primaryColor,
+    introText: item.body,
+  }) : renderFirstContactEmailHtml({
     creatorName: item.displayName || item.handle,
     senderName: branding.senderName,
     brandName: currentCampaign?.name || branding.brand,
@@ -133,6 +150,13 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
 
   const handleGenerate = async () => {
     if (rows.length === 0) return;
+    if (stage === 'challenge') {
+      setError('');
+      setItems(rows.map(r => r.email
+        ? { ...r, displayName: r.displayName || r.handle, subject: pickRandomChallengeSubject(), body: CHALLENGE_INVITE_DEFAULT_INTRO, source: 'template', status: 'draft' as DraftStatus, sendStatus: 'idle' as SendStatus }
+        : { ...r, displayName: r.displayName || r.handle, subject: '', body: '', source: 'template', status: 'skipped_no_email' as DraftStatus, skipReason: 'Thiếu email', sendStatus: 'idle' as SendStatus }));
+      return;
+    }
     setGenerating(true);
     setError('');
     try {
@@ -243,20 +267,20 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
           <div className="flex flex-wrap items-center gap-3 pt-1">
             <select
               value={stage}
-              onChange={e => setStage(e.target.value as SequenceStage)}
+              onChange={e => setStage(e.target.value as AdhocStage)}
               className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
             >
               {STAGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
 
-            <select
+            {stage !== 'challenge' && <select
               value={contentSource}
               onChange={e => setContentSource(e.target.value as 'ai' | 'template')}
               className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
             >
               <option value="ai">Soạn bằng AI</option>
               <option value="template">Dùng mẫu có sẵn</option>
-            </select>
+            </select>}
 
             <select
               value={campaignId}
@@ -376,7 +400,9 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
                       <>
                         {stage !== 'first' && (
                           <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                            Đây chỉ là câu mở đầu (thay câu pitch mặc định) — phần sản phẩm, offer và CTA bên dưới vẫn giữ nguyên như mẫu.
+                            {stage === 'challenge'
+                              ? 'Đây chỉ là câu mở đầu — thể lệ challenge, nút Join, thông tin đợt sale/hashtag bên dưới là mẫu cố định (bấm Xem trước để xem).'
+                              : 'Đây chỉ là câu mở đầu (thay câu pitch mặc định) — phần sản phẩm, offer và CTA bên dưới vẫn giữ nguyên như mẫu.'}
                           </p>
                         )}
                         <textarea

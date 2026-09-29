@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 import { ZipArchive } from 'archiver';
 import { getEmailConfig, saveEmailConfig, DEFAULT_SENDER_NAME } from './src/lib/emailConfig';
 import { sendEmail } from './src/lib/mailer';
-import { renderFirstContactEmailHtml } from './src/lib/emailTemplate';
+import { renderFirstContactEmailHtml, renderChallengeInviteEmailHtml, renderChallengeInviteEmailText } from './src/lib/emailTemplate';
 import { downloadAvatar } from './src/lib/avatars';
 import { Client as QStashClient, Receiver as QStashReceiver } from '@upstash/qstash';
 import { getAiConfig, saveAiConfig, defaultModelFor, AiProviderName } from './src/lib/aiConfig';
@@ -1366,10 +1366,31 @@ app.post('/api/outreach/adhoc/send', async (req, res) => {
       email, subject, body, cc, creatorName, sequenceStage, campaignId,
     }: {
       email: string; subject: string; body: string; cc?: string;
-      creatorName?: string; sequenceStage?: SequenceStage; campaignId?: string;
+      creatorName?: string; sequenceStage?: SequenceStage | 'challenge'; campaignId?: string;
     } = req.body;
     if (!email || !email.trim()) return res.status(400).json({ success: false, message: 'Thiếu email' });
     if (!subject || !body) return res.status(400).json({ success: false, message: 'Thiếu subject/body' });
+
+    // Mail mời challenge không phải lời mời paid collab → giữ nguyên subject (không ép "Paid"),
+    // dùng khung HTML riêng thay vì khung product/offer của Piedmont. body ở đây là câu mở đầu.
+    if (sequenceStage === 'challenge') {
+      const cfg = await getEmailConfig();
+      const camp = campaignId ? await getCampaignById(campaignId) : undefined;
+      const data = {
+        creatorName,
+        senderName: cfg.senderName || DEFAULT_SENDER_NAME,
+        brandName: camp?.name || cfg.brand,
+        logoUrl: cfg.logoUrl,
+        primaryColor: cfg.primaryColor,
+        introText: body,
+      };
+      const { messageId } = await sendEmail({
+        to: email, cc, subject,
+        text: renderChallengeInviteEmailText(data),
+        html: renderChallengeInviteEmailHtml(data),
+      });
+      return res.json({ success: true, data: { messageId } });
+    }
 
     const sendSubject = ensurePaidSubject(subject);
 

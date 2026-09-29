@@ -136,6 +136,37 @@ function shell(headerHtml: string, middleHtml: string, footerHtml: string): stri
 </html>`;
 }
 
+function headerHtml(brandName: string, logoUrl: string | undefined): string {
+  return `
+    <tr>
+      <td align="center" class="pd-pad-lg" style="background:#ffffff;padding:28px 32px;border-bottom:1px solid rgba(26,26,26,0.08);">
+        ${logoBlockHtml(brandName, logoUrl, '#1a1c1c')}
+      </td>
+    </tr>`;
+}
+
+function signOffHtml(senderName: string, senderTitle: string, brandName: string): string {
+  return `
+    <tr>
+      <td class="pd-pad-lg" style="padding:28px 32px 8px;border-top:1px solid rgba(26,26,26,0.08);margin-top:20px;">
+        <p style="margin:20px 0 0;font-size:14px;line-height:1.6;color:#4d4635;">
+          Best regards,<br>
+          <strong style="color:#1a1c1c;">${senderName}</strong><br>
+          <span style="font-size:13px;">${senderTitle} | ${brandName}</span>
+        </p>
+      </td>
+    </tr>`;
+}
+
+function footerHtml(brandName: string): string {
+  return `
+    <tr>
+      <td class="pd-pad-lg" style="padding:20px 32px 28px;color:#7f7663;font-size:11px;line-height:1.5;">
+        &copy; ${brandName}
+      </td>
+    </tr>`;
+}
+
 // First-contact email — "Piedmont Ethereal" template: serif hero greeting, product
 // highlight card, fixed compensation pitch copy, gold gradient CTA, numbered next-steps,
 // and a signed sign-off. Structured fields instead of one freeform body because the
@@ -149,12 +180,7 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
   const primaryColor = data.primaryColor || GOLD_PRIMARY_COLOR;
   const accentColor = data.primaryColor ? data.primaryColor : GOLD_ACCENT_COLOR;
 
-  const header = `
-    <tr>
-      <td align="center" class="pd-pad-lg" style="background:#ffffff;padding:28px 32px;border-bottom:1px solid rgba(26,26,26,0.08);">
-        ${logoBlockHtml(brandName, data.logoUrl, '#1a1c1c')}
-      </td>
-    </tr>`;
+  const header = headerHtml(brandName, data.logoUrl);
 
   const hero = `
     <tr>
@@ -260,16 +286,7 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
       </td>
     </tr>`;
 
-  const signOff = `
-    <tr>
-      <td class="pd-pad-lg" style="padding:28px 32px 8px;border-top:1px solid rgba(26,26,26,0.08);margin-top:20px;">
-        <p style="margin:20px 0 0;font-size:14px;line-height:1.6;color:#4d4635;">
-          Best regards,<br>
-          <strong style="color:#1a1c1c;">${senderName}</strong><br>
-          <span style="font-size:13px;">${senderTitle} | ${brandName}</span>
-        </p>
-      </td>
-    </tr>`;
+  const signOff = signOffHtml(senderName, senderTitle, brandName);
 
   const middle = `
     ${hero}
@@ -279,12 +296,120 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
     ${nextSteps}
     ${signOff}`;
 
-  const footer = `
+  const footer = footerHtml(brandName);
+
+  return shell(header, middle, footer);
+}
+
+
+// --- Challenge invite ---------------------------------------------------------------------
+// Email mời creator (đã/đang có quan hệ với brand) tham gia contest + đăng video trong đợt
+// sale — KHÔNG phải mail thương lượng paid collab: không có product card, flat fee hay
+// "Next Steps" xin rate/địa chỉ. Mục tiêu duy nhất là kéo creator bấm nút join contest và
+// đăng video. Dùng lại đúng khung/CTA/sign-off của mail Piedmont để nhìn cùng một hệ.
+// Link/ngày/hashtag đổi theo từng đợt → chỉ sửa ở CHALLENGE_INVITE_DEFAULTS.
+export const CHALLENGE_INVITE_DEFAULTS = {
+  contestUrl: 'https://creators.euka.ai/contests/dalba2x',
+  ctaLabel: 'Join the Challenge',
+  saleName: 'TikTok Shop Fall Deals For You',
+  saleWindow: 'Oct 4, 5:00 PM PT – Oct 18, 8:59 PM PT (14 days + 4 hours)',
+  hashtag: '#TikTokShopFallDealsForYou',
+};
+
+// Câu mở đầu mặc định — operator sửa được trong ô soạn (giống introText của reminder).
+export const CHALLENGE_INVITE_DEFAULT_INTRO =
+  "We've just sent you a target invitation on TikTok Shop for our creator challenge, and we'd love to have you in it! " +
+  'Please keep an eye out for it and accept it when you see it. Here is how the challenge works:';
+
+export interface ChallengeInviteEmailData {
+  creatorName?: string;
+  senderName?: string;
+  senderTitle?: string;
+  brandName?: string;
+  logoUrl?: string;
+  primaryColor?: string;
+  introText?: string;
+  contestUrl?: string;
+  ctaLabel?: string;
+  saleName?: string;
+  saleWindow?: string;
+  hashtag?: string;
+}
+
+const CHALLENGE_POINTS = [
+  'Cash prizes for 1st, 2nd and 3rd place in GMV',
+  "Even if you don't rank at the top, you can still win cash in our lucky draw",
+  'The more videos you upload, the higher your chances in the lucky draw',
+];
+
+export function renderChallengeInviteEmailHtml(data: ChallengeInviteEmailData): string {
+  const d = CHALLENGE_INVITE_DEFAULTS;
+  const brandName = escapeHtml(data.brandName || 'Pickdi Partner');
+  const creatorName = escapeHtml(data.creatorName || 'Creator');
+  const senderName = escapeHtml(data.senderName || 'Juan');
+  const senderTitle = escapeHtml(data.senderTitle || DEFAULT_SENDER_TITLE);
+  const primaryColor = data.primaryColor || GOLD_PRIMARY_COLOR;
+  const accentColor = data.primaryColor ? data.primaryColor : GOLD_ACCENT_COLOR;
+  const contestUrl = data.contestUrl || d.contestUrl;
+  const saleName = escapeHtml(data.saleName || d.saleName);
+  const saleWindow = escapeHtml(data.saleWindow || d.saleWindow);
+  const hashtag = escapeHtml(data.hashtag || d.hashtag);
+
+  const hero = `
     <tr>
-      <td class="pd-pad-lg" style="padding:20px 32px 28px;color:#7f7663;font-size:11px;line-height:1.5;">
-        &copy; ${brandName}
+      <td align="center" class="pd-pad-lg" style="padding:40px 32px 8px;">
+        <div class="pd-hero-title" style="font-family:Georgia,'Times New Roman',serif;font-size:30px;color:${primaryColor};margin-bottom:12px;">
+          Hi ${creatorName},
+        </div>
+        <p class="pd-hero-text" style="margin:0;font-size:15px;line-height:1.6;color:#4d4635;word-wrap:break-word;overflow-wrap:break-word;">
+          ${escapeHtml(data.introText || CHALLENGE_INVITE_DEFAULT_INTRO)}
+        </p>
       </td>
     </tr>`;
 
-  return shell(header, middle, footer);
+  const card = (label: string, inner: string) => `
+    <tr>
+      <td class="pd-pad-lg" style="padding:24px 32px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FBF6E9;border:1px solid #e6d8a8;border-radius:12px;">
+          <tr>
+            <td align="left" style="padding:22px 24px 24px;">
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:${primaryColor};margin-bottom:14px;">${label}</div>
+              ${inner}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>`;
+
+  const challengeCard = card('The Challenge', `
+    <p style="margin:0;font-size:15px;line-height:1.85;color:#4d4635;word-wrap:break-word;overflow-wrap:break-word;">
+      ${CHALLENGE_POINTS.map(p => `<span style="color:${primaryColor};font-weight:bold;">&#10004;</span> ${escapeHtml(p)}`).join('<br>')}
+    </p>`);
+
+  const saleCard = card('Post During The Sale', `
+    <p style="margin:0 0 10px;font-size:15px;line-height:1.6;color:#1a1c1c;font-weight:bold;">&#128293; ${saleName}</p>
+    <p style="margin:0 0 10px;font-size:15px;line-height:1.6;color:#4d4635;">&#128197; ${saleWindow}</p>
+    <p style="margin:0;font-size:15px;line-height:1.6;color:#4d4635;word-wrap:break-word;overflow-wrap:break-word;">&#127991; Add <strong style="color:#1a1c1c;">${hashtag}</strong> to your videos to reach much higher GMV &mdash; so posting within this window works even better for you.</p>`);
+
+  const middle = `
+    ${hero}
+    ${challengeCard}
+    ${ctaButtonHtml(contestUrl, data.ctaLabel || d.ctaLabel, primaryColor, accentColor).replace('padding:8px 24px 28px', 'padding:24px 24px 4px')}
+    ${saleCard}
+    ${signOffHtml(senderName, senderTitle, brandName).replace('padding:28px 32px 8px', 'padding:12px 32px 8px')}`;
+
+  return shell(headerHtml(brandName, data.logoUrl), middle, footerHtml(brandName));
+}
+
+// Plain-text fallback (multipart/alternative) — cùng nội dung với bản HTML.
+export function renderChallengeInviteEmailText(data: ChallengeInviteEmailData): string {
+  const d = CHALLENGE_INVITE_DEFAULTS;
+  return [
+    `Hi ${data.creatorName || 'Creator'},`,
+    data.introText || CHALLENGE_INVITE_DEFAULT_INTRO,
+    CHALLENGE_POINTS.map(p => `- ${p}`).join('\n'),
+    `${data.ctaLabel || d.ctaLabel}: ${data.contestUrl || d.contestUrl}`,
+    `${data.saleName || d.saleName}: ${data.saleWindow || d.saleWindow}. Add ${data.hashtag || d.hashtag} to your videos to reach much higher GMV, so posting within this window works even better for you.`,
+    `Best regards,\n${data.senderName || 'Juan'}\n${data.senderTitle || DEFAULT_SENDER_TITLE} | ${data.brandName || 'Pickdi Partner'}`,
+  ].join('\n\n');
 }

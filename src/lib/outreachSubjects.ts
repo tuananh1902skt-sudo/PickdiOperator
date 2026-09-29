@@ -59,3 +59,20 @@ export function ensurePaidSubject(subject: string): string {
   if (/^Re:\s*/i.test(subject)) return subject.replace(/^Re:\s*/i, 'Re: Paid ');
   return `Paid ${subject}`;
 }
+
+// Challenge-invite subjects (mail mời tham gia contest + đăng video) — KHÔNG chứa "Paid" và
+// không đi qua ensurePaidSubject, vì đây không phải lời mời paid collab.
+export const CHALLENGE_SUBJECT_POOL: string[] = [
+  "d'Alba Creator Challenge — Cash Prizes Up for Grabs",
+  "Join the d'Alba Challenge & Win Cash Prizes",
+  "You're Invited: d'Alba Creator Challenge",
+  "d'Alba Global | Creator Challenge — Win Cash Prizes",
+  "Cash Prizes + Lucky Draw | d'Alba Creator Challenge",
+  "Post & Win — d'Alba Creator Challenge",
+  "d'Alba Global x You — Join Our Creator Challenge",
+  "Win Cash With d'Alba — Creator Challenge Is Live",
+];
+
+export function pickRandomChallengeSubject(): string {
+  return CHALLENGE_SUBJECT_POOL[Math.floor(Math.random() * CHALLENGE_SUBJECT_POOL.length)];
+}
