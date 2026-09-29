@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 import { ZipArchive } from 'archiver';
 import { getEmailConfig, saveEmailConfig, DEFAULT_SENDER_NAME } from './src/lib/emailConfig';
 import { sendEmail } from './src/lib/mailer';
-import { renderFirstContactEmailHtml, renderChallengeInviteEmailHtml, renderChallengeInviteEmailText } from './src/lib/emailTemplate';
+import { renderFirstContactEmailHtml, renderChallengeInviteEmailHtml, renderChallengeInviteEmailText, renderDealOfferEmailHtml, renderDealOfferEmailText, type DealOfferEmailData } from './src/lib/emailTemplate';
 import { downloadAvatar } from './src/lib/avatars';
 import { Client as QStashClient, Receiver as QStashReceiver } from '@upstash/qstash';
 import { getAiConfig, saveAiConfig, defaultModelFor, AiProviderName } from './src/lib/aiConfig';
@@ -1363,10 +1363,11 @@ app.post('/api/outreach/adhoc/generate', async (req, res) => {
 app.post('/api/outreach/adhoc/send', async (req, res) => {
   try {
     const {
-      email, subject, body, cc, creatorName, sequenceStage, campaignId,
+      email, subject, body, cc, creatorName, sequenceStage, campaignId, deal,
     }: {
       email: string; subject: string; body: string; cc?: string;
-      creatorName?: string; sequenceStage?: SequenceStage | 'challenge'; campaignId?: string;
+      creatorName?: string; sequenceStage?: SequenceStage | 'challenge' | 'offer'; campaignId?: string;
+      deal?: Pick<DealOfferEmailData, 'productName' | 'videoCount' | 'totalFee' | 'referenceVideoUrl' | 'paymentTerms'>;
     } = req.body;
     if (!email || !email.trim()) return res.status(400).json({ success: false, message: 'Thiếu email' });
     if (!subject || !body) return res.status(400).json({ success: false, message: 'Thiếu subject/body' });
@@ -1388,6 +1389,38 @@ app.post('/api/outreach/adhoc/send', async (req, res) => {
         to: email, cc, subject,
         text: renderChallengeInviteEmailText(data),
         html: renderChallengeInviteEmailHtml(data),
+      });
+      return res.json({ success: true, data: { messageId } });
+    }
+
+    // Mail chốt deal (số video + tổng phí đã duyệt): khung riêng, subject vẫn phải có "Paid".
+    if (sequenceStage === 'offer') {
+      const cfg = await getEmailConfig();
+      const camp = campaignId ? await getCampaignById(campaignId) : undefined;
+      const data: DealOfferEmailData = {
+        creatorName,
+        senderName: cfg.senderName || DEFAULT_SENDER_NAME,
+        brandName: camp?.name || cfg.brand,
+        logoUrl: cfg.logoUrl,
+        primaryColor: cfg.primaryColor,
+        introText: body,
+        productName: deal?.productName || camp?.products?.[0]?.name,
+        productImageUrl: camp?.products?.[0]?.imageUrl,
+        productUrl: camp?.products?.[0]?.productUrl,
+        productRating: camp?.products?.[0]?.rating,
+        productReviewCount: camp?.products?.[0]?.reviewCount,
+        productSoldCount: camp?.products?.[0]?.soldCount,
+        productHighlights: camp?.products?.[0]?.highlights,
+        videoCount: deal?.videoCount,
+        totalFee: deal?.totalFee,
+        referenceVideoUrl: deal?.referenceVideoUrl,
+        paymentTerms: deal?.paymentTerms,
+        ctaHref: cfg.email ? `mailto:${cfg.email}?subject=${encodeURIComponent(ensurePaidSubject(subject))}` : undefined,
+      };
+      const { messageId } = await sendEmail({
+        to: email, cc, subject: ensurePaidSubject(subject),
+        text: renderDealOfferEmailText(data),
+        html: renderDealOfferEmailHtml(data),
       });
       return res.json({ success: true, data: { messageId } });
     }

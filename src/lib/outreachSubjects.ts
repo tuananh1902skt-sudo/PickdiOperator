@@ -76,3 +76,17 @@ export const CHALLENGE_SUBJECT_POOL: string[] = [
 export function pickRandomChallengeSubject(): string {
   return CHALLENGE_SUBJECT_POOL[Math.floor(Math.random() * CHALLENGE_SUBJECT_POOL.length)];
 }
+
+// Deal-offer subjects (mail chốt số video + tổng phí đã duyệt) — vẫn là mail paid nên chứa "Paid",
+// nhưng nói thẳng "offer" thay vì "opportunity" vì rate đã cụ thể.
+export const DEAL_OFFER_SUBJECT_POOL: string[] = [
+  "Your Paid Collaboration Offer | d'Alba Global",
+  "d'Alba Global | Paid Collaboration Offer for You",
+  "Paid Collaboration Offer — d'Alba Global",
+  "Let's Make It Official | Paid Collaboration with d'Alba",
+  "d'Alba Global x You — Paid Collaboration Offer",
+];
+
+export function pickRandomDealOfferSubject(): string {
+  return DEAL_OFFER_SUBJECT_POOL[Math.floor(Math.random() * DEAL_OFFER_SUBJECT_POOL.length)];
+}

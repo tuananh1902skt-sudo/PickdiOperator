@@ -167,6 +167,50 @@ function footerHtml(brandName: string): string {
     </tr>`;
 }
 
+type ProductCardData = Pick<FirstContactEmailTemplateData,
+  'productName' | 'productImageUrl' | 'productRating' | 'productReviewCount' | 'productSoldCount' | 'productHighlights'>;
+
+// Product highlight card (image, rating line, USP checklist) — shared by first-contact and
+// deal-offer emails so the product block looks identical in both.
+function productCardHtml(data: ProductCardData, primaryColor: string): string {
+  const ratingLine = (data.productRating != null || data.productReviewCount != null || data.productSoldCount)
+    ? [
+        data.productRating != null ? `&#11088; ${data.productRating} Rating` : '',
+        data.productReviewCount != null ? `${data.productReviewCount} Reviews` : '',
+        data.productSoldCount ? `${escapeHtml(data.productSoldCount)} Sold` : '',
+      ].filter(Boolean).join(' &nbsp;|&nbsp; ')
+    : '';
+
+  const highlightsHtml = data.productHighlights && data.productHighlights.length > 0
+    ? data.productHighlights.map(h => `<span style="color:${primaryColor};font-weight:bold;">&#10004;</span> ${escapeHtml(h)}`).join('<br>')
+    : '';
+
+  const productInfoHtml = `
+    <span style="display:block;text-align:center;font-size:11px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:${primaryColor};margin-bottom:8px;">Signature Collection</span>
+    <span style="display:block;text-align:center;font-size:17px;line-height:1.4;font-weight:500;color:#1a1c1c;word-wrap:break-word;overflow-wrap:break-word;">${escapeHtml(data.productName || '')}</span>
+    ${ratingLine ? `<span style="display:block;text-align:center;margin-top:10px;font-size:13px;line-height:1.4;color:#8a7f30;">${ratingLine}</span>` : ''}
+    ${highlightsHtml ? `<div style="margin-top:16px;text-align:left;width:100%;font-size:14px;line-height:1.85;color:#4d4635;">${highlightsHtml}</div>` : ''}`;
+
+  // Image always centered on top, text always below — never side-by-side — so the card
+  // renders correctly with zero dependency on @media support (see MOBILE_STYLE comment).
+  return data.productName
+    ? `
+    <tr>
+      <td class="pd-pad-lg" style="padding:24px 32px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid rgba(26,26,26,0.1);">
+          <tr>
+            <td align="center" style="padding:24px;">
+              ${data.productImageUrl ? `
+              <img src="${escapeHtml(data.productImageUrl)}" alt="${escapeHtml(data.productName)}" width="180" style="display:block;width:180px;max-width:60%;height:auto;border:0;object-fit:contain;margin:0 auto 20px;">
+              ` : ''}
+              ${productInfoHtml}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>` : '';
+}
+
 // First-contact email — "Piedmont Ethereal" template: serif hero greeting, product
 // highlight card, fixed compensation pitch copy, gold gradient CTA, numbered next-steps,
 // and a signed sign-off. Structured fields instead of one freeform body because the
@@ -195,42 +239,7 @@ export function renderFirstContactEmailHtml(data: FirstContactEmailTemplateData)
       </td>
     </tr>`;
 
-  const ratingLine = (data.productRating != null || data.productReviewCount != null || data.productSoldCount)
-    ? [
-        data.productRating != null ? `&#11088; ${data.productRating} Rating` : '',
-        data.productReviewCount != null ? `${data.productReviewCount} Reviews` : '',
-        data.productSoldCount ? `${escapeHtml(data.productSoldCount)} Sold` : '',
-      ].filter(Boolean).join(' &nbsp;|&nbsp; ')
-    : '';
-
-  const highlightsHtml = data.productHighlights && data.productHighlights.length > 0
-    ? data.productHighlights.map(h => `<span style="color:${primaryColor};font-weight:bold;">&#10004;</span> ${escapeHtml(h)}`).join('<br>')
-    : '';
-
-  const productInfoHtml = `
-    <span style="display:block;text-align:center;font-size:11px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:${primaryColor};margin-bottom:8px;">Signature Collection</span>
-    <span style="display:block;text-align:center;font-size:17px;line-height:1.4;font-weight:500;color:#1a1c1c;word-wrap:break-word;overflow-wrap:break-word;">${escapeHtml(data.productName || '')}</span>
-    ${ratingLine ? `<span style="display:block;text-align:center;margin-top:10px;font-size:13px;line-height:1.4;color:#8a7f30;">${ratingLine}</span>` : ''}
-    ${highlightsHtml ? `<div style="margin-top:16px;text-align:left;width:100%;font-size:14px;line-height:1.85;color:#4d4635;">${highlightsHtml}</div>` : ''}`;
-
-  // Image always centered on top, text always below — never side-by-side — so the card
-  // renders correctly with zero dependency on @media support (see MOBILE_STYLE comment).
-  const productBlock = data.productName
-    ? `
-    <tr>
-      <td class="pd-pad-lg" style="padding:24px 32px 0;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid rgba(26,26,26,0.1);">
-          <tr>
-            <td align="center" style="padding:24px;">
-              ${data.productImageUrl ? `
-              <img src="${escapeHtml(data.productImageUrl)}" alt="${escapeHtml(data.productName)}" width="180" style="display:block;width:180px;max-width:60%;height:auto;border:0;object-fit:contain;margin:0 auto 20px;">
-              ` : ''}
-              ${productInfoHtml}
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>` : '';
+  const productBlock = productCardHtml(data, primaryColor);
 
   const offer = `
     <tr>
@@ -412,4 +421,140 @@ export function renderChallengeInviteEmailText(data: ChallengeInviteEmailData): 
     `${data.saleName || d.saleName}: ${data.saleWindow || d.saleWindow}. Add ${data.hashtag || d.hashtag} to your videos to reach much higher GMV, so posting within this window works even better for you.`,
     `Best regards,\n${data.senderName || 'Juan'}\n${data.senderTitle || DEFAULT_SENDER_TITLE} | ${data.brandName || 'Pickdi Partner'}`,
   ].join('\n\n');
+}
+
+
+// --- Deal offer ---------------------------------------------------------------------------
+// Email chốt một deal paid cụ thể (số video + tổng phí đã được client duyệt) gửi cho creator đã
+// có tín hiệu quan tâm/được brand nhắm tới — khác mail first-contact (không hỏi rate, không có
+// product card mặc định) vì rate đã có sẵn. Cùng khung Piedmont để nhìn một hệ với các mail khác.
+// Payment luôn net-30 sau khi giao nội dung (quy tắc campaign, không có trả trước).
+export interface DealOfferEmailData {
+  creatorName?: string;
+  senderName?: string;
+  senderTitle?: string;
+  brandName?: string;
+  logoUrl?: string;
+  primaryColor?: string;
+  introText?: string;
+  // Số video và tổng phí hiển thị nguyên văn, vd "5" và "$2,000".
+  videoCount?: string;
+  totalFee?: string;
+  // Link video của creator mà brand thích (tuỳ chọn) — hiện như một dòng "we loved your video".
+  referenceVideoUrl?: string;
+  productName?: string;
+  productImageUrl?: string;
+  productUrl?: string;
+  productRating?: number;
+  productReviewCount?: number;
+  productSoldCount?: string;
+  productHighlights?: string[];
+  paymentTerms?: string;
+  ctaLabel?: string;
+  ctaHref?: string;
+}
+
+export const DEAL_OFFER_DEFAULT_PAYMENT_TERMS = 'Net-30 after the content is delivered';
+export const DEAL_OFFER_DEFAULT_INTRO =
+  "Thanks so much for your interest in working with us! We love your content and would be excited to make this a paid collaboration. Here's what we'd like to propose:";
+
+function dealOfferRows(data: DealOfferEmailData): Array<[string, string]> {
+  const rows: Array<[string, string]> = [];
+  if (data.videoCount) rows.push(['Deliverables', `${data.videoCount} TikTok video${data.videoCount === '1' ? '' : 's'}`]);
+  if (data.totalFee) rows.push(['Total fee', data.totalFee]);
+  rows.push(['Payment', data.paymentTerms || DEAL_OFFER_DEFAULT_PAYMENT_TERMS]);
+  return rows;
+}
+
+export function renderDealOfferEmailHtml(data: DealOfferEmailData): string {
+  const brandName = escapeHtml(data.brandName || 'Pickdi Partner');
+  const creatorName = escapeHtml(data.creatorName || 'Creator');
+  const senderName = escapeHtml(data.senderName || 'Juan');
+  const senderTitle = escapeHtml(data.senderTitle || DEFAULT_SENDER_TITLE);
+  const primaryColor = data.primaryColor || GOLD_PRIMARY_COLOR;
+  const accentColor = data.primaryColor ? data.primaryColor : GOLD_ACCENT_COLOR;
+
+  const hero = `
+    <tr>
+      <td align="center" class="pd-pad-lg" style="padding:40px 32px 8px;">
+        <div class="pd-hero-title" style="font-family:Georgia,'Times New Roman',serif;font-size:30px;color:${primaryColor};margin-bottom:12px;">
+          Hi ${creatorName},
+        </div>
+        <p class="pd-hero-text" style="margin:0;font-size:15px;line-height:1.6;color:#4d4635;word-wrap:break-word;overflow-wrap:break-word;">
+          ${escapeHtml(data.introText || DEAL_OFFER_DEFAULT_INTRO)}
+        </p>
+      </td>
+    </tr>`;
+
+  const rows = dealOfferRows(data).map(([label, value], i, all) => `
+    <tr>
+      <td valign="top" style="padding:10px 0;${i < all.length - 1 ? 'border-bottom:1px solid #e6d8a8;' : ''}font-size:13px;color:#7f7663;width:110px;">${escapeHtml(label)}</td>
+      <td valign="top" style="padding:10px 0;${i < all.length - 1 ? 'border-bottom:1px solid #e6d8a8;' : ''}font-size:${label === 'Total fee' ? '20px' : '15px'};line-height:1.5;font-weight:${label === 'Total fee' ? '700' : '600'};color:${label === 'Total fee' ? primaryColor : '#1a1c1c'};word-wrap:break-word;overflow-wrap:break-word;">${escapeHtml(value)}</td>
+    </tr>`).join('');
+
+  const dealCard = `
+    <tr>
+      <td class="pd-pad-lg" style="padding:24px 32px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FBF6E9;border:1px solid #e6d8a8;border-radius:12px;">
+          <tr>
+            <td align="left" style="padding:22px 24px 14px;">
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:${primaryColor};margin-bottom:6px;">Paid Collaboration Offer</div>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows}</table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>`;
+
+  const referenceBlock = data.referenceVideoUrl ? `
+    <tr>
+      <td align="center" class="pd-pad-lg" style="padding:20px 32px 0;font-size:14px;line-height:1.6;color:#4d4635;">
+        &#127916; We especially enjoyed
+        <a href="${escapeHtml(data.referenceVideoUrl)}" style="color:${primaryColor};font-weight:600;">this video of yours</a>
+        &mdash; that's the kind of energy we're hoping for.
+      </td>
+    </tr>` : '';
+
+  const nextSteps = `
+    <tr>
+      <td class="pd-pad-lg" style="padding:24px 32px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FBF6E9;border:1px solid #e6d8a8;border-radius:12px;">
+          <tr>
+            <td style="padding:20px 24px 22px;">
+              <p style="margin:0;font-size:14px;line-height:1.7;color:#4d4635;">
+                If this works for you, just let us know and we'll get things moving.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>`;
+
+  const ctaHref = data.productUrl || data.ctaHref;
+  const cta = ctaHref
+    ? ctaButtonHtml(ctaHref, data.ctaLabel || (data.productUrl ? DEFAULT_PRODUCT_CTA_LABEL : 'Reply to accept'), primaryColor, accentColor)
+    : '';
+
+  const middle = `
+    ${hero}
+    ${productCardHtml(data, primaryColor)}
+    ${cta}
+    ${dealCard}
+    ${referenceBlock}
+    ${nextSteps}
+    ${signOffHtml(senderName, senderTitle, brandName).replace('padding:28px 32px 8px', 'padding:12px 32px 8px')}`;
+
+  return shell(headerHtml(brandName, data.logoUrl), middle, footerHtml(brandName));
+}
+
+// Plain-text fallback (multipart/alternative) — cùng nội dung với bản HTML.
+export function renderDealOfferEmailText(data: DealOfferEmailData): string {
+  return [
+    `Hi ${data.creatorName || 'Creator'},`,
+    data.introText || DEAL_OFFER_DEFAULT_INTRO,
+    dealOfferRows(data).map(([l, v]) => `- ${l}: ${v}`).join('\n'),
+    data.referenceVideoUrl ? `We especially enjoyed this video of yours: ${data.referenceVideoUrl}` : '',
+    'If this works for you, just let us know and we\'ll get things moving.',
+    `Best regards,\n${data.senderName || 'Juan'}\n${data.senderTitle || DEFAULT_SENDER_TITLE} | ${data.brandName || 'Pickdi Partner'}`,
+  ].filter(Boolean).join('\n\n');
 }
