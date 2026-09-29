@@ -1363,11 +1363,10 @@ app.post('/api/outreach/adhoc/generate', async (req, res) => {
 app.post('/api/outreach/adhoc/send', async (req, res) => {
   try {
     const {
-      email, subject, body, cc, creatorName, sequenceStage, campaignId, deal,
+      email, subject, body, cc, creatorName, sequenceStage, campaignId,
     }: {
       email: string; subject: string; body: string; cc?: string;
-      creatorName?: string; sequenceStage?: SequenceStage | 'challenge' | 'offer'; campaignId?: string;
-      deal?: Pick<DealOfferEmailData, 'productName' | 'videoCount' | 'totalFee' | 'referenceVideoUrl' | 'paymentTerms'>;
+      creatorName?: string; sequenceStage?: SequenceStage | 'challenge'; campaignId?: string;
     } = req.body;
     if (!email || !email.trim()) return res.status(400).json({ success: false, message: 'Thiếu email' });
     if (!subject || !body) return res.status(400).json({ success: false, message: 'Thiếu subject/body' });
@@ -1389,38 +1388,6 @@ app.post('/api/outreach/adhoc/send', async (req, res) => {
         to: email, cc, subject,
         text: renderChallengeInviteEmailText(data),
         html: renderChallengeInviteEmailHtml(data),
-      });
-      return res.json({ success: true, data: { messageId } });
-    }
-
-    // Mail chốt deal (số video + tổng phí đã duyệt): khung riêng, subject vẫn phải có "Paid".
-    if (sequenceStage === 'offer') {
-      const cfg = await getEmailConfig();
-      const camp = campaignId ? await getCampaignById(campaignId) : undefined;
-      const data: DealOfferEmailData = {
-        creatorName,
-        senderName: cfg.senderName || DEFAULT_SENDER_NAME,
-        brandName: camp?.name || cfg.brand,
-        logoUrl: cfg.logoUrl,
-        primaryColor: cfg.primaryColor,
-        introText: body,
-        productName: deal?.productName || camp?.products?.[0]?.name,
-        productImageUrl: camp?.products?.[0]?.imageUrl,
-        productUrl: camp?.products?.[0]?.productUrl,
-        productRating: camp?.products?.[0]?.rating,
-        productReviewCount: camp?.products?.[0]?.reviewCount,
-        productSoldCount: camp?.products?.[0]?.soldCount,
-        productHighlights: camp?.products?.[0]?.highlights,
-        videoCount: deal?.videoCount,
-        totalFee: deal?.totalFee,
-        referenceVideoUrl: deal?.referenceVideoUrl,
-        paymentTerms: deal?.paymentTerms,
-        ctaHref: cfg.email ? `mailto:${cfg.email}?subject=${encodeURIComponent(ensurePaidSubject(subject))}` : undefined,
-      };
-      const { messageId } = await sendEmail({
-        to: email, cc, subject: ensurePaidSubject(subject),
-        text: renderDealOfferEmailText(data),
-        html: renderDealOfferEmailHtml(data),
       });
       return res.json({ success: true, data: { messageId } });
     }
@@ -1457,6 +1424,59 @@ app.post('/api/outreach/adhoc/send', async (req, res) => {
     res.json({ success: true, data: { messageId } });
   } catch (err: any) {
     console.error('Ad-hoc outreach send error:', err);
+    res.status(500).json({ success: false, message: err?.message || 'Gửi email thất bại. Vui lòng kiểm tra cấu hình Email trong Cài đặt và thử lại.' });
+  }
+});
+
+// --- Deal Offer API ---
+// Module "Chốt Deal" (tách khỏi Dán & Gửi Outreach): mỗi creator một deal riêng (số video, tổng
+// phí, link video...) đã được client duyệt. Gửi từng mail một, không dedupe/ghi lịch sử — Google
+// Sheet vẫn là nơi theo dõi. Subject luôn có "Paid".
+app.post('/api/outreach/deal/send', async (req, res) => {
+  try {
+    const {
+      email, subject, body, cc, creatorName, campaignId, deal,
+    }: {
+      email: string; subject: string; body: string; cc?: string;
+      creatorName?: string; campaignId?: string;
+      deal?: Pick<DealOfferEmailData, 'productName' | 'videoCount' | 'totalFee' | 'referenceVideoUrl' | 'paymentTerms'>;
+    } = req.body;
+    if (!email || !email.trim()) return res.status(400).json({ success: false, message: 'Thiếu email' });
+    if (!subject || !body) return res.status(400).json({ success: false, message: 'Thiếu subject/body' });
+    if (!deal?.videoCount || !deal?.totalFee) return res.status(400).json({ success: false, message: 'Thiếu số video hoặc tổng phí' });
+
+    const cfg = await getEmailConfig();
+    const camp = campaignId ? await getCampaignById(campaignId) : undefined;
+    const product = camp?.products?.[0];
+    const sendSubject = ensurePaidSubject(subject);
+    const data: DealOfferEmailData = {
+      creatorName,
+      senderName: cfg.senderName || DEFAULT_SENDER_NAME,
+      brandName: camp?.name || cfg.brand,
+      logoUrl: cfg.logoUrl,
+      primaryColor: cfg.primaryColor,
+      introText: body,
+      productName: deal.productName || product?.name,
+      productImageUrl: product?.imageUrl,
+      productUrl: product?.productUrl,
+      productRating: product?.rating,
+      productReviewCount: product?.reviewCount,
+      productSoldCount: product?.soldCount,
+      productHighlights: product?.highlights,
+      videoCount: deal.videoCount,
+      totalFee: deal.totalFee,
+      referenceVideoUrl: deal.referenceVideoUrl,
+      paymentTerms: deal.paymentTerms,
+      ctaHref: cfg.email ? `mailto:${cfg.email}?subject=${encodeURIComponent(sendSubject)}` : undefined,
+    };
+    const { messageId } = await sendEmail({
+      to: email, cc, subject: sendSubject,
+      text: renderDealOfferEmailText(data),
+      html: renderDealOfferEmailHtml(data),
+    });
+    res.json({ success: true, data: { messageId } });
+  } catch (err: any) {
+    console.error('Deal offer send error:', err);
     res.status(500).json({ success: false, message: err?.message || 'Gửi email thất bại. Vui lòng kiểm tra cấu hình Email trong Cài đặt và thử lại.' });
   }
 });

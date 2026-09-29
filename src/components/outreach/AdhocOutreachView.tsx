@@ -5,11 +5,9 @@ import type { Campaign } from '../../types';
 import {
   renderFirstContactEmailHtml,
   renderChallengeInviteEmailHtml,
-  renderDealOfferEmailHtml,
   CHALLENGE_INVITE_DEFAULT_INTRO,
-  DEAL_OFFER_DEFAULT_INTRO,
 } from '../../lib/emailTemplate';
-import { pickRandomChallengeSubject, pickRandomDealOfferSubject } from '../../lib/outreachSubjects';
+import { pickRandomChallengeSubject } from '../../lib/outreachSubjects';
 
 // Chỉ những field branding mà khung mail Piedmont cần để dựng preview giống hệt mail thật
 // (/api/settings/email trả về nhiều hơn thế — phần còn lại là cấu hình SMTP/IMAP).
@@ -74,12 +72,7 @@ interface DraftItem extends ParsedRow {
 
 // 'challenge' không thuộc chuỗi outreach paid-collab (first → reminder) mà là mail mời tham gia
 // contest + đăng video — soạn hoàn toàn ở client từ mẫu cố định (không gọi AI), khung HTML riêng.
-// 'offer' = mail chốt deal paid cụ thể (số video + tổng phí đã được client duyệt), cũng dựng ở client.
-type AdhocStage = SequenceStage | 'challenge' | 'offer';
-
-// Thông số deal áp chung cho cả đợt dán (vd "5 video / $2,000") — nhập một lần ở bước dán.
-interface DealTerms { productName: string; videoCount: string; totalFee: string; referenceVideoUrl: string; paymentTerms: string }
-const EMPTY_DEAL: DealTerms = { productName: '', videoCount: '5', totalFee: '', referenceVideoUrl: '', paymentTerms: '' };
+type AdhocStage = SequenceStage | 'challenge';
 
 const STAGE_OPTIONS: { value: AdhocStage; label: string }[] = [
   { value: 'first', label: 'Email đầu tiên (First Contact)' },
@@ -87,7 +80,6 @@ const STAGE_OPTIONS: { value: AdhocStage; label: string }[] = [
   { value: 'reminder_2', label: 'Nhắc lần 2' },
   { value: 'reminder_3', label: 'Nhắc lần 3 (Close-out)' },
   { value: 'challenge', label: 'Mời tham gia Challenge (đăng video, không paid)' },
-  { value: 'offer', label: 'Chốt deal paid (số video + tổng phí đã duyệt)' },
 ];
 
 function randomDelayMs() {
@@ -106,7 +98,6 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
   const [contentSource, setContentSource] = useState<'ai' | 'template'>('ai');
   const [campaignId, setCampaignId] = useState('');
   const [cc, setCc] = useState('');
-  const [deal, setDeal] = useState<DealTerms>(EMPTY_DEAL);
   const [items, setItems] = useState<DraftItem[] | null>(null);
   const [branding, setBranding] = useState<EmailBranding>({});
   const [previewHandle, setPreviewHandle] = useState<string | null>(null);
@@ -130,26 +121,7 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
 
   // Giữ nguyên thứ tự ưu tiên của server (campaign.name trước, rồi brand trong Settings) —
   // lệch chỗ này là preview hiển thị một tên thương hiệu, mail gửi đi lại ra tên khác.
-  const renderPreview = (item: DraftItem) => stage === 'offer' ? renderDealOfferEmailHtml({
-    creatorName: item.displayName || item.handle,
-    senderName: branding.senderName,
-    brandName: currentCampaign?.name || branding.brand,
-    logoUrl: branding.logoUrl,
-    primaryColor: branding.primaryColor,
-    introText: item.body,
-    productName: deal.productName.trim() || product?.name,
-    productImageUrl: product?.imageUrl,
-    productUrl: product?.productUrl,
-    productRating: product?.rating,
-    productReviewCount: product?.reviewCount,
-    productSoldCount: product?.soldCount,
-    productHighlights: product?.highlights,
-    videoCount: deal.videoCount.trim() || undefined,
-    totalFee: deal.totalFee.trim() || undefined,
-    referenceVideoUrl: deal.referenceVideoUrl.trim() || undefined,
-    paymentTerms: deal.paymentTerms.trim() || undefined,
-    ctaHref: branding.email ? `mailto:${branding.email}?subject=${encodeURIComponent(item.subject)}` : undefined,
-  }) : stage === 'challenge' ? renderChallengeInviteEmailHtml({
+  const renderPreview = (item: DraftItem) => stage === 'challenge' ? renderChallengeInviteEmailHtml({
     creatorName: item.displayName || item.handle,
     senderName: branding.senderName,
     brandName: currentCampaign?.name || branding.brand,
@@ -178,16 +150,10 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
 
   const handleGenerate = async () => {
     if (rows.length === 0) return;
-    if (stage === 'challenge' || stage === 'offer') {
-      if (stage === 'offer' && (!deal.totalFee.trim() || !deal.videoCount.trim())) {
-        setError('Nhập số video và tổng phí trước khi soạn mail chốt deal.');
-        return;
-      }
+    if (stage === 'challenge') {
       setError('');
-      const pickSubject = stage === 'offer' ? pickRandomDealOfferSubject : pickRandomChallengeSubject;
-      const intro = stage === 'offer' ? DEAL_OFFER_DEFAULT_INTRO : CHALLENGE_INVITE_DEFAULT_INTRO;
       setItems(rows.map(r => r.email
-        ? { ...r, displayName: r.displayName || r.handle, subject: pickSubject(), body: intro, source: 'template', status: 'draft' as DraftStatus, sendStatus: 'idle' as SendStatus }
+        ? { ...r, displayName: r.displayName || r.handle, subject: pickRandomChallengeSubject(), body: CHALLENGE_INVITE_DEFAULT_INTRO, source: 'template', status: 'draft' as DraftStatus, sendStatus: 'idle' as SendStatus }
         : { ...r, displayName: r.displayName || r.handle, subject: '', body: '', source: 'template', status: 'skipped_no_email' as DraftStatus, skipReason: 'Thiếu email', sendStatus: 'idle' as SendStatus }));
       return;
     }
@@ -227,13 +193,6 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
           creatorName: item.displayName,
           sequenceStage: stage,
           campaignId: campaignId || undefined,
-          deal: stage === 'offer' ? {
-            productName: deal.productName.trim() || undefined,
-            videoCount: deal.videoCount.trim(),
-            totalFee: deal.totalFee.trim(),
-            referenceVideoUrl: deal.referenceVideoUrl.trim() || undefined,
-            paymentTerms: deal.paymentTerms.trim() || undefined,
-          } : undefined,
         }),
       });
       const data = await res.json();
@@ -314,7 +273,7 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
               {STAGE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
 
-            {stage !== 'challenge' && stage !== 'offer' && <select
+            {stage !== 'challenge' && <select
               value={contentSource}
               onChange={e => setContentSource(e.target.value as 'ai' | 'template')}
               className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
@@ -349,29 +308,6 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
               Soạn nháp cho {rows.length} creator
             </button>
           </div>
-
-          {stage === 'offer' && (
-            <div className="grid grid-cols-2 gap-3 pt-1">
-              {([
-                ['productName', 'Sản phẩm (bỏ trống = sản phẩm đầu của campaign)'],
-                ['videoCount', 'Số video (vd 5)'],
-                ['totalFee', 'Tổng phí (vd $2,000)'],
-                ['referenceVideoUrl', 'Link video của creator (tuỳ chọn)'],
-                ['paymentTerms', 'Điều khoản thanh toán (bỏ trống = Net-30 sau khi giao nội dung)'],
-              ] as [keyof DealTerms, string][]).map(([key, ph]) => (
-                <input
-                  key={key}
-                  value={deal[key]}
-                  onChange={e => setDeal(d => ({ ...d, [key]: e.target.value }))}
-                  placeholder={ph}
-                  className="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
-                />
-              ))}
-              <p className="col-span-2 text-[11px] text-slate-500 dark:text-slate-400">
-                Chỉ dùng cho rate đã được client duyệt. Thông số này áp cho cả đợt dán — deal khác giá thì dán/soạn đợt riêng.
-              </p>
-            </div>
-          )}
 
           {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
         </div>
@@ -464,9 +400,7 @@ export const AdhocOutreachView: React.FC<AdhocOutreachViewProps> = ({ campaigns 
                       <>
                         {stage !== 'first' && (
                           <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                            {stage === 'offer'
-                              ? 'Đây chỉ là câu mở đầu — bảng deal (số video, tổng phí, thanh toán) lấy từ ô nhập ở bước dán (bấm Xem trước để xem).'
-                              : stage === 'challenge'
+                            {stage === 'challenge'
                               ? 'Đây chỉ là câu mở đầu — thể lệ challenge, nút Join, thông tin đợt sale/hashtag bên dưới là mẫu cố định (bấm Xem trước để xem).'
                               : 'Đây chỉ là câu mở đầu (thay câu pitch mặc định) — phần sản phẩm, offer và CTA bên dưới vẫn giữ nguyên như mẫu.'}
                           </p>

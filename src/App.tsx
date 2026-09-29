@@ -10,6 +10,7 @@ import { OutreachView } from './components/outreach/OutreachView';
 import { EmailComposerModal } from './components/outreach/EmailComposerModal';
 import { BulkOutreachModal } from './components/outreach/BulkOutreachModal';
 import { AdhocOutreachView } from './components/outreach/AdhocOutreachView';
+import { DealOfferView } from './components/outreach/DealOfferView';
 
 import { CampaignsView } from './components/campaigns/CampaignsView';
 import { CreateCampaignModal } from './components/campaigns/CreateCampaignModal';
@@ -44,6 +45,7 @@ const TAB_PATHS: Record<ActiveTab, string> = {
   creators: '/creators',
   outreach: '/outreach',
   'adhoc-outreach': '/outreach-nhanh',
+  'deal-offer': '/chot-deal',
   campaigns: '/campaigns',
   export: '/export',
   settings: '/settings'
@@ -762,6 +764,10 @@ export function App() {
 
           {activeTab === 'adhoc-outreach' && (
             <AdhocOutreachView campaigns={isAgencyWorkspace ? campaigns : workspaceCampaigns} />
+          )}
+
+          {activeTab === 'deal-offer' && (
+            <DealOfferView campaigns={isAgencyWorkspace ? campaigns : workspaceCampaigns} />
           )}
 
           {activeTab === 'campaigns' && (
